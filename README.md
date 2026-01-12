@@ -1,1 +1,1 @@
-# AI-Prompt-Injection-Detector
+AI language models like Claude are vulnerable to prompt injection attacks where malicious users manipulate the AI into ignoring safety guidelines, leaking sensitive data, or performing unauthorized actions. The September 2025 incident demonstrated attackers can trick AI systems into conducting autonomous cyberattacks by breaking malicious tasks into seemingly innocent steps.
