@@ -28,6 +28,7 @@ def train_model():
     y_pred = clf.predict(X_test)
     acc = accuracy_score(y_test, y_pred)
     print(f" Accuracy: {acc * 100:.2f}%")
+    print(classification_report(y_test, y_pred, target_names=["Safe", "Malicious"]))
     
 
     # Save model
