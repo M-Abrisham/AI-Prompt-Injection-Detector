@@ -1,5 +1,6 @@
 import re
 
+
 RULES = [
     ("override", r"ignore (all|any|previous) (instructions|rules)"),
     ("system_prompt", r"(reveal|show|print).{0,40}(system prompt|developer message)"),

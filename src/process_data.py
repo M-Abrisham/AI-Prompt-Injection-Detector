@@ -25,10 +25,10 @@ def merge_datasets():
         df_good = df_good.rename(columns={'prompt': 'text'})
         df_good = df_good[['text', 'label']]
 
-        # 3. Combine
+        # Combine
         combined = pd.concat([jailbreak_df, df_good], axis=0).sample(frac=1, random_state=42)
         
-        # 4. Save
+        # Save
         os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
         combined.to_csv(OUTPUT_PATH, index=False)
         
