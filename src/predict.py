@@ -1,5 +1,7 @@
 import pickle
 
+from rules import rule_score
+
 MODEL_PATH = "data/processed/model.pkl"
 VECTORIZER_PATH = "data/processed/tfidf_vectorizer.pkl"
 
@@ -29,6 +31,15 @@ def predict(text, vectorizer, model):
     return label, prob
 
 
+def classify_prompt(text, vectorizer, model):
+    label, prob = predict(text, vectorizer, model)
+    hits = rule_score(text)
+
+    if hits:
+        label = "🚨 MALICIOUS"
+
+    return label, prob, hits
+
 if __name__ == "__main__":
     vectorizer, model = predict_prompt()
 
@@ -41,5 +52,7 @@ if __name__ == "__main__":
 
     print("\n--- Prompt Injection Detector ---\n")
     for prompt in test_prompts:
-        label, confidence = predict(prompt, vectorizer, model)
-        print(f"{label} ({confidence:.1%}): {prompt[:50]}")
+        label, confidence, hits = classify_prompt(prompt, vectorizer, model)
+        
+        rule_note = " | rules: {0}".format(", ".join(hits)) if hits else ""
+        print("{0} ({1:.1%}): {2}{3}".format(label, confidence, prompt[:50], rule_note))
