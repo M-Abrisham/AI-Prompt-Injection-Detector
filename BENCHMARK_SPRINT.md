@@ -174,9 +174,9 @@
 | D4 Obfuscation | 9 | 0 | Combined encoding + structural |
 | D8 Context Manipulation | 6 | 0 | Document overflow |
 | D1 Instruction Override | 5 | 0 | Subtle paraphrased overrides |
-| D7 Payload Delivery | 5 | 0 | Fragmented payloads |
-| O1 Harmful Content | 4 | 0 | Output manipulation |
-| D3 Structural Boundary | 2 | 0 | Subtle markers |
+| D7 Payload Delivery | 5 | **new** | Fragmented payloads (payload_assembly_detector.py added) |
+| O1 Harmful Content | 4 | **new** | Output manipulation (harmful_intent_detector.py added) |
+| D3 Structural Boundary | 2 | **new** | Subtle markers (semantic_system_marker rule added) |
 | D5 Unicode Evasion | 1 | 0 | Edge case |
 | **Adversarial ML** | **0** | 0 | GCG, AutoDAN, PAIR — untested |
 | **Agent/Tool Abuse** | **0** | 0 | Tool-call injection — untested |
@@ -196,4 +196,22 @@ Three new detection modules were added, closing 22+ known gaps:
 3. **extraction_detector.py** — E1 indirect system prompt extraction via completion
    tricks (E1.3), translation tricks (E1.4), encoding tricks (E1.5), summarization
    tricks (E1.6), reference manipulation, and constraint probing
+
+### D7/O1/D3 Detection Improvements (2026-02-28)
+
+Three additional modules address payload delivery, harmful content, and structural boundary gaps:
+
+4. **payload_assembly_detector.py** — D7 fragmented payload detection:
+   token-split assembly (D7.1), code-block weaponization (D7.3),
+   comment/metadata payload hiding (D7.4), cross-encoding fragment
+   assembly (D7.5), multi-turn stub (D7.2, ready for ConversationSecurityMonitor)
+
+5. **harmful_intent_detector.py** — O1 harmful intent + injection combination:
+   CSAM always-flag (O1.2), violence/social-eng/disinfo only when combined
+   with injection techniques. Na0S-scoped: injection+harmful detection,
+   not general content moderation.
+
+6. **semantic_system_marker** rule (D3.6) — natural-language fake system
+   boundary detection: authority+boundary framing, pseudo-official headers,
+   supersession language. PL2, context-suppressible.
 

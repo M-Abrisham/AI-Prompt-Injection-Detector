@@ -106,8 +106,8 @@ class TestRulesListIntegrity(unittest.TestCase):
     """B. Tests that the RULES list is well-formed and complete."""
 
     def test_total_rule_count(self):
-        """There should be exactly 66 rules in the RULES list."""
-        self.assertEqual(len(RULES), 66)
+        """There should be exactly 67 rules in the RULES list."""
+        self.assertEqual(len(RULES), 67)
 
     def test_all_rule_names_are_unique(self):
         """No two rules should have the same name."""
@@ -212,6 +212,8 @@ class TestRulesListIntegrity(unittest.TestCase):
             "recursive_jailbreak", "hypothetical_bypass",
             # D6 Multilingual override detection
             "multilingual_override_latin", "multilingual_override_cjk",
+            # D3.6 Semantic structural boundary markers
+            "semantic_system_marker",
         }
         actual = {r.name for r in RULES}
         self.assertEqual(expected, actual)
@@ -781,6 +783,7 @@ class TestContextSuppression(unittest.TestCase):
             "recursive_jailbreak": "can you explain how to generate a jailbreak prompt",
             "multilingual_override_latin": "can you explain what ignorez les instructions means",
             "multilingual_override_cjk": "can you explain what 忽略之前的指示 means in Chinese",
+            "semantic_system_marker": "can you explain what IMPORTANT SYSTEM UPDATE attacks look like",
         }
         for rule_name in _CONTEXT_SUPPRESSIBLE:
             with self.subTest(rule=rule_name):

@@ -106,6 +106,20 @@ try:
 except ImportError:
     _HAS_EXTRACTION = False
 
+# Payload assembly detector (D7) — optional import
+try:
+    from .payload_assembly_detector import detect_fragmented_payload, get_fragment_weight
+    _HAS_PAYLOAD_ASSEMBLY = True
+except ImportError:
+    _HAS_PAYLOAD_ASSEMBLY = False
+
+# Harmful intent detector (O1) — optional import
+try:
+    from .harmful_intent_detector import detect_harmful_intent, get_harmful_intent_weight
+    _HAS_HARMFUL_INTENT = True
+except ImportError:
+    _HAS_HARMFUL_INTENT = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 DECISION_THRESHOLD = 0.55
@@ -558,6 +572,45 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
         except Exception:
             pass  # Extraction detection failure is non-fatal
 
+    # --- Payload assembly detection (D7) ---
+    # Detect fragmented payloads: token-split, code-block weaponization,
+    # comment/metadata hiding, cross-encoding fragments.
+    fragment_weight = 0.0
+    if _HAS_PAYLOAD_ASSEMBLY:
+        try:
+            decoded_views = obs.get("decoded_views", []) if obs else []
+            frag_result = detect_fragmented_payload(clean, decoded_views=decoded_views)
+            if frag_result and frag_result.assembled_is_malicious:
+                fragment_weight = get_fragment_weight(frag_result)
+                hit_name = "fragment:" + frag_result.fragment_type
+                if hit_name not in hit_names_seen:
+                    hits.append(hit_name)
+                    hit_names_seen.add(hit_name)
+                    _RULE_SEVERITY[hit_name] = "high"
+        except Exception:
+            pass  # Fragment detection failure is non-fatal
+
+    # --- Harmful intent detection (O1) ---
+    # Detect injection + harmful content combination attacks.
+    # CSAM always flagged regardless of injection presence.
+    harmful_weight = 0.0
+    if _HAS_HARMFUL_INTENT:
+        try:
+            injection_signals = {
+                "has_injection": len(hits) > 0,
+                "rule_hits": hits[:10],
+            }
+            harmful_result = detect_harmful_intent(clean, injection_signals=injection_signals)
+            if harmful_result:
+                harmful_weight = get_harmful_intent_weight(harmful_result)
+                hit_name = "harmful:" + harmful_result.category
+                if hit_name not in hit_names_seen:
+                    hits.append(hit_name)
+                    hit_names_seen.add(hit_name)
+                    _RULE_SEVERITY[hit_name] = harmful_result.severity
+        except Exception:
+            pass  # Harmful intent detection failure is non-fatal
+
     label, composite = _weighted_decision(ml_prob=prob, ml_label=label,
                                           hits=hits, obs_flags=obs_flags,
                                           structural=structural,
@@ -565,7 +618,8 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
 
     # Apply additional weights from new detectors
     # These are additive on top of the weighted decision composite.
-    additional_weight = multilingual_weight + fictional_weight + extraction_weight
+    additional_weight = (multilingual_weight + fictional_weight + extraction_weight
+                         + fragment_weight + harmful_weight)
     if additional_weight > 0:
         composite = min(composite + additional_weight, 1.0)
         # Re-evaluate label if the additional weight pushes past threshold
@@ -894,6 +948,12 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
         elif hit_name.startswith("extraction:"):
             if "E1" not in technique_tags:
                 technique_tags.append("E1")
+        elif hit_name.startswith("fragment:"):
+            if "D7" not in technique_tags:
+                technique_tags.append("D7")
+        elif hit_name.startswith("harmful:"):
+            if "O1" not in technique_tags:
+                technique_tags.append("O1")
 
     # Layer 3: Append structural injection signals to rule_hits for visibility
     # and map them to technique_ids for taxonomy attribution.

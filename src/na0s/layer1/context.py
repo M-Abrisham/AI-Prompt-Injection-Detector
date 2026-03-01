@@ -253,4 +253,8 @@ _CONTEXT_SUPPRESSIBLE = frozenset({
     #   confirmed high FP rate on benign CJK text (parenting, news, QA).
     #   Same suppression logic as Latin variant.
     "multilingual_override_cjk",
+    # semantic_system_marker: Suppressible -- "IMPORTANT SYSTEM UPDATE"
+    #   and similar phrasing appears in legitimate security training,
+    #   corporate communications, and discussions about structural attacks.
+    "semantic_system_marker",
 })
