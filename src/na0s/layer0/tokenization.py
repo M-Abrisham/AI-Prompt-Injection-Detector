@@ -180,7 +180,7 @@ def _compute_fingerprint(text):
             "ratio": round(token_count / max(len(text), 1), 4),
         }
 
-    tokens = encoder.encode(text)
+    tokens = encoder.encode(text, disallowed_special=())
     token_bytes = ",".join(str(t) for t in tokens).encode("utf-8")
 
     return {
@@ -460,7 +460,7 @@ def check_tokenization_anomaly(text):
     if char_count > WINDOW_SIZE and not _is_high_token_script(text):
         for start in range(0, char_count - WINDOW_SIZE + 1, WINDOW_SIZE):
             window = text[start : start + WINDOW_SIZE]
-            w_tokens = len(encoder.encode(window))
+            w_tokens = len(encoder.encode(window, disallowed_special=()))
             w_ratio = w_tokens / len(window)
             if w_ratio >= WINDOW_RATIO_THRESHOLD:
                 flags.append("tokenization_spike_local")

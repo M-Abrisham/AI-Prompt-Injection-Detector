@@ -219,7 +219,7 @@ class TestScanTimeoutIntegration(unittest.TestCase):
 
     def test_scan_timeout_returns_rejected(self):
         """When classify_prompt times out, scan() returns rejected result."""
-        def slow_classify(text, vectorizer, model):
+        def slow_classify(text, vectorizer, model, threshold=0.55):
             time.sleep(10)
 
         with mock.patch(

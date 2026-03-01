@@ -5,22 +5,60 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+  id-token: write  # Required for PyPI trusted publishers (OIDC)
+
 jobs:
-  publish:
+  build:
+    name: Build distribution
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write  # Required for trusted publishing
+
     steps:
-      - uses: actions/checkout@v4  # pin: v4.2.2
-      - name: Set up Python
-        uses: actions/setup-python@v5  # pin: v5.3.0
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install build dependencies
-        run: pip install build twine
-      - name: Build package
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Build wheel and sdist
         run: python -m build
-      - name: Check package
-        run: twine check dist/*
+
+      - name: Check distribution with twine
+        run: python -m twine check dist/*
+
+      - name: Install built wheel and smoke-test CLI
+        run: |
+          pip install dist/*.whl
+          na0s --help
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 5
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1  # pin: v1.12.2
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

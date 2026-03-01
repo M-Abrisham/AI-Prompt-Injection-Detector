@@ -71,6 +71,11 @@ jobs:
           coverage report --show-missing --fail-under=50
           coverage xml -o coverage.xml
 
+      - name: Run quick benchmark (non-blocking)
+        if: matrix.python-version == '3.12'
+        continue-on-error: true
+        run: make bench-fast
+
       - name: Upload coverage artifact
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4

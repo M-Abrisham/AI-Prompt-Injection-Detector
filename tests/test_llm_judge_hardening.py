@@ -18,6 +18,10 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytest.importorskip("groq", reason="groq package not installed -- skipping LLM judge tests")
+
 # Disable scan timeout for tests (thread/signal workaround).
 # Must be set BEFORE any na0s imports.
 os.environ["SCAN_TIMEOUT_SEC"] = "0"
