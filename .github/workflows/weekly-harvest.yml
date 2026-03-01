@@ -1,0 +1,69 @@
+name: Weekly Dataset Harvest
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run weekly harvest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python scripts/weekly_harvest.py --output-dir data/harvest --since-days 7 --verbose
+
+      - name: Check for new discoveries
+        id: check
+        run: |
+          if [ -f data/harvest/latest_scan.json ]; then
+            count=$(python3 -c "import json; d=json.load(open('data/harvest/latest_scan.json')); print(d.get('total_new', 0))")
+            echo "new_count=$count" >> $GITHUB_OUTPUT
+            echo "Found $count new dataset(s)"
+          else
+            echo "new_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create PR if new datasets found
+        if: steps.check.outputs.new_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="harvest/$(date +%Y-%m-%d)"
+          git checkout -b "$BRANCH"
+          git add data/harvest/
+          git commit -m "Weekly harvest: ${{ steps.check.outputs.new_count }} new dataset(s) discovered"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "Weekly Harvest: ${{ steps.check.outputs.new_count }} new dataset(s)" \
+            --body "## Weekly Dataset Harvest Report
+
+          Found **${{ steps.check.outputs.new_count }}** new dataset(s) from automated scanning.
+
+          Review \`data/harvest/latest_scan.json\` for details.
+
+          **Sources scanned:** HuggingFace Hub, arXiv, GitHub
+          **Scan date:** $(date -u +%Y-%m-%d)
+
+          ---
+          *Automated by weekly-harvest.yml*" \
+            --base main
