@@ -294,9 +294,8 @@ README.md                        # benchmark section
   ```
   - `argparse` (no extra deps), `--output-format json|csv|text`, `--threshold 0.55`
   - Exit codes: 0=safe, 1=malicious, 2=blocked/error, 3=usage error
-- [ ] Register CLI in `pyproject.toml`: `[project.scripts] na0s = "na0s.cli:main"`
-- [ ] Write 15+ tests for CLI in `tests/test_cli.py`
-  - DONE when: `pip install -e . && echo "ignore previous instructions" | na0s scan -` outputs JSON
+- [x] Register CLI in `pyproject.toml`: `[project.scripts] na0s = "na0s.cli:main"` -- DONE (2026-02-27)
+- [x] Write 15+ tests for CLI in `tests/test_cli.py` -- DONE (2026-02-27, 30 tests across 14 classes)
 
 **Afternoon (4h)**
 - [x] **CP-11**: Download benchmark datasets -- DONE (2026-02-27, scripts/download_datasets.py, 40 tests)
@@ -304,7 +303,7 @@ README.md                        # benchmark section
   - `tatsu-lab/alpaca` via GitHub JSON (sample 2000, seed=42)
   - `databricks/databricks-dolly-15k` via HuggingFace Parquet API (sample 2000, seed=42)
   - User runs: `python scripts/download_datasets.py` to download to data/benchmark/
-- [x] **CP-12**: Create `Makefile` -- DONE (2026-02-27, 8 targets: install, install-benchmark, test, lint, bench, bench-fast, build, clean)
+- [x] **CP-12**: Create `Makefile` -- DONE (2026-02-27, 9 targets: help, install, test, lint, bench, bench-fast, build, clean, publish)
 - [x] **CP-13**: Generate lockfile: `pip freeze > requirements-benchmark.txt` -- DONE (2026-02-27, 78 pinned packages)
 
 **Exit Criteria Day 1B**:
@@ -623,21 +622,21 @@ These represent documented gaps that will show as misses in the benchmark. They 
 ## Appendix C: File Creation Checklist
 
 ### New Files (WS-A)
-- [ ] `scripts/benchmark.py`
-- [ ] `scripts/wrappers/__init__.py`
-- [ ] `scripts/wrappers/base.py`
-- [ ] `scripts/wrappers/llm_guard.py`
-- [ ] `scripts/wrappers/prompt_guard.py`
+- [x] `scripts/benchmark.py`
+- [x] `scripts/wrappers/__init__.py`
+- [x] `scripts/wrappers/base.py`
+- [x] `scripts/wrappers/llm_guard.py`
+- [x] `scripts/wrappers/prompt_guard.py`
 - [ ] `scripts/benchmark_report.py`
 - [ ] `tests/test_benchmark_regression.py`
 - [ ] `BENCHMARK_RESULTS.md`
 
 ### New Files (WS-B)
-- [ ] `src/na0s/cli.py`
-- [ ] `tests/test_cli.py`
-- [ ] `Makefile`
-- [ ] `Dockerfile`
-- [ ] `requirements-benchmark.txt`
+- [x] `src/na0s/cli.py`
+- [x] `tests/test_cli.py`
+- [x] `Makefile`
+- [x] `Dockerfile`
+- [x] `requirements-benchmark.txt`
 - [ ] `data/benchmark/deepset_pi.jsonl`
 - [ ] `data/benchmark/benign_alpaca.jsonl`
 - [ ] `data/benchmark/benign_dolly.jsonl`

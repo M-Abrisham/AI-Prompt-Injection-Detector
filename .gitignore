@@ -9,5 +9,15 @@ __pycache__/
 dist/
 build/
 .hypothesis/
-*.dbsrc/data/fingerprints.db-shm
+*.db
+src/data/fingerprints.db-shm
 src/data/fingerprints.db-wal
+
+# Build & test artifacts
+*.pyc
+.coverage
+htmlcov/
+
+# Environment
+.env
+.venv/
