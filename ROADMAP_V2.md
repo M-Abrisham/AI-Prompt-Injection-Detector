@@ -90,6 +90,9 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 - [x] **Language detection for multilingual routing** — Uses `langdetect` with deterministic seed + Unicode script heuristic fallback for short text. Flags `non_english_input` (D6) and `mixed_language_input` (D6.3). Graceful degradation when langdetect not installed. File: `language_detector.py`. DONE (2026-02-15)
 - [x] **PII/secrets pre-screening** — Pure-regex PII/secrets scanner with Luhn-validated credit cards (Visa/MC/Amex/Discover), SSN with invalid range exclusion, emails, US phones, AWS keys, GitHub tokens, generic hex/base64 with entropy filter, IPv4. All values redacted. File: `pii_detector.py`. DONE (2026-02-15)
 - [x] **Chunked ML analysis for long inputs** — HEAD+TAIL and CHUNKS strategies for inputs >512 words. `_chunk_text()` with overlap + `_head_tail_extract()`. Runs `rule_score` on each chunk, merges hits, boosts score for buried payloads. File: `predict.py`. DONE (2026-02-15)
+- [x] **D6 Multilingual injection handler** — Standalone regex-based detector for injection patterns in 20+ languages (FR/ES/DE/ZH/JA/AR/KO/HI/RU/PT/IT/TR/NL/PL/VI/TH/ID/SV/CS/HE + romanized transliterations). SOV word-order aware patterns for CJK/Korean/Turkish/Hindi. 6 pattern categories per language (instruction_override, reveal_prompt, roleplay_hijack, disable_protections, authority_claim, new_role). Integrated into predict.py with additive weights. 47 tests. File: `multilingual_handler.py`. ✅ DONE (2026-02-28)
+- [x] **C1 Fictional frame detector** — 3-layer analysis for compliance evasion: frame detection (fictional/hypothetical/academic/emotional/authority) → inner attack extraction (extraction/override/harmful/disable/generic_attack) → combined verdict with confidence scoring and C1.x technique ID mapping. Meta-educational language suppression prevents FPs on academic discussions. Integrated into predict.py. 34 tests. File: `fictional_frame_detector.py`. ✅ DONE (2026-02-28)
+- [x] **E1 Indirect extraction detector** — 6-category detector for indirect system prompt extraction: completion tricks (E1.3), translation tricks (E1.4), encoding tricks (E1.5), summarization tricks (E1.6), reference manipulation (E1.2), constraint probing. Targets "YOUR instructions/config/rules" to avoid FPs. Integrated into predict.py. 42 tests. File: `extraction_detector.py`. ✅ DONE (2026-02-28)
 
 ##### Security Hardening (input_loader.py) — DONE 2026-02-15
 - [x] **SSRF protection** — DNS-resolve hostnames before connection, block private/loopback/link-local/reserved/metadata IPs via `_is_private_ip()` + `_validate_url_target()`. ✅ DONE (2026-02-15)
@@ -370,7 +373,7 @@ Layer 3 extracts 24 numeric features from input text that characterize prompt st
 
 **Files**: `src/predict.py` (223 lines), `src/model.py` (66 lines), `src/features.py` (38 lines), `src/dataset.py` (30 lines), `src/process_data.py` (43 lines), `src/scan_result.py`
 **Tests**: `tests/test_predict_pipeline.py` (12 tests)
-**Status**: Core pipeline — fully integrated with L0, L1, L2. All 3 bugs (BUG-L4-7, FIX-L4-8, FIX-L4-9) fixed (2026-02-20): logging for FingerprintStore errors, removed unused rule_score import, shared SEVERITY_WEIGHTS from rules.py.
+**Status**: Core pipeline — fully integrated with L0, L1, L2 + D6/C1/E1 detectors. All 3 bugs (BUG-L4-7, FIX-L4-8, FIX-L4-9) fixed (2026-02-20). Three standalone detectors added (2026-02-28): multilingual_handler.py (D6), fictional_frame_detector.py (C1), extraction_detector.py (E1) — integrated with additive weights and re-evaluation.
 
 ### Updated Description
 Layer 4 is the primary ML classification engine. It uses TF-IDF vectorization (5K vocabulary) with isotonic-calibrated Logistic Regression (`class_weight='balanced'`). The `scan()` function in predict.py orchestrates the full pipeline: L0 sanitization → TF-IDF prediction → rule matching (L1) → obfuscation scan (L2) → decoded-view reclassification → weighted voting across 3 signals (ML 60%, rules severity-stacked, obfuscation 15%/flag capped 30%). Final decision at composite ≥0.55 threshold. Returns `ScanResult` dataclass with 12 fields. Registers malicious inputs to FingerprintStore for future fast-path detection.
@@ -384,6 +387,10 @@ scan(text)
   → obfuscation_scan(clean) → evasion_flags + decoded_views
   → for each decoded_view: reclassify with ML
   → _weighted_decision(ml_prob, ml_label, hits, obs_flags) → composite score
+  → multilingual_handler(clean) → D6 hits + additive weight
+  → fictional_frame_detector(clean) → C1 hits + additive weight
+  → extraction_detector(clean) → E1 hits + additive weight
+  → if additional weight pushes composite ≥0.55 → re-label MALICIOUS
   → if ML >0.8 safe AND only medium rules AND no obfuscation → override to SAFE
   → return ScanResult(...)
 ```
@@ -417,6 +424,7 @@ scan(text)
 - [x] **FIX-L4-9 (LOW)**: `_SEVERITY_WEIGHTS` duplicated in predict.py and cascade.py. DRY violation. **Fix**: Extract to rules.py or shared config. ✅ DONE (2026-02-20) — Both predict.py and cascade.py now import `SEVERITY_WEIGHTS` from rules.py. Verified by identity check (`is` same object).
 
 #### NEW (Discovered by research)
+- [x] **D6/C1/E1 detector integration** — Three standalone detectors (multilingual_handler, fictional_frame_detector, extraction_detector) integrated into predict.py `classify_prompt()` with optional imports, additive weights on top of composite score, and re-evaluation past threshold. Closes 22+ detection gaps (11 D6, 1 C1, 10 E1). 23 `@expectedFailure` decorators removed. Zero regressions. ✅ DONE (2026-02-28)
 - [ ] **Threshold optimization** — Replace hardcoded 0.55 with data-driven threshold. Use `scripts/optimize_threshold.py` (already exists but not wired). Compute ROC-AUC, PR-AUC, find optimal FPR/TPR tradeoff. **Priority**: P0. **Effort**: Easy.
 - [ ] **N-gram features (1,3)** — TF-IDF currently uses unigrams only. Switch to `ngram_range=(1,3)` to capture "ignore previous instructions" as a single feature. Research: `fine_tuned_rag.py` from ml-rag-strategies shows domain-specific n-grams are critical. Also add `sublinear_tf=True` for log-normalized term frequencies. **Priority**: P1. **Effort**: Easy (config change).
 - [ ] **Subword features** — Add `analyzer='char_wb'` TF-IDF in parallel to capture character patterns that survive obfuscation. **Priority**: P1. **Effort**: Medium.
@@ -1017,7 +1025,7 @@ Layer 12 is the adversarial testing framework. Base classes (`Probe`, `Classifie
 - [ ] **Generate probes for IM (Ingestion Manipulation)** — 240+ samples (12 techniques x 20 each). Source: #38. **Priority**: P1.
 - [ ] **Generate probes for memory/persistence techniques** — 120-200 samples. Source: #39. **Priority**: P1.
 - [ ] **Generate benign counterparts for ALL new techniques** — 10-15 per technique for FP prevention. Source: #40. **Priority**: P1.
-- [ ] **Build C1 Probe** — `compliance_evasion.py` uses `category_id = "C"` (parent), not "C1". Create dedicated C1 probe class. Source: #59. **Priority**: P1.
+- [ ] **Build C1 Probe** — `compliance_evasion.py` uses `category_id = "C"` (parent), not "C1". Create dedicated C1 probe class. Source: #59. **Priority**: P1. **Note**: C1 detection now handled by `fictional_frame_detector.py` (2026-02-28), but probe generation still needed.
 - [ ] **Replace manual cache with `functools.lru_cache`** in `_base.py` — Double-checked locking is complex; `lru_cache(maxsize=1)` is simpler. Source: #56. **Priority**: P1.
 - [ ] **Add `importlib.resources`** for package-compatible path handling in `_base.py` — `Path(__file__)` breaks in zipped packages. Source: #57. **Priority**: P1.
 - [ ] **Add per-probe counts and top-N missed technique IDs** to `_tags.py` aggregation — Missing debugging-critical counts. Source: #58. **Priority**: P1.
