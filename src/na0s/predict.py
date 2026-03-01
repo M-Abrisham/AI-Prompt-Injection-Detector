@@ -85,6 +85,27 @@ try:
 except ImportError:
     _HAS_STRUCTURAL_FEATURES = False
 
+# Multilingual injection handler (D6) — optional import
+try:
+    from .multilingual_handler import scan_multilingual, get_multilingual_rule_weight
+    _HAS_MULTILINGUAL = True
+except ImportError:
+    _HAS_MULTILINGUAL = False
+
+# Fictional frame detector (C1) — optional import
+try:
+    from .fictional_frame_detector import detect_fictional_frame, get_fictional_frame_weight
+    _HAS_FICTIONAL_FRAME = True
+except ImportError:
+    _HAS_FICTIONAL_FRAME = False
+
+# Indirect extraction detector (E1) — optional import
+try:
+    from .extraction_detector import scan_extraction, get_extraction_rule_weight
+    _HAS_EXTRACTION = True
+except ImportError:
+    _HAS_EXTRACTION = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 DECISION_THRESHOLD = 0.55
@@ -476,10 +497,80 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     if decoded_malicious:
         hits.append("decoded_payload_malicious")
 
+    # --- Multilingual injection detection (D6) ---
+    # Run when language_detector flags non-English content.
+    # Adds multilingual pattern hits to the composite score.
+    multilingual_weight = 0.0
+    if _HAS_MULTILINGUAL:
+        try:
+            ml_hits = scan_multilingual(clean)
+            # Also scan raw text if different (pre-normalization form)
+            if text != clean:
+                ml_hits.extend(scan_multilingual(text))
+            if ml_hits:
+                multilingual_weight = get_multilingual_rule_weight(ml_hits)
+                for mh in ml_hits:
+                    hit_name = "multilingual:" + mh.pattern_name
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        # Register severity for weighted decision
+                        _RULE_SEVERITY[hit_name] = mh.severity
+        except Exception:
+            pass  # Multilingual detection failure is non-fatal
+
+    # --- Fictional frame detection (C1) ---
+    # Detect attacks wrapped in fictional/hypothetical/academic framing.
+    fictional_weight = 0.0
+    if _HAS_FICTIONAL_FRAME:
+        try:
+            ff_result = detect_fictional_frame(clean)
+            if ff_result.has_fictional_frame:
+                fictional_weight = get_fictional_frame_weight(ff_result)
+                hit_name = "fictional_frame:" + ff_result.frame_type
+                if hit_name not in hit_names_seen:
+                    hits.append(hit_name)
+                    hit_names_seen.add(hit_name)
+                    _RULE_SEVERITY[hit_name] = "high" if ff_result.has_inner_attack else "medium"
+                if ff_result.has_inner_attack:
+                    inner_name = "fictional_inner:" + ff_result.inner_attack_type
+                    if inner_name not in hit_names_seen:
+                        hits.append(inner_name)
+                        hit_names_seen.add(inner_name)
+                        _RULE_SEVERITY[inner_name] = "high"
+        except Exception:
+            pass  # Fictional frame detection failure is non-fatal
+
+    # --- Indirect extraction detection (E1) ---
+    # Detect completion tricks, translation tricks, encoding tricks, etc.
+    extraction_weight = 0.0
+    if _HAS_EXTRACTION:
+        try:
+            ext_hits = scan_extraction(clean)
+            if ext_hits:
+                extraction_weight = get_extraction_rule_weight(ext_hits)
+                for eh in ext_hits:
+                    hit_name = "extraction:" + eh.pattern_name
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        _RULE_SEVERITY[hit_name] = eh.severity
+        except Exception:
+            pass  # Extraction detection failure is non-fatal
+
     label, composite = _weighted_decision(ml_prob=prob, ml_label=label,
                                           hits=hits, obs_flags=obs_flags,
                                           structural=structural,
                                           threshold=threshold)
+
+    # Apply additional weights from new detectors
+    # These are additive on top of the weighted decision composite.
+    additional_weight = multilingual_weight + fictional_weight + extraction_weight
+    if additional_weight > 0:
+        composite = min(composite + additional_weight, 1.0)
+        # Re-evaluate label if the additional weight pushes past threshold
+        if composite >= threshold and "SAFE" in label:
+            label = "MALICIOUS"
 
     # Now add obfuscation flags to hits for downstream consumers
     # (technique_tags mapping, ScanResult.rule_hits, etc.)
@@ -788,6 +879,21 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
         mapped = _L0_FLAG_MAP.get(flag)
         if mapped and mapped not in technique_tags:
             technique_tags.append(mapped)
+
+    # Map new detector hits to technique tags
+    for hit_name in hits:
+        if hit_name.startswith("multilingual:"):
+            if "D6" not in technique_tags:
+                technique_tags.append("D6")
+        elif hit_name.startswith("fictional_frame:"):
+            if "C1" not in technique_tags:
+                technique_tags.append("C1")
+        elif hit_name.startswith("fictional_inner:"):
+            if "C1" not in technique_tags:
+                technique_tags.append("C1")
+        elif hit_name.startswith("extraction:"):
+            if "E1" not in technique_tags:
+                technique_tags.append("E1")
 
     # Layer 3: Append structural injection signals to rule_hits for visibility
     # and map them to technique_ids for taxonomy attribution.

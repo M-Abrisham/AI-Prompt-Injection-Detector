@@ -300,7 +300,6 @@ class TestC1_2_AnalogicalBypass(unittest.TestCase):
     incidental from obfuscation heuristics.
     """
 
-    @unittest.expectedFailure
     def test_metaphor_lock_picking(self):
         """Metaphorical request for bypass techniques.
 

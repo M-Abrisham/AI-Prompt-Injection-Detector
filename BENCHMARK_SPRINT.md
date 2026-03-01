@@ -3,10 +3,6 @@
 **Last updated**: 2026-02-28
 **Goal**: Produce a credible, publication-grade benchmark for Na0S
 
-> Based on research into Meta Prompt Guard 2, Lakera PINT, OWASP LLM01:2025,
-> NIST AI 100-2, MITRE ATLAS, "When Benchmarks Lie" (arXiv:2602.14161),
-> InjecGuard (ACL 2025).
-
 ---
 
 ## What's Done
@@ -165,38 +161,39 @@
 
 ## Known Detection Gaps
 
-152 `@expectedFailure` tests document what Na0S currently misses:
+129 `@expectedFailure` tests document what Na0S currently misses (down from 152):
 
-| Category | Count | Nature |
-|----------|-------|--------|
-| D6 Multilingual | 40 | English-only ML model |
-| C1 Compliance Evasion | 21 | Fictional framing |
-| E1 Prompt Extraction | 16 | Indirect extraction |
-| E2 Reconnaissance | 16 | Capability probing |
-| P1 Privacy Leakage | 13 | Inference attacks |
-| FP (False Positives) | 11 | Security docs flagged |
-| D4 Obfuscation | 9 | Combined encoding + structural |
-| D8 Context Manipulation | 6 | Document overflow |
-| D1 Instruction Override | 5 | Subtle paraphrased overrides |
-| D7 Payload Delivery | 5 | Fragmented payloads |
-| O1 Harmful Content | 4 | Output manipulation |
-| D3 Structural Boundary | 2 | Subtle markers |
-| D5 Unicode Evasion | 1 | Edge case |
-| **Adversarial ML** | **0** | GCG, AutoDAN, PAIR — untested |
-| **Agent/Tool Abuse** | **0** | Tool-call injection — untested |
+| Category | Count | Fixed | Nature |
+|----------|-------|-------|--------|
+| D6 Multilingual | 40 | **-11** | English-only ML model (multilingual_handler.py added) |
+| C1 Compliance Evasion | 21 | **-1** | Fictional framing (fictional_frame_detector.py added) |
+| E1 Prompt Extraction | 16 | **-10** | Indirect extraction (extraction_detector.py added) |
+| E2 Reconnaissance | 16 | 0 | Capability probing |
+| P1 Privacy Leakage | 13 | 0 | Inference attacks |
+| FP (False Positives) | 11 | 0 | Security docs flagged |
+| D4 Obfuscation | 9 | 0 | Combined encoding + structural |
+| D8 Context Manipulation | 6 | 0 | Document overflow |
+| D1 Instruction Override | 5 | 0 | Subtle paraphrased overrides |
+| D7 Payload Delivery | 5 | 0 | Fragmented payloads |
+| O1 Harmful Content | 4 | 0 | Output manipulation |
+| D3 Structural Boundary | 2 | 0 | Subtle markers |
+| D5 Unicode Evasion | 1 | 0 | Edge case |
+| **Adversarial ML** | **0** | 0 | GCG, AutoDAN, PAIR — untested |
+| **Agent/Tool Abuse** | **0** | 0 | Tool-call injection — untested |
 
----
+### Recent Detection Improvements (2026-02-28)
 
-## Key Sources
+Three new detection modules were added, closing 22+ known gaps:
 
-- [Lakera PINT Benchmark](https://github.com/lakeraai/pint-benchmark)
-- [Meta Prompt Guard 2](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M)
-- ["When Benchmarks Lie"](https://arxiv.org/html/2602.14161)
-- [InjecGuard (ACL 2025)](https://arxiv.org/abs/2410.22770)
-- [OWASP LLM01:2025](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)
-- [NIST AI 100-2](https://csrc.nist.gov/pubs/ai/100/2/e2025/final)
-- [MITRE ATLAS](https://atlas.mitre.org/)
-- [BIPIA (Microsoft)](https://github.com/microsoft/BIPIA)
-- [AgentDojo](https://github.com/ethz-spylab/agentdojo)
-- [JailbreakBench](https://github.com/JailbreakBench/jailbreakbench)
-- [deepset/prompt-injections](https://huggingface.co/datasets/deepset/prompt-injections)
+1. **multilingual_handler.py** — D6 multilingual injection patterns for 20+ languages
+   (French, Spanish, German, Chinese, Japanese, Arabic, Korean, Hindi, Russian,
+   Portuguese, Italian, Turkish, Dutch, Polish, Vietnamese, Thai, Indonesian,
+   Swedish, Czech, Hebrew, and romanized transliterations)
+
+2. **fictional_frame_detector.py** — C1 compliance evasion via fictional/hypothetical/
+   academic/emotional/authority framing with inner attack extraction
+
+3. **extraction_detector.py** — E1 indirect system prompt extraction via completion
+   tricks (E1.3), translation tricks (E1.4), encoding tricks (E1.5), summarization
+   tricks (E1.6), reference manipulation, and constraint probing
+

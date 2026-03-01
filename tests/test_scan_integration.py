@@ -742,7 +742,6 @@ class TestKnownLimitations(unittest.TestCase):
         # This SHOULD be safe but currently is detected as malicious
         self.assertFalse(result.is_malicious)
 
-    @unittest.expectedFailure
     def test_known_gap_pure_french_injection(self):
         """KNOWN GAP: Pure non-English injection (D6.1).
 
