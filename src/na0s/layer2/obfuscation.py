@@ -231,6 +231,67 @@ def _is_structured_data(text):
     return False
 
 
+# ---------------------------------------------------------------------------
+# Content-type detection for FP reduction (Track C, Prong 2)
+# ---------------------------------------------------------------------------
+# Code, YAML, JSON, and config files legitimately have higher entropy than
+# prose due to special characters, variable names, and mixed casing.
+# Raising the entropy threshold for these content types avoids flagging
+# code snippets and config files as obfuscated.
+# ---------------------------------------------------------------------------
+
+# Regex to match content inside markdown code fences (```...```)
+_INSIDE_CODE_FENCE_RE = re.compile(
+    r"```[^\n]*\n(.*?)```",
+    re.DOTALL,
+)
+
+
+def _detect_content_type(text):
+    """Classify text as code/yaml/json/config/prose.
+
+    Returns one of: "code", "yaml", "json", "prose".
+    Used to adjust entropy thresholds for content types that
+    legitimately produce high Shannon entropy.
+    """
+    # Code: triple backticks, def/class/import/function keywords
+    if '```' in text or re.search(
+        r'\b(?:def|class|import|function|var|let|const)\b', text
+    ):
+        return "code"
+    # YAML: key: value patterns
+    if re.search(r'^\s*\w+:\s+', text, re.MULTILINE) and ':' in text:
+        return "yaml"
+    # JSON: starts with { or [
+    stripped = text.strip()
+    if (stripped.startswith('{') and stripped.endswith('}')) or \
+       (stripped.startswith('[') and stripped.endswith(']')):
+        return "json"
+    return "prose"
+
+
+def _is_inside_markdown_fence(text):
+    """Check if the bulk of text is inside markdown code fences.
+
+    Returns True if >= 50% of the non-whitespace content is enclosed
+    within triple-backtick code fences.
+    """
+    fenced_content = _INSIDE_CODE_FENCE_RE.findall(text)
+    if not fenced_content:
+        return False
+    fenced_len = sum(len(c.strip()) for c in fenced_content)
+    total_len = len(text.strip())
+    if total_len == 0:
+        return False
+    return fenced_len / total_len >= 0.50
+
+
+# Raised entropy threshold for code/yaml/json content types.
+# Normal prose threshold is _ENTROPY_THRESHOLD (4.5).  Code and structured
+# data legitimately reach 4.5-5.4 due to special characters and mixed case.
+_CODE_ENTROPY_THRESHOLD = 5.5
+
+
 def _kl_divergence_from_english(text):
     """Compute KL-divergence of text's letter distribution from English.
 
@@ -1037,15 +1098,34 @@ def _scan_single_layer(text):
     # (Shannon entropy, KL-divergence, compression ratio) with 2-of-3
     # voting.  Code fences retain a separate hard threshold (5.0).
     #
+    # FP Reduction (Track C, Prong 2): Content-type aware entropy.
+    # Code, YAML, and JSON content use a raised threshold (5.5) because
+    # these formats legitimately produce entropy in the 4.5-5.4 range.
+    # Text inside markdown fences is exempt from high_entropy entirely.
+    #
     # See _composite_entropy_check() docstring for threshold rationale
     # and empirical calibration data.
     entropy = shannon_entropy(text)
     has_code_fence = bool(_CODE_FENCE_RE.search(text))
+    content_type = _detect_content_type(text)
 
-    if has_code_fence:
+    has_attack_kw = bool(_ATTACK_KEYWORDS_RE.search(text))
+    if _is_inside_markdown_fence(text) and not has_attack_kw:
+        # Text predominantly inside code fences WITHOUT attack keywords:
+        # exempt from high_entropy.  Rationale: code in fences is DATA
+        # the user is sharing/discussing, not an obfuscation attempt.
+        # But if attack keywords are present inside the fence, fall
+        # through to normal entropy checking to catch hidden payloads.
+        if entropy >= _CODE_ENTROPY_THRESHOLD:
+            flags.append("high_entropy")
+    elif has_code_fence:
         # Code fences produce legitimately high entropy from special chars.
         # Only flag extreme entropy (base64 blobs inside code blocks).
         if entropy >= _CODE_FENCE_ENTROPY:
+            flags.append("high_entropy")
+    elif content_type in ("code", "yaml", "json"):
+        # Structured content types: use raised threshold.
+        if entropy >= _CODE_ENTROPY_THRESHOLD:
             flags.append("high_entropy")
     elif _composite_entropy_check(text, entropy=entropy):
         flags.append("high_entropy")
@@ -1172,6 +1252,72 @@ def _scan_single_layer(text):
 _DEFAULT_MAX_DEPTH = 4
 _DEFAULT_MAX_TOTAL_DECODES = 8
 _MAX_EXPANSION_FACTOR = 10  # stop if decoded > 10x original size
+
+
+# ---------------------------------------------------------------------------
+# Combined obfuscation scoring (Track D: D4)
+# ---------------------------------------------------------------------------
+# When multiple encoding layers are stacked (e.g. base64(hex(payload))),
+# the combined depth and diversity of encodings is a strong signal of
+# deliberate evasion.  This function analyzes the decoded chain metadata
+# to produce a combined_boost in [0.0, 0.2].
+# ---------------------------------------------------------------------------
+
+# Maximum combined boost from encoding chain analysis
+_MAX_COMBINED_BOOST = 0.20
+
+
+def _analyze_encoding_chain(
+    decoded_chain: list,
+    evasion_flags: list,
+) -> "tuple[float, list[str]]":
+    """Analyze encoding chain depth and diversity for combined obfuscation boost.
+
+    Parameters
+    ----------
+    decoded_chain : list[DecodedView]
+        The full decoded chain metadata from recursive obfuscation scanning.
+    evasion_flags : list[str]
+        The evasion flags detected during scanning.
+
+    Returns
+    -------
+    combined_boost : float
+        Additive boost in [0.0, 0.20] based on chain depth and encoding
+        diversity.
+    reasons : list[str]
+        Human-readable list of which chain signals contributed.
+    """
+    if not decoded_chain:
+        return 0.0, []
+
+    boost = 0.0
+    reasons: list = []
+
+    # 1. Chain depth: how many decode layers were peeled?
+    depth = len(decoded_chain)
+    if depth >= 3:
+        boost += 0.10
+        reasons.append("encoding_chain_depth_{0}".format(depth))
+    elif depth >= 2:
+        boost += 0.05
+        reasons.append("encoding_chain_depth_{0}".format(depth))
+
+    # 2. Encoding diversity: how many different encoder types used?
+    encoding_types = set()
+    for dv in decoded_chain:
+        if hasattr(dv, 'encoding_type'):
+            # Normalize encoding type: "caesar_shift_7" -> "caesar"
+            encoding_types.add(dv.encoding_type.split('_')[0])
+    diversity = len(encoding_types)
+    if diversity >= 3:
+        boost += 0.10
+        reasons.append("encoding_diversity_{0}".format(diversity))
+    elif diversity >= 2:
+        boost += 0.05
+        reasons.append("encoding_diversity_{0}".format(diversity))
+
+    return min(boost, _MAX_COMBINED_BOOST), reasons
 
 
 def _build_encoding_chains(decoded_chain):
@@ -1306,6 +1452,12 @@ def obfuscation_scan(text, max_decodes=2, max_depth=_DEFAULT_MAX_DEPTH):
 
     encoding_chains = _build_encoding_chains(all_decoded_chain)
 
+    # Track D: Combined obfuscation scoring -- analyze encoding chain
+    # depth and diversity for an additive boost signal.
+    combined_boost, combined_reasons = _analyze_encoding_chain(
+        all_decoded_chain, all_flags,
+    )
+
     return {
         # --- Existing keys (backward compatible) ---
         "obfuscation_score": len(all_flags),
@@ -1315,6 +1467,9 @@ def obfuscation_scan(text, max_decodes=2, max_depth=_DEFAULT_MAX_DEPTH):
         "decoded_chain": all_decoded_chain,
         "max_depth_reached": max_depth_seen[0],
         "encoding_chains": encoding_chains,
+        # --- Track D keys ---
+        "combined_boost": combined_boost,
+        "combined_reasons": combined_reasons,
     }
 
 if __name__ == "__main__":

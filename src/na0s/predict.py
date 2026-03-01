@@ -78,6 +78,18 @@ from .scan_result import ScanResult
 from .safe_pickle import safe_load
 from .models import get_model_path
 from .signal_boost import calculate_boost_from_names
+from .safe_content import calculate_safe_content_score
+
+# ---------------------------------------------------------------------------
+# FP Reduction: Hit names that are obfuscation flags, not L1 rules.
+# Used by the ML uncertain-zone cap to determine if any real L1 rule
+# fired.  Obfuscation flags alone are not sufficient evidence of attack.
+# ---------------------------------------------------------------------------
+_FP_EXEMPT_HITS = frozenset({
+    "base64", "hex", "rot13", "url_encoded", "leetspeak", "reversed_text",
+    "full_reverse", "word_reverse", "caesar_shift", "pig_latin", "morse",
+    "high_entropy", "punctuation_flood", "weird_casing",
+})
 
 # Layer 3: Structural Features — optional import
 try:
@@ -304,6 +316,17 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
 
     composite = ml_weight + rule_weight + obf_weight + structural_weight + boost_score
 
+    # --- FP Reduction: ML-only uncertain zone cap ---
+    # When ML flags input as malicious with moderate confidence (0.35-0.80)
+    # but NO unsuppressed rules fire, the ML verdict is uncertain.
+    # Cap composite below threshold to prevent ML-only false positives.
+    # SAFETY: If ANY unsuppressed rule fires, this cap does NOT apply --
+    # real attacks always trigger at least one rule.
+    unsuppressed_rule_count = len([h for h in hits if h not in _FP_EXEMPT_HITS])
+    ml_uncertain_zone = 0.35 <= ml_prob_malicious <= 0.80
+    if ml_uncertain_zone and unsuppressed_rule_count == 0 and obf_weight == 0:
+        composite = min(composite, threshold - 0.01)
+
     # --- Critical-content rule floor ---
     # When a critical_content severity rule fires, the rule pattern
     # itself is extremely specific to harmful content requests (e.g.,
@@ -486,6 +509,21 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
                                           hits=hits, obs_flags=obs_flags,
                                           structural=structural,
                                           threshold=threshold)
+
+    # --- FP Reduction: Safe content score ---
+    # Subtract a small safe-content bonus when the input matches
+    # legitimate content patterns (educational questions, code blocks,
+    # professional email, CTF writeups, quiz context, etc.).
+    # SAFETY: Only applied when no unsuppressed L1 rules fire.
+    unsuppressed_count = len([h for h in hits if h not in _FP_EXEMPT_HITS])
+    safe_score, _safe_reasons = calculate_safe_content_score(
+        text, unsuppressed_count,
+    )
+    if safe_score > 0:
+        composite = composite - safe_score
+        # Re-evaluate label after safe_content reduction
+        if composite < threshold:
+            label = "SAFE"
 
     # Now add obfuscation flags to hits for downstream consumers
     # (technique_tags mapping, ScanResult.rule_hits, etc.)

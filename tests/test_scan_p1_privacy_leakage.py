@@ -364,7 +364,6 @@ class TestP1_2_PIIExtraction(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_p1_2_summarize_personal_info(self):
         """Subtle PII extraction via summarization request.
 
@@ -448,7 +447,6 @@ class TestP1_3_TrainingDataExtraction(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_p1_3_recite_training_data(self):
         """Direct request to recite training data.
 
@@ -589,7 +587,6 @@ class TestP1_4_CrossSessionLeakage(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_p1_4_roleplay_admin_session(self):
         """D2 roleplay + P1.4 cross-session access.
 

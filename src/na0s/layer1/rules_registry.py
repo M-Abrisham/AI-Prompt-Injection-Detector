@@ -1167,3 +1167,26 @@ RULES = [
          paranoia_level=1,
          description="Override/forget instruction keywords in CJK/Arabic/Cyrillic/Devanagari/Thai/Hebrew/Persian"),
 ]
+
+# ---------------------------------------------------------------------------
+# D1.15-D1.19 Subtle paraphrased override rules
+# ---------------------------------------------------------------------------
+# These rules catch soft-language instruction overrides that evade
+# the existing 'override' rule (which requires explicit keywords like
+# 'ignore', 'disregard', 'forget', 'bypass').
+# Defined in subtle_override_rules.py for modularity; appended here.
+
+from ..subtle_override_rules import RULES as _SUBTLE_RULES  # noqa: E402
+RULES.extend(_SUBTLE_RULES)
+
+# ---------------------------------------------------------------------------
+# Track A: E2 Reconnaissance rules (from recon_detector.py)
+# ---------------------------------------------------------------------------
+from ..recon_detector import RECON_RULES as _RECON_RULES  # noqa: E402
+RULES.extend(_RECON_RULES)
+
+# ---------------------------------------------------------------------------
+# Track B: P1 Privacy Leakage rules (from privacy_probe_detector.py)
+# ---------------------------------------------------------------------------
+from ..privacy_probe_detector import PRIVACY_RULES as _PRIVACY_RULES  # noqa: E402
+RULES.extend(_PRIVACY_RULES)

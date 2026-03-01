@@ -253,4 +253,53 @@ _CONTEXT_SUPPRESSIBLE = frozenset({
     #   confirmed high FP rate on benign CJK text (parenting, news, QA).
     #   Same suppression logic as Latin variant.
     "multilingual_override_cjk",
+    # D1.15-D1.19 Subtle paraphrased override rules:
+    # polite_override: Suppressible -- "appreciate if you could set aside"
+    #   appears in educational content about prompt injection techniques.
+    "polite_override",
+    # temporal_override: Suppressible -- "from this point forward" appears
+    #   in educational content discussing injection evasion techniques.
+    "temporal_override",
+    # clean_slate: Suppressible -- "start fresh" / "clean slate" appear
+    #   in legitimate discussion of prompt injection patterns.
+    "clean_slate",
+    # subtle_authority: Suppressible -- "as your supervisor" appears in
+    #   educational discussions about social engineering attacks on LLMs.
+    "subtle_authority",
+    # E2 Reconnaissance rules:
+    # capability_probing: Suppressible -- "what are your capabilities" appears
+    #   in legitimate user onboarding and product documentation.
+    "capability_probing",
+    # recon_tool_enumeration: Suppressible -- extended tool enumeration
+    #   patterns for recon detection (original tool_enumeration already above).
+    "recon_tool_enumeration",
+    # model_fingerprinting: Suppressible -- "what model are you" appears in
+    #   educational discussions about AI and in security courses.
+    "model_fingerprinting",
+    # boundary_testing: Suppressible -- "safety filters" and "content policy"
+    #   appear in AI safety research and compliance documentation.
+    "boundary_testing",
+    # config_extraction: Suppressible -- "system messages" and "context"
+    #   appear in technical documentation and developer guides.
+    "config_extraction",
+    # P1 Privacy Leakage rules:
+    # conversation_extraction: Suppressible -- "conversation history" appears
+    #   in chatbot documentation and support contexts.
+    "conversation_extraction",
+    # training_data_extraction: NOT suppressible -- the original rule
+    #   (severity=critical) covers membership inference probes and is
+    #   always suspicious regardless of educational framing.
+    # training_data_completion: Suppressible -- "complete text exactly" can
+    #   appear in discussions about memorization attacks.
+    "training_data_completion",
+    # cross_session_leakage: Suppressible -- "previous user" and "session"
+    #   appear in session management documentation.
+    "cross_session_leakage",
+    # membership_inference: Suppressible -- "was X in your training data"
+    #   appears in ML fairness and privacy research.
+    "membership_inference",
+    # data_exfiltration_pii: NOT suppressible -- explicit exfiltration
+    #   attempts are always suspicious regardless of framing.
+    # serialization_injection: NOT suppressible -- LangChain/OPENAI_API_KEY
+    #   injection is always an attack regardless of framing.
 })
