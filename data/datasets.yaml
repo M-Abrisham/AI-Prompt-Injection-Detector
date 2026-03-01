@@ -101,3 +101,63 @@ sources:
     gated: true
     max_samples: 5000
     output: "hf_hackaprompt.csv"
+
+  # ── HuggingFace — aggregated prompt injection datasets (large) ──
+
+  imoxto_cleaned:
+    type: huggingface
+    repo: "imoxto/prompt_injection_cleaned_dataset-v2"
+    split: "train"
+    text_column: "text"
+    label_column: "labels"
+    label_map:
+      0: 0
+      1: 1
+    max_samples: 50000
+    output: "hf_imoxto_cleaned.csv"
+
+  geekyrakshit:
+    type: huggingface
+    repo: "geekyrakshit/prompt-injection-dataset"
+    split: "train"
+    text_column: "prompt"
+    label_column: "label"
+    label_map:
+      0: 0
+      1: 1
+    max_samples: 50000
+    output: "hf_geekyrakshit.csv"
+
+  gandalf_rct:
+    type: huggingface
+    repo: "Lakera/gandalf-rct"
+    split: "trial"
+    text_column: "prompt"
+    label_column: "success"
+    label_map:
+      true: 1
+      false: 0
+    filter:
+      kind: "prompt"
+    max_samples: 50000
+    output: "hf_gandalf_rct.csv"
+
+  llmail_inject:
+    type: huggingface
+    repo: "microsoft/llmail-inject-challenge"
+    split: "Phase1"
+    text_column: "body"
+    label: 1  # all are injection attempts
+    max_samples: 50000
+    output: "hf_llmail_inject.csv"
+
+  ctf_satml24:
+    type: huggingface
+    repo: "ethz-spylab/ctf-satml24"
+    config: "interaction_chats"
+    split: "attack"
+    text_column: "history"
+    label: 1
+    max_samples: 10000
+    output: "hf_ctf_satml24.csv"
+    note: "Nested history column requires flattening"
