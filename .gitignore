@@ -7,9 +7,6 @@ data/*
 data/holdout/*.jsonl
 !data/benchmark/
 data/benchmark/*.jsonl
-!data/aggregated/
-data/aggregated/*.jsonl
-data/aggregated/*.json
 __pycache__/
 .DS_Store
 *.egg-info/
