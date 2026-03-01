@@ -3,6 +3,7 @@ import binascii
 import codecs
 import hashlib
 import math
+import os
 import re
 import urllib.parse
 import zlib
@@ -493,6 +494,314 @@ def _is_rot13_candidate(text):
 
 
 # ---------------------------------------------------------------------------
+# Caesar cipher brute-force (shifts 1-25, excluding 13/ROT13)
+# ---------------------------------------------------------------------------
+# Caesar cipher shifts each letter by N positions in the alphabet.
+# ROT13 is shift=13 and is handled separately above.  This section
+# brute-forces shifts 1-25 (skipping 13) and uses dictionary validation
+# to identify the correct shift.  A decoded candidate is accepted when
+# it contains attack keywords OR has a high ratio of real English words.
+# ---------------------------------------------------------------------------
+
+# Load English common words for dictionary validation
+_ENGLISH_WORDS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+    "data", "english_common_1000.txt",
+)
+
+
+def _load_english_words():
+    """Load English common words set for Caesar/PigLatin validation."""
+    words = set()
+    try:
+        with open(_ENGLISH_WORDS_PATH, "r") as fh:
+            for line in fh:
+                w = line.strip().lower()
+                if w and not w.startswith("#"):
+                    words.add(w)
+    except OSError:
+        pass
+    return frozenset(words)
+
+
+_ENGLISH_COMMON_WORDS = _load_english_words()
+
+
+def _caesar_shift(text: str, shift: int) -> str:
+    """Shift each alphabetic character by *shift* positions (A-Z wraps).
+
+    Preserves case and leaves non-alpha characters unchanged.
+    A positive shift moves forward (A+1=B); a negative shift moves backward.
+    """
+    result = []
+    for ch in text:
+        if 'A' <= ch <= 'Z':
+            result.append(chr((ord(ch) - ord('A') + shift) % 26 + ord('A')))
+        elif 'a' <= ch <= 'z':
+            result.append(chr((ord(ch) - ord('a') + shift) % 26 + ord('a')))
+        else:
+            result.append(ch)
+    return "".join(result)
+
+
+def _validate_english(
+    text: str,
+    word_set: "frozenset[str] | None" = None,
+) -> "tuple[float, int, int]":
+    """Validate how English-like *text* is using a dictionary check.
+
+    Splits *text* on whitespace, strips non-alpha from each token, and
+    counts how many tokens appear in *word_set* (defaults to
+    ``_ENGLISH_COMMON_WORDS``) or match ``_ATTACK_KEYWORDS_RE``.
+
+    Returns
+    -------
+    english_ratio : float
+        Fraction of tokens found in the dictionary (0.0-1.0).
+    attack_hits : int
+        Number of distinct attack-keyword matches in the full text.
+    total_words : int
+        Total number of non-empty tokens considered.
+    """
+    if word_set is None:
+        word_set = _ENGLISH_COMMON_WORDS
+
+    tokens = text.split()
+    if not tokens:
+        return 0.0, 0, 0
+
+    english_count = 0
+    total_words = 0
+    for token in tokens:
+        # Strip non-alpha from edges for matching
+        cleaned = re.sub(r"[^a-zA-Z]", "", token).lower()
+        if not cleaned:
+            continue
+        total_words += 1
+        if cleaned in word_set:
+            english_count += 1
+
+    if total_words == 0:
+        return 0.0, 0, 0
+
+    english_ratio = english_count / float(total_words)
+
+    # Count distinct attack keyword hits
+    matches = _ATTACK_KEYWORDS_RE.findall(text)
+    attack_hits = len(set(m.lower().strip() for m in matches))
+
+    return english_ratio, attack_hits, total_words
+
+
+def _caesar_brute_force(text: str) -> "tuple[bool, str, int]":
+    """Brute-force Caesar cipher decoding across shifts 1-25 (skip 13).
+
+    Pre-filters text that is too short or too non-alphabetic, then tries
+    all 24 non-ROT13 shifts.  The best shift is selected by maximising
+    ``(attack_hits, english_ratio)``.
+
+    Returns
+    -------
+    is_candidate : bool
+        True if a valid Caesar-encoded payload was detected.
+    decoded_text : str
+        The decoded text for the best shift (empty string if not detected).
+    shift : int
+        The shift value used (0 if not detected).
+    """
+    # Length cap: prevent CPU exhaustion on very large inputs (24 shifts × N)
+    if len(text) > 10_000:
+        return False, "", 0
+
+    # Pre-filter: need enough alpha content
+    alpha_count = sum(1 for c in text if c.isalpha())
+    if alpha_count < 4:
+        return False, "", 0
+
+    total_chars = len(text)
+    if total_chars > 0 and (total_chars - alpha_count) / total_chars > 0.80:
+        return False, "", 0
+
+    best_shift = 0
+    best_decoded = ""
+    best_attack_hits = 0
+    best_english_ratio = 0.0
+    best_total_words = 0
+
+    for shift in range(1, 26):
+        if shift == 13:
+            continue  # handled by ROT13 decoder
+
+        decoded = _caesar_shift(text, shift)
+        english_ratio, attack_hits, total_words = _validate_english(decoded)
+
+        # Track best by (attack_hits, english_ratio)
+        if (attack_hits, english_ratio) > (best_attack_hits, best_english_ratio):
+            best_shift = shift
+            best_decoded = decoded
+            best_attack_hits = attack_hits
+            best_english_ratio = english_ratio
+            best_total_words = total_words
+
+    # Selection criteria
+    if best_attack_hits >= 2:
+        return True, best_decoded, best_shift
+    if best_english_ratio >= 0.5 and best_total_words >= 3:
+        return True, best_decoded, best_shift
+
+    return False, "", 0
+
+
+# ---------------------------------------------------------------------------
+# Pig Latin detection and decoding
+# ---------------------------------------------------------------------------
+# Pig Latin moves leading consonant clusters to the end and adds "ay".
+# Words starting with vowels get "way" or "yay" appended.  We detect
+# Pig Latin by:
+#   1. Counting words ending in "ay" that are NOT natural English "ay" words
+#   2. If enough candidates exist (>=3 words, >=30% of total), decode them
+#   3. Validate decoded text against English dictionary + attack keywords
+# ---------------------------------------------------------------------------
+
+# English words naturally ending in "ay" -- exclude from Pig Latin detection
+_ENGLISH_AY_WORDS = frozenset({
+    "today", "delay", "relay", "spray", "decay", "essay", "hooray", "okay",
+    "play", "pray", "stay", "sway", "away", "birthday", "highway", "holiday",
+    "subway", "anyway", "display", "halfway", "sunday", "monday", "tuesday",
+    "wednesday", "thursday", "friday", "saturday", "may", "say", "day", "way",
+    "pay", "lay", "bay", "ray", "hay", "jay", "gay", "clay", "gray", "stray",
+    "array", "portray", "repay", "betray", "dismay", "hooray", "hurray",
+    "nay", "slay", "tray", "astray", "bouquet", "survey", "convey",
+})
+
+_VOWELS = frozenset("aeiouAEIOU")
+
+
+def _decode_pig_latin_word(word: str) -> "tuple[str, bool]":
+    """Decode a single Pig Latin-encoded word.
+
+    Handles three Pig Latin conventions:
+    - Vowel-initial words: ``appleyay`` / ``appleway`` -> ``apple``
+    - Consonant-initial words: ``ellohay`` -> ``hello``
+
+    For consonant-initial words, tries moving consonant clusters of
+    length 1-4 from the suffix back to the front and checks each
+    candidate against the English dictionary.
+
+    Returns
+    -------
+    decoded_word : str
+        The decoded word (or the original if no decoding was possible).
+    was_decoded : bool
+        True if the word was actually decoded from Pig Latin.
+    """
+    lower = word.lower()
+
+    # Must end in "ay" to be Pig Latin
+    if not lower.endswith("ay"):
+        return word, False
+
+    # Vowel-initial: word ends in "way" and removing "way" starts with vowel
+    if lower.endswith("way") and len(lower) > 3:
+        candidate = lower[:-3]
+        if candidate and candidate[0] in _VOWELS:
+            return candidate, True
+
+    # Vowel-initial: word ends in "yay" and removing "yay" starts with vowel
+    if lower.endswith("yay") and len(lower) > 3:
+        candidate = lower[:-3]
+        if candidate and candidate[0] in _VOWELS:
+            return candidate, True
+
+    # Consonant-initial: try moving suffix (before "ay") back to front
+    # The Pig Latin form is: <rest><consonants>ay
+    # So decoded = <consonants><rest>
+    body = lower[:-2]  # strip "ay"
+    if not body:
+        return word, False
+
+    fallback = None
+    for cluster_len in range(1, min(5, len(body))):
+        consonants = body[-cluster_len:]
+        rest = body[:-cluster_len]
+        candidate = consonants + rest
+
+        if candidate in _ENGLISH_COMMON_WORDS:
+            return candidate, True
+
+        if cluster_len == 1 and fallback is None:
+            fallback = candidate
+
+    # Return length-1 attempt as fallback
+    if fallback is not None:
+        return fallback, True
+
+    return word, False
+
+
+def _detect_pig_latin(text: str) -> "tuple[bool, str]":
+    """Detect and decode Pig Latin-encoded text.
+
+    Splits text on whitespace, counts words ending in ``ay`` that are
+    NOT in ``_ENGLISH_AY_WORDS``.  If fewer than 3 candidates or less
+    than 30% of total words are candidates, returns early.
+
+    Decodes each word, validates the result with ``_validate_english()``
+    and ``_has_attack_keywords()``, and accepts if attack_hits >= 1 AND
+    english_ratio >= 0.4.
+
+    Returns
+    -------
+    is_candidate : bool
+        True if Pig Latin attack payload was detected.
+    decoded_text : str
+        The decoded text (empty if not detected).
+    """
+    # Length cap: defense-in-depth against oversized inputs
+    if len(text) > 10_000:
+        return False, ""
+
+    tokens = text.split()
+    if not tokens:
+        return False, ""
+
+    # Count candidate Pig Latin words
+    candidate_count = 0
+    for token in tokens:
+        cleaned = re.sub(r"[^a-zA-Z]", "", token).lower()
+        if cleaned.endswith("ay") and cleaned not in _ENGLISH_AY_WORDS:
+            candidate_count += 1
+
+    total = len(tokens)
+    if candidate_count < 3:
+        return False, ""
+    if total > 0 and candidate_count / float(total) < 0.30:
+        return False, ""
+
+    # Decode each word
+    decoded_tokens = []
+    for token in tokens:
+        # Preserve non-alpha wrapping (punctuation, etc.)
+        alpha_only = re.sub(r"[^a-zA-Z]", "", token)
+        if alpha_only:
+            decoded_word, _ = _decode_pig_latin_word(alpha_only)
+            decoded_tokens.append(decoded_word)
+        else:
+            decoded_tokens.append(token)
+
+    decoded_text = " ".join(decoded_tokens)
+
+    # Validate decoded text
+    english_ratio, attack_hits, _ = _validate_english(decoded_text)
+    has_keywords = _has_attack_keywords(decoded_text, min_hits=1)
+
+    if attack_hits >= 1 and english_ratio >= 0.4:
+        return True, decoded_text
+
+    return False, ""
+
+
+# ---------------------------------------------------------------------------
 # Reversed text decoder  (D4.6)
 # ---------------------------------------------------------------------------
 # Reversed text is a simple obfuscation where the entire string or
@@ -810,6 +1119,18 @@ def _scan_single_layer(text):
     if is_rot13 and rot13_decoded:
         decoded_pairs.append((rot13_decoded, "rot13"))
         flags.append("rot13")
+
+    # --- Caesar cipher brute-force (D4.4b) ---
+    is_caesar, caesar_decoded, caesar_shift = _caesar_brute_force(text)
+    if is_caesar and caesar_decoded:
+        decoded_pairs.append((caesar_decoded, f"caesar_shift_{caesar_shift}"))
+        flags.append("caesar_shift")
+
+    # --- Pig Latin detection ---
+    is_piglatin, piglatin_decoded = _detect_pig_latin(text)
+    if is_piglatin and piglatin_decoded:
+        decoded_pairs.append((piglatin_decoded, "pig_latin"))
+        flags.append("pig_latin")
 
     # --- Reversed text detection (D4.6) ---
     # Try full string reversal and per-word reversal.

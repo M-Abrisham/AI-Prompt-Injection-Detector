@@ -36,4 +36,11 @@ from .layer2.obfuscation import (  # noqa: F401
     _is_structured_data,
     _extract_embedded_base64,
     _extract_embedded_hex,
+    _caesar_brute_force,
+    _caesar_shift,
+    _validate_english,
+    _detect_pig_latin,
+    _decode_pig_latin_word,
+    _ENGLISH_COMMON_WORDS,
+    _ENGLISH_AY_WORDS,
 )

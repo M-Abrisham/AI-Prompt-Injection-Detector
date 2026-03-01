@@ -22,6 +22,7 @@ from .layer0 import layer0_sanitize
 from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult
 from .models import get_model_path
+from .signal_boost import calculate_boost
 
 # Layer 5: Embedding-based classifier — optional import
 try:
@@ -271,8 +272,14 @@ class WeightedClassifier:
             self.OBFUSCATION_WEIGHT_CAP,
         )
 
+        # --- Signal co-occurrence boost ---
+        boost_score, boost_reasons = calculate_boost(
+            detailed_hits, obfuscation_flags,
+        )
+        hit_names.extend(boost_reasons)
+
         # --- Composite score ---
-        final_score = (self.ML_WEIGHT * ml_prob) + rule_weight + obf_weight
+        final_score = (self.ML_WEIGHT * ml_prob) + rule_weight + obf_weight + boost_score
 
         # Clamp to [0, 1]
         final_score = max(0.0, min(1.0, final_score))

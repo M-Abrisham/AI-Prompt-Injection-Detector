@@ -248,10 +248,10 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 #### FIXES
 - [x] **FIX: Entropy threshold too low** — Replaced single threshold (4.0) with composite 2-of-3 voting: Shannon entropy (4.3/4.5) + KL-divergence from English + compression ratio. Added `_kl_divergence_from_english()`, `_compression_ratio()` helpers. 34 regression tests. ✅ DONE (2026-02-20) — Bug Bounty Team, verified by 2 independent agents
 - [x] **FIX: Flat decode budget** — Replaced flat `max_decodes=2` with recursive `_scan_single_layer()` + `obfuscation_scan()` (max_depth=4, cycle detection via SHA-256, expansion limit 10x). Peels nested base64(url("payload")) across multiple layers. ✅ DONE (2026-02-20) — Bug Bounty Team, verified by 2 independent agents
-- [ ] **FIX: Combined signal boosting missing** — Persona hijack + encoded payload in same message should carry extra weight. Currently scored independently. **Priority**: P1.
+- [x] **FIX: Combined signal boosting missing** — Multi-vector signal co-occurrence boost. When persona hijack / override / system extraction rules co-occur with encoding flags (base64, rot13, caesar_shift, pig_latin, etc.), additive boost (0.05-0.12 per combo) applied to composite score, capped at MAX_BOOST=0.3. Safety: context_suppressed bypass, single-signal-type guard, multi-encoding boost for layered obfuscation. `signal_boost.py` (292 lines), wired into `cascade.py` and `predict.py`. 45 tests. ✅ DONE (2026-02-28)
 
 #### NEW (Discovered by research)
-- [x] **ROT13/Caesar detection** — ROT13 decoder: applies `codecs.decode(text, 'rot_13')`, validates via attack-keyword matching (2+ unique hits). Explicit "ROT13:" label detection. Decoded views fed through ML + L1 rules. Caesar non-13 shifts remain a gap. Maps to D4.4. ✅ DONE (2026-02-21)
+- [x] **ROT13/Caesar detection** — ROT13 decoder: applies `codecs.decode(text, 'rot_13')`, validates via attack-keyword matching (2+ unique hits). Explicit "ROT13:" label detection. Caesar brute-force (shifts 1-25, skip 13): 1150-word English dictionary validation + attack keyword matching, 10KB input cap. Decoded views fed through ML + L1 rules. Maps to D4.4. ✅ DONE (2026-02-21; Caesar brute-force 2026-02-28, 38 tests)
 - [x] **Leetspeak normalizer** — Substitution map (`0→o`, `1→i`, `3→e`, `4→a`, `5→s`, `7→t`, `@→a`, `$→s`, `!→i`), density threshold (>=10%), attack-keyword validation. Decoded views fed through ML + L1 rules. Maps to D4.5. ✅ DONE (2026-02-21)
 - [x] **Reversed text detection** — Full-string and per-word reversal with attack-keyword validation. Both variants added as decoded views for L1 rule matching. Maps to D4.6. ✅ DONE (2026-02-21)
 - [x] **Morse code detection** — ITU-R M.1677 Morse decoder with Unicode dot/dash normalization (6 dot + 4 dash variants), 80% density threshold, explicit label detection ("Morse:", "decode this morse:"), 4-layer FP defense (density gate, structure validation, min length, attack keyword validation). Integrated as obfuscation decoder + analyzer alt_view (step 6). First-in-class — CipherChat showed 55.3% ASR on GPT-4 via Morse; no competitor tool detects this. 88 tests. `morse_code.py`. Maps to D4.7. ✅ DONE (2026-02-25) — Review fix (2026-02-26): expanded HR regex to cover `***`/`___` markdown variants (+2 tests).
@@ -261,6 +261,8 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 - [x] **Whitespace stego (Snow-style)** — SNOW structural detection (0.95 confidence), statistical anomaly (0.70), simple binary encoding (0.60), trailing WS anomaly (0.50). CRLF-safe, env-configurable thresholds, 1MB input cap. First-in-class — no competitor detects this. 43 tests. `whitespace_stego.py`. ✅ DONE (2026-02-23)
 - [x] **ASCII art detection** — 5-signal weighted voting: art block detection (0.35), structural consistency (0.20), character concentration (0.20), vertical alignment (0.15), box patterns (0.10). Unicode box-drawing + braille + block element detection. Markdown table exemption, code fence penalty, alnum ratio penalty. First-in-class — ArtPrompt (ACL 2024) showed 100% ASR on all moderation tools. 67 tests. `ascii_art_detector.py`. ✅ DONE (2026-02-23)
 - [x] **Syllable-splitting detection** — De-hyphenation of 25 Unicode dash chars, ~75 suspicious words in 5 categories, ~60 compound whitelist, 40+ safe prefixes with override exception (over-ride→override). Integrated as analyzer alt_view (step 5). First-in-class — Meta Prompt Guard 2 classifies hyphenated attacks as 98.9% safe. 73 tests. `syllable_splitting.py`. ✅ DONE (2026-02-23)
+- [x] **Pig Latin detection** — Consonant-cluster decoding (`ignoreway`→`ignore`, `omptpray`→`prompt`), 50+ English "-ay" word exclusion set (today, play, okay...), 30% candidate threshold, attack-keyword + English dictionary validation. 10KB input cap. 36 tests. Integrated as obfuscation decoder in `_scan_single_layer()`. Maps to D4.6. ✅ DONE (2026-02-28)
+- [x] **Combined signal boosting** — Multi-vector co-occurrence detection. Frozenset combo pairs mapping categorised L1 rules (persona hijack, override/authority, system extraction, decode-execute) × L2 encoding flags to additive boost weights (0.05-0.12). Multi-encoding boost (0.10) for layered obfuscation (e.g. base64+hex). MAX_BOOST=0.3 cap. Wired into cascade.py and predict.py composite scoring. 45 tests + 27 cross-track integration tests. `signal_boost.py`. ✅ DONE (2026-02-28)
 
 #### REMAINING (From original roadmap)
 - [x] ROT13 ← DONE (2026-02-21)
@@ -285,7 +287,7 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 
 ### Implementation Plan
 **Phase 1 (P0)**: Fix entropy threshold, refactor to recursive unwrap loop, add ROT13 + reversed text detectors ✅ DONE (2026-02-20/21)
-**Phase 2 (P1)**: ~~Add leetspeak~~, Morse, binary/octal, syllable-splitting, combined signal boosting (leetspeak ✅ DONE 2026-02-21)
+**Phase 2 (P1)**: ~~Add leetspeak~~, Morse, binary/octal, syllable-splitting, ~~combined signal boosting~~ (leetspeak ✅ DONE 2026-02-21, signal boosting ✅ DONE 2026-02-28)
 **Phase 3 (P2)**: ~~Unicode tag stego~~✅ (moved to L0, 2026-02-22), ~~whitespace stego~~✅, ~~ASCII art detection~~✅ DONE (2026-02-23) — 3 first-in-class modules, 183 new tests, 8 audit fixes
 **Phase 4 (Restructuring)**: Promoted to `src/na0s/layer2/` package (2026-02-26). Moved `obfuscation.py`, `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py` from top-level/layer1 into `layer2/`. Backward-compat shims at old import paths. Zero regressions: 2862 tests passing.
 **Phase 5 (Full Implementation)**: Implemented `ascii_art_detector.py` (420+ lines, 5-signal weighted voting, Unicode box-drawing/braille/block detection, FP exemptions, 115 tests) and `syllable_splitting.py` (300+ lines, 25 Unicode dash chars, 83 suspicious words in 5 categories, 63 compound whitelist, 50+ safe prefixes with override exception, 144 tests). Created `test_whitespace_stego.py` (72 tests). Updated all backward-compat shims. Removed `@expectedFailure` from `test_d4_6_word_splitting` (now passes). 2955+ tests passing, zero regressions.
@@ -293,9 +295,10 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 #### REMAINING
 - [x] ~~**ascii_art_detector.py full implementation**~~ — DONE (2026-02-26). 5-signal weighted voting, Unicode detection, 115 tests.
 - [x] ~~**syllable_splitting.py full implementation**~~ — DONE (2026-02-26). 25 Unicode dashes, 83 suspicious words, 63 compound whitelist, 144 tests.
-- [ ] **FIX: Combined signal boosting missing** — Persona hijack + encoded payload in same message should carry extra weight. **Priority**: P1.
-- [ ] **Caesar cipher (non-13 shifts)** — ROT13 only covers shift=13. Full Caesar with brute-force (shifts 1-25) + dictionary validation. **Priority**: P2.
-- [ ] **Pig-latin detection** — Simple substitution cipher variant. **Priority**: P3.
+- [x] ~~**FIX: Combined signal boosting missing**~~ — DONE (2026-02-28). Multi-vector co-occurrence boost in `signal_boost.py`, wired into cascade.py + predict.py. 45 tests. Security audit: 6/7 PASS, CPU exhaustion fixed with 10KB cap.
+- [x] ~~**Caesar cipher (non-13 shifts)**~~ — DONE (2026-02-28). Brute-force shifts 1-25 (skip 13), 1150-word English dictionary + attack keyword validation, 10KB input cap. 38 tests.
+- [x] ~~**Pig-latin detection**~~ — DONE (2026-02-28). Consonant-cluster decoding, 50+ English "-ay" word exclusion set, 10KB input cap. 36 tests.
+- [x] ~~**Cross-track integration tests**~~ — DONE (2026-02-28). 27 tests verifying signal boost + Caesar + Pig Latin work together. 4 formerly-xfail D4 tests now pass.
 
 ---
 
@@ -884,7 +887,7 @@ Layer 10 plants decoy tokens (honeytokens) in system prompts. If a canary appear
 - [ ] **Per-conversation canaries** — Generate unique canary per conversation/session with TTL. Enables precise leak attribution. **Priority**: P1.
 - [ ] **Canary rotation** — Periodically rotate canaries to prevent attacker learning. **Priority**: P1.
 - [ ] **Honeypot decoys** — Plant deliberately weak fake canaries to waste attacker effort. **Priority**: P2.
-- [ ] **Extended encoding coverage** — Add ROT13, Caesar cipher, Unicode escapes, double-encoding, whitespace stego detection. **Priority**: P1.
+- [ ] **Extended encoding coverage** — Add Unicode escapes, double-encoding detection. ROT13 ✅, Caesar ✅, whitespace stego ✅ already in L2. **Priority**: P1.
 - [ ] **Alert mechanism** — Webhook/callback on canary trigger for real-time incident response. **Priority**: P1.
 - [ ] **Canary persistence** — Save/load canary registry to disk for cross-session tracking. **Priority**: P1.
 

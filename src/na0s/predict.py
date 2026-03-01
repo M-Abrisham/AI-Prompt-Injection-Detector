@@ -77,6 +77,7 @@ from .rules import rule_score_detailed, RULES, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
 from .safe_pickle import safe_load
 from .models import get_model_path
+from .signal_boost import calculate_boost_from_names
 
 # Layer 3: Structural Features — optional import
 try:
@@ -296,7 +297,12 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
         if structural.get("repetition_score", 0) > 0.3:
             structural_weight += 0.05
 
-    composite = ml_weight + rule_weight + obf_weight + structural_weight
+    # --- Signal co-occurrence boost ---
+    boost_score, _boost_reasons = calculate_boost_from_names(
+        hits, obs_flags,
+    )
+
+    composite = ml_weight + rule_weight + obf_weight + structural_weight + boost_score
 
     # --- Critical-content rule floor ---
     # When a critical_content severity rule fires, the rule pattern
