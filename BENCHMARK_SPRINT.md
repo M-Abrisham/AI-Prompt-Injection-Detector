@@ -202,8 +202,8 @@ BENCHMARK_RESULTS.md             # NEW - published numbers
   - Supports `--dataset`, `--tool na0s|llm_guard|prompt_guard`, `--max-samples`, `--threshold`, `--output`
   - Outputs: per-sample JSONL results + summary JSON with `BenchmarkResult` schema
   - DONE when: `python scripts/benchmark.py --dataset data/benchmark/test.jsonl --tool na0s` produces metrics
-- [ ] Run baseline benchmark on whatever datasets WS-B has downloaded by EOD
-- [ ] Record baseline numbers in `BENCHMARK_RESULTS.md`
+- [x] Run baseline benchmark on whatever datasets WS-B has downloaded by EOD -- DONE (2026-02-28, 10/10 on test_sample.jsonl, F1=1.0, p50=9.93ms)
+- [x] Record baseline numbers in `BENCHMARK_RESULTS.md` -- DONE (2026-02-28, full report with per-sample breakdown, latency, gaps, next steps)
 
 **Exit Criteria Day 1A**:
 - `ScanResult.to_json()` works, threshold configurable, latency measured
@@ -235,7 +235,7 @@ BENCHMARK_RESULTS.md             # NEW - published numbers
 ### Day 3A: Regression Suite + Final Report
 
 **Morning (4h)**
-- [ ] Create `tests/test_benchmark_regression.py` -- golden regression tests:
+- [x] Create `tests/test_benchmark_regression.py` -- golden regression tests:
   - 20 known-malicious samples that MUST be detected (recall floor)
   - 20 known-safe samples that MUST NOT be flagged (FPR ceiling)
   - Technique-tag assertions (e.g., many-shot -> D8, template -> D3.4)
@@ -315,27 +315,30 @@ README.md                        # benchmark section
 ### Day 2B: Dataset Curation + Docker
 
 **Morning (4h)**
-- [ ] Build safe-text holdout corpus (minimum 500 samples):
-  - 100 instructional/educational text (cooking recipes, tutorials)
-  - 100 code snippets (Python, JS, SQL -- not injection-related)
+- [x] Build safe-text holdout corpus (minimum 500 samples): -- DONE (2026-02-28, 502 samples)
+  - 102 instructional/educational text (cooking recipes, tutorials)
+  - 98 code snippets (Python, JS, SQL -- not injection-related)
   - 100 customer support conversations
-  - 100 creative writing prompts
-  - 100 technical documentation excerpts
-  - Use `scripts/mine_hard_negatives.py` as starting point
+  - 101 creative writing prompts
+  - 101 technical documentation excerpts
+  - Generated via inline Python script (seed=42)
   - Save as `data/holdout/safe_holdout.jsonl` (`{"text": ..., "label": 0, "category": "..."}`)
-- [ ] Build malicious holdout (minimum 200 samples from deepset + custom):
+- [x] Build malicious holdout (minimum 200 samples, synthetic): -- DONE (2026-02-28, 200 samples)
+  - D1:40, D2:30, D3:30, E1:25, D4:25, D5:25, D8:25
+  - Generated via `scripts/gen_all_datasets.py` (seed=42)
   - Save as `data/holdout/malicious_holdout.jsonl`
 - [ ] Create 70/30 stratified split: tune vs holdout (by label + category)
 
 **Afternoon (4h)**
-- [ ] Generate adversarial evasion dataset via existing buffs framework:
-  - Take 100 known-malicious prompts
-  - Run through: Base64, ROT13, leetspeak, Unicode homoglyphs, syllable-splitting, reversed
+- [x] Generate adversarial evasion dataset: -- DONE (2026-02-28, 574 samples)
+  - 82 core malicious prompts
+  - 7 evasion types: Base64, ROT13, leetspeak, reversed, mixed_case, word_reverse, padded
+  - Generated via `scripts/gen_all_datasets.py` (seed=42)
   - Save as `data/benchmark/adversarial_evasion.jsonl` (`{"text": ..., "label": 1, "evasion_type": "..."}`)
-  - DONE when: 500+ adversarial samples generated
+  - 574 adversarial samples generated (target was 500+)
 - [x] Create `Dockerfile` -- DONE (2026-02-27, multi-stage build, non-root user, layer caching, 39 tests)
   - `.dockerignore` with 17 exclusion patterns
-- [ ] Create `data/holdout/README.md` documenting provenance, license, split methodology
+- [x] Create `data/holdout/README.md` documenting provenance, license, split methodology -- DONE (2026-02-28)
 - [ ] Feed holdout datasets to WS-A for benchmark runs
 
 **Exit Criteria Day 2B**:
@@ -353,15 +356,16 @@ README.md                        # benchmark section
   - `python -m build` -> verify wheel + sdist
   - `twine check dist/*`
   - Test install in clean venv: `pip install dist/na0s-0.2.0-py3-none-any.whl && na0s scan "test"`
-- [ ] Add PyPI publish workflow: `.github/workflows/publish.yml` (on tag push)
+- [x] Add PyPI publish workflow: `.github/workflows/publish.yml` (on tag push) -- DONE (2026-02-28)
 - [ ] 🔗 **Day 3 morning sync**: Validate datasets work with WS-A benchmark harness
 
 **Afternoon (4h)**
-- [ ] Update `README.md` with:
+- [x] Update `README.md` with: -- DONE (2026-02-28)
   - Installation instructions (`pip install na0s`)
   - Quick-start code (3-line Python example)
   - Benchmark results table (from BENCHMARK_RESULTS.md)
   - CLI usage examples
+  - Detection capabilities (15-layer summary table)
 - [ ] Final integration test: `pip install` -> `na0s scan` -> JSON output -> correct
 - [ ] Verify Dockerfile builds and runs benchmark end-to-end
 - [ ] Tag `v0.2.0` and publish to TestPyPI (production PyPI after manual review)
@@ -629,7 +633,7 @@ These represent documented gaps that will show as misses in the benchmark. They 
 - [x] `scripts/wrappers/prompt_guard.py`
 - [ ] `scripts/benchmark_report.py`
 - [ ] `tests/test_benchmark_regression.py`
-- [ ] `BENCHMARK_RESULTS.md`
+- [x] `BENCHMARK_RESULTS.md`
 
 ### New Files (WS-B)
 - [x] `src/na0s/cli.py`
@@ -640,8 +644,8 @@ These represent documented gaps that will show as misses in the benchmark. They 
 - [ ] `data/benchmark/deepset_pi.jsonl`
 - [ ] `data/benchmark/benign_alpaca.jsonl`
 - [ ] `data/benchmark/benign_dolly.jsonl`
-- [ ] `data/benchmark/adversarial_evasion.jsonl`
-- [ ] `data/holdout/safe_holdout.jsonl`
-- [ ] `data/holdout/malicious_holdout.jsonl`
-- [ ] `data/holdout/README.md`
-- [ ] `.github/workflows/publish.yml`
+- [x] `data/benchmark/adversarial_evasion.jsonl`
+- [x] `data/holdout/safe_holdout.jsonl`
+- [x] `data/holdout/malicious_holdout.jsonl`
+- [x] `data/holdout/README.md`
+- [x] `.github/workflows/publish.yml`

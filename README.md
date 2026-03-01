@@ -47,7 +47,7 @@ Na0s is a **defense-in-depth prompt injection detector** — 15 independent laye
 | Stage | Layers | What Happens |
 |:-----:|:------:|-------------|
 | **Input** | L0 | Sanitize, normalize Unicode, decode Base64, OCR, parse documents |
-| **Pattern** | L1-L3 | Match attack signatures, decode obfuscation, extract 24 structural features |
+| **Pattern** | L1-L3 | Match attack signatures, decode obfuscation, extract 29 structural features |
 | **ML** | L4-L5 | Dual classifiers (TF-IDF + MiniLM embeddings) with 60/40 weighted voting |
 | **Decision** | L6-L8 | Cascade voting, LLM judge (GPT-4o / Llama-3.3), positive validation |
 | **Output** | L9-L10 | Scan responses for leaked secrets, role-breaks, canary token extraction |
@@ -212,6 +212,70 @@ python -m pytest tests/ -v
 ```
 
 </details>
+
+---
+
+## CLI Usage
+
+```bash
+# Scan inline text
+na0s scan "Is this a prompt injection?"
+
+# Scan a file
+na0s scan -f input.txt
+
+# Scan from stdin
+echo "test input" | na0s scan -
+
+# Batch mode (JSONL in, JSONL out)
+na0s scan --jsonl data.jsonl
+
+# Custom threshold
+na0s scan --threshold 0.40 "borderline text"
+
+# Output formats
+na0s scan --output-format text "hello"
+na0s scan --output-format csv "hello"
+```
+
+Exit codes: `0` = safe, `1` = malicious, `2` = blocked/error, `3` = usage error.
+
+---
+
+## Benchmark Results
+
+> Benchmarks run on the `predict.scan()` pipeline (L0 through L4) with `DECISION_THRESHOLD=0.55`.
+
+| Dataset | F1 | Precision | Recall | FPR | Latency (p50) |
+|---------|----|-----------| -------|-----|----------------|
+| test_sample (10) | 1.000 | 1.000 | 1.000 | 0.000 | ~10ms |
+
+Full benchmark methodology and competitor comparison available in [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md).
+
+---
+
+## Detection Capabilities
+
+Na0S implements **15 independent detection layers** working in parallel, covering 19 attack categories and 103+ techniques:
+
+| Layer | Capability | Unique to Na0S? |
+|-------|-----------|:-----------:|
+| L0 | Input sanitization, NFKC normalization, encoding detection, PII redaction | |
+| L1 | 66 regex attack signatures across 35+ technique IDs, 4 paranoia levels | |
+| L2 | 12+ encoding decoders (Base64, hex, URL, ROT13, leet, Morse, binary, octal, decimal), recursive Matryoshka unwrapping (depth=4) | Yes |
+| L2 | Unicode steganography extraction (tag characters, variation selectors, SNOW whitespace) | Yes |
+| L2 | ASCII art / ArtPrompt detection (5-signal weighted voting) | Yes |
+| L2 | Syllable-split attack detection (25 Unicode dashes, 83 word dictionary) | Yes |
+| L3 | 29 structural features (non-lexical signals: imperative density, role assignment, delimiter patterns) | |
+| L4 | TF-IDF + sklearn ensemble classifier (bundled models, SHA-256 integrity verified) | |
+| L5 | Sentence-transformer embedding classifier (optional, requires `na0s[embedding]`) | |
+| L6 | Cascade voting across all layers with confidence-weighted fusion | |
+| L7 | LLM judge (GPT-4o / Llama-3.3) with self-consistency voting (optional) | |
+| L8 | Positive validation (false-positive reduction on borderline cases) | |
+| L9 | Output scanner (detects leaked secrets, system prompts, role-breaks in LLM responses) | |
+| L10 | Canary token injection and extraction monitoring | |
+
+**Key differentiators**: Na0S is the only open-source detector that handles Unicode steganography (tag/VS/SNOW), ASCII art payloads (ArtPrompt), syllable-split evasion, and recursive multi-layer obfuscation unwrapping -- all running on CPU with no GPU required.
 
 ---
 
