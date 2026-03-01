@@ -12,3 +12,4 @@ class Layer0Result:
     rejected: bool = False
     rejection_reason: str = ""
     source_metadata: dict = field(default_factory=dict)
+    timing: dict = field(default_factory=dict)
