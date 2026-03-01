@@ -1,0 +1,66 @@
+name: Social Scraper (3h)
+
+on:
+  schedule:
+    # Every 3 hours
+    - cron: '0 */3 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run social scraper
+        id: scrape
+        env:
+          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
+        run: python scripts/social_scraper.py --verbose
+
+      - name: Check for new records
+        id: check
+        run: |
+          if [ -f data/scraped/latest_scrape.json ]; then
+            count=$(python3 -c "import json; d=json.load(open('data/scraped/latest_scrape.json')); print(d.get('new_count', 0))")
+            echo "new_count=$count" >> $GITHUB_OUTPUT
+            echo "Found $count new record(s)"
+          else
+            echo "new_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create PR if new data found
+        if: steps.check.outputs.new_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="scrape/$(date +%Y%m%d-%H%M%S)"
+          git checkout -b "$BRANCH"
+          git add data/scraped/
+          git commit -m "Add scraped prompt injection data ($(date +%Y-%m-%d))"
+          git push -u origin "$BRANCH"
+          gh pr create \
+            --title "New scraped data: $(date +%Y-%m-%d %H:%M)" \
+            --body "## Social Scraper Report
+
+          Automated social media scrape found **${{ steps.check.outputs.new_count }}** new prompt injection content.
+
+          Review \`data/scraped/latest_scrape.json\` for details.
+
+          ---
+          *Automated by social-scraper.yml*" \
+            --base main
