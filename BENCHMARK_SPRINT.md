@@ -315,27 +315,25 @@ README.md                        # benchmark section
 ### Day 2B: Dataset Curation + Docker
 
 **Morning (4h)**
-- [ ] Build safe-text holdout corpus (minimum 500 samples):
+- [x] Build safe-text holdout corpus (minimum 500 samples): -- DONE (2026-02-28, 500 samples, 100/category, 19 tests)
   - 100 instructional/educational text (cooking recipes, tutorials)
   - 100 code snippets (Python, JS, SQL -- not injection-related)
   - 100 customer support conversations
   - 100 creative writing prompts
   - 100 technical documentation excerpts
-  - Use `scripts/mine_hard_negatives.py` as starting point
-  - Save as `data/holdout/safe_holdout.jsonl` (`{"text": ..., "label": 0, "category": "..."}`)
-- [ ] Build malicious holdout (minimum 200 samples from deepset + custom):
-  - Save as `data/holdout/malicious_holdout.jsonl`
+  - Uses `scripts/generate_safe_holdout.py` (deterministic generation)
+  - Saved as `data/holdout/safe_holdout.jsonl`
+- [x] Build malicious holdout (minimum 200 samples from deepset + custom): -- DONE (2026-02-28, 240 samples, 12 technique categories, 20 tests)
+  - Saved as `data/holdout/malicious_holdout.jsonl`
 - [ ] Create 70/30 stratified split: tune vs holdout (by label + category)
 
 **Afternoon (4h)**
-- [ ] Generate adversarial evasion dataset via existing buffs framework:
-  - Take 100 known-malicious prompts
-  - Run through: Base64, ROT13, leetspeak, Unicode homoglyphs, syllable-splitting, reversed
-  - Save as `data/benchmark/adversarial_evasion.jsonl` (`{"text": ..., "label": 1, "evasion_type": "..."}`)
-  - DONE when: 500+ adversarial samples generated
+- [x] Generate adversarial evasion dataset via `scripts/generate_adversarial.py`: -- DONE (2026-02-28, 567 samples, 9 evasion techniques, 23 tests)
+  - 65 base malicious prompts x 9 evasion types (base64, rot13, leet, homoglyphs, reversed, hex, mixed, whitespace, syllable-split)
+  - Saved as `data/benchmark/adversarial_evasion.jsonl`
 - [x] Create `Dockerfile` -- DONE (2026-02-27, multi-stage build, non-root user, layer caching, 39 tests)
   - `.dockerignore` with 17 exclusion patterns
-- [ ] Create `data/holdout/README.md` documenting provenance, license, split methodology
+- [x] Create `data/holdout/README.md` documenting provenance, license, split methodology -- DONE (2026-02-28)
 - [ ] Feed holdout datasets to WS-A for benchmark runs
 
 **Exit Criteria Day 2B**:
@@ -640,8 +638,8 @@ These represent documented gaps that will show as misses in the benchmark. They 
 - [ ] `data/benchmark/deepset_pi.jsonl`
 - [ ] `data/benchmark/benign_alpaca.jsonl`
 - [ ] `data/benchmark/benign_dolly.jsonl`
-- [ ] `data/benchmark/adversarial_evasion.jsonl`
-- [ ] `data/holdout/safe_holdout.jsonl`
-- [ ] `data/holdout/malicious_holdout.jsonl`
-- [ ] `data/holdout/README.md`
+- [x] `data/benchmark/adversarial_evasion.jsonl`
+- [x] `data/holdout/safe_holdout.jsonl`
+- [x] `data/holdout/malicious_holdout.jsonl`
+- [x] `data/holdout/README.md`
 - [ ] `.github/workflows/publish.yml`

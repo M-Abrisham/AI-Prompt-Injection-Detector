@@ -3,6 +3,10 @@ data/*
 !data/*.yaml
 !data/*.tsv
 !data/datasets.lock
+!data/holdout/
+data/holdout/*.jsonl
+!data/benchmark/
+data/benchmark/*.jsonl
 __pycache__/
 .DS_Store
 *.egg-info/
