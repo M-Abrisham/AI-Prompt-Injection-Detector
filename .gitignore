@@ -28,3 +28,6 @@ htmlcov/
 # Environment
 .env
 .venv/
+
+# Claude Code config
+.claude/
