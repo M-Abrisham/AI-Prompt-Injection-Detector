@@ -35,7 +35,10 @@ htmlcov/
 
 # Environment
 .env
-.venv/
+.venv*/
+
+# Model backups (created by deploy_model.py)
+*.bak
 
 # Claude Code config
 .claude/
