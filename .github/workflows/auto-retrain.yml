@@ -53,6 +53,9 @@ jobs:
       - name: Promote validated quarantined datasets
         run: python -m scripts.quarantine --promote-validated
 
+      - name: Generate synthetic training samples (D3/D4/D5/D6/D7/D8/E1/E2/C1/O1/P1)
+        run: python scripts/gen_all_datasets.py
+
       - name: Merge and deduplicate all data
         run: python -m scripts.process_data
 

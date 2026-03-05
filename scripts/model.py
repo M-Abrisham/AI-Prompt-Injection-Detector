@@ -1,4 +1,11 @@
-    #Train the Model
+"""Model training script — logistic regression with isotonic calibration.
+
+Reads the feature matrix produced by ``scripts/features.py``, trains a
+``LogisticRegression`` model, applies ``CalibratedClassifierCV`` for
+probability calibration, and writes the result to
+``data/processed/model.pkl``.
+"""
+
 import sys
 import os
 from sklearn.model_selection import train_test_split
@@ -8,8 +15,14 @@ from sklearn.metrics import accuracy_score, classification_report
 from na0s.safe_pickle import safe_load, safe_dump
 import numpy as np
 
+__all__ = ["train_model"]
+
 FEATURES_PATH = "data/processed/features.pkl"
 MODEL_PATH = "data/processed/model.pkl"
+
+# Minimum number of samples required for meaningful training
+_MIN_SAMPLES = 100
+
 
 def train_model():
     # --- Guard: verify input file exists ---
@@ -22,7 +35,44 @@ def train_model():
         print(" Training...")
 
         # load Binary data (integrity-checked)
-        X, y = safe_load(FEATURES_PATH)
+        loaded = safe_load(FEATURES_PATH)
+
+        # --- Guard: features file must contain a (matrix, array) tuple ---
+        if (
+            not isinstance(loaded, tuple)
+            or len(loaded) != 2
+        ):
+            print(
+                f"ERROR: Features file has unexpected format. "
+                f"Expected a 2-tuple (X, y), got {type(loaded).__name__}."
+            )
+            sys.exit(1)
+
+        X, y = loaded
+
+        # --- Guard: feature matrix must not be empty ---
+        if X.shape[0] == 0:
+            print("ERROR: Feature matrix has 0 samples. Cannot train.")
+            sys.exit(1)
+
+        # --- Guard: minimum sample count ---
+        n_samples = X.shape[0]
+        if n_samples < _MIN_SAMPLES:
+            print(
+                f"ERROR: Feature matrix has only {n_samples} sample(s). "
+                f"At least {_MIN_SAMPLES} are required for reliable training."
+            )
+            sys.exit(1)
+
+        # --- Guard: both class labels must be present ---
+        y_arr = np.asarray(y)
+        unique_labels = set(y_arr)
+        if not {0, 1}.issubset(unique_labels):
+            print(
+                f"ERROR: Labels must contain both class 0 (Safe) and class 1 "
+                f"(Malicious). Found only: {sorted(unique_labels)}"
+            )
+            sys.exit(1)
 
         # Split data: Test + Training
         X_train, X_test, y_train, y_test = train_test_split(
@@ -76,12 +126,13 @@ def train_model():
         print(f"ERROR: Unexpected failure during model training: {e}")
         sys.exit(1)
 
-    # --- Verify output file exists and report size ---
+    # --- Verify output file exists and exit non-zero if missing ---
     if os.path.isfile(MODEL_PATH):
         size = os.path.getsize(MODEL_PATH)
         print(f"Verified: {MODEL_PATH} ({size:,} bytes)")
     else:
-        print(f"WARNING: Expected model file was not created: {MODEL_PATH}")
+        print(f"ERROR: Expected model file was not created: {MODEL_PATH}")
+        sys.exit(1)
 
     print(" Classifier is successfully trained, calibrated, and saved")
 
