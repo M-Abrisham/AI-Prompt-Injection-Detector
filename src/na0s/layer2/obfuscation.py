@@ -1163,6 +1163,10 @@ def _scan_single_layer(text):
         if decoded:
             decoded_pairs.append((decoded, "base64"))
             flags.append("base64")
+            # When the ENTIRE input is base64 (no surrounding text), that
+            # itself is a strong obfuscation signal.  Normal user messages
+            # are never pure base64.
+            flags.append("entire_input_base64")
     else:
         # Try extracting embedded base64 substrings from mixed text.
         # This catches attacks where base64 payloads are wrapped in

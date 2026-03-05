@@ -129,7 +129,7 @@ def _run_buff_matrix(classify_fn, seed, num_probes, max_samples):
         # Raw (no buff)
         det = 0
         for text, tech_id in samples:
-            label, prob, hits, l0 = classify_fn(text)
+            label, prob, hits, l0, *_ = classify_fn(text)
             if l0.rejected or ("SAFE" not in label.upper()):
                 det += 1
         recall = det / len(samples) * 100 if samples else 0
@@ -143,7 +143,7 @@ def _run_buff_matrix(classify_fn, seed, num_probes, max_samples):
                     mutated = buff.apply(text)
                 except Exception:
                     continue
-                label, prob, hits, l0 = classify_fn(mutated)
+                label, prob, hits, l0, *_ = classify_fn(mutated)
                 if l0.rejected or ("SAFE" not in label.upper()):
                     det += 1
             recall = det / len(samples) * 100 if samples else 0

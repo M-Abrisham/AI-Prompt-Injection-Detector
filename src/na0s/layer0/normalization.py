@@ -14,8 +14,12 @@ except ImportError:
 
 # Unicode whitespace variants that should become plain ASCII space.
 # Does NOT include \n, \r, \t — those are handled separately.
+# U+2800 (BRAILLE PATTERN BLANK) is included: it renders as a blank/space
+# but has category So (Other Symbol) so is not caught by standard whitespace
+# checks.  Attackers use it as an invisible word separator to evade regex
+# matching (e.g. "Ignore⠀all⠀previous" with braille blanks between words).
 _UNICODE_WHITESPACE_RE = re.compile(
-    "[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff\x0b\x0c]"
+    "[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u2800\u3000\ufeff\x0b\x0c]"
 )
 
 # Collapse runs of multiple ASCII spaces into one
@@ -212,6 +216,7 @@ _SCRIPT_RANGES = (
     (0x0530, 0x058F, "Armenian"),
     (0x0590, 0x05FF, "Hebrew"),
     (0x0600, 0x06FF, "Arabic"),
+    (0x0700, 0x074F, "Syriac"),
     (0x0900, 0x097F, "Devanagari"),
     (0x3040, 0x309F, "Hiragana"),
     (0x30A0, 0x30FF, "Katakana"),
@@ -307,6 +312,62 @@ def normalize_homoglyphs(text):
     return "".join(parts), total_replaced
 
 
+# ---------------------------------------------------------------------------
+# Combining diacritical mark stripping (D5.6 — accent-based evasion)
+# ---------------------------------------------------------------------------
+# Combining marks (U+0300-U+036F, Unicode category Mn in this block) attach
+# to preceding base characters.  NFKC composes them into precomposed forms
+# (e.g. o + U+0300 -> U+00F2 ò), but the resulting accented characters are
+# DIFFERENT from their unaccented base letters.  Rules matching "ignore"
+# will NOT match "ignòre".
+#
+# To close this evasion gap, we decompose via NFD (splits precomposed chars
+# back into base + combining mark), then strip all characters with Unicode
+# category Mn (Nonspacing Mark) in the combining diacritical range.  This
+# is more targeted than stripping ALL Mn characters, which would also remove
+# legitimate diacritics in scripts like Hebrew/Arabic/Devanagari niqqud.
+#
+# DESIGN: We strip combining marks in the range U+0300-U+036F only.  These
+# are the Latin/Cyrillic/Greek combining diacriticals.  Extended combining
+# marks (U+0370+) for other scripts are left intact to preserve legitimate
+# multilingual text.
+
+def _strip_combining_diacriticals(text):
+    """Strip combining diacritical marks (U+0300-U+036F) from text.
+
+    Uses NFD decomposition to split precomposed characters (e.g. ò -> o +
+    combining grave), then removes combining marks in the basic diacriticals
+    block.  Finally re-applies NFC to re-compose any remaining sequences.
+
+    Parameters
+    ----------
+    text : str
+        Input text (should already be NFKC-normalized).
+
+    Returns
+    -------
+    tuple of (str, int)
+        ``(cleaned_text, marks_stripped)`` where *marks_stripped* is the count
+        of combining diacritical marks that were removed.
+    """
+    # NFD decomposition: splits precomposed chars into base + combining marks
+    decomposed = unicodedata.normalize("NFD", text)
+    cleaned = []
+    marks_stripped = 0
+    for ch in decomposed:
+        cp = ord(ch)
+        # Strip combining diacritical marks (U+0300-U+036F)
+        if 0x0300 <= cp <= 0x036F:
+            marks_stripped += 1
+        else:
+            cleaned.append(ch)
+    if marks_stripped == 0:
+        return text, 0
+    # NFC re-composition: re-compose any remaining valid sequences
+    result = unicodedata.normalize("NFC", "".join(cleaned))
+    return result, marks_stripped
+
+
 def _validate_ftfy_output(original, fixed):
     """Check whether ftfy's correction is safe.
 
@@ -326,6 +387,32 @@ def _validate_ftfy_output(original, fixed):
     new_chars = set(fixed) - set(original)
     if not new_chars:
         return True
+
+    # 0. Idempotency guard: reject if ftfy's output is NOT stable —
+    #    i.e., running ftfy on the fixed text changes it AGAIN.
+    #    Real mojibake repair is idempotent (the correctly decoded text
+    #    won't be "re-fixed").  False-positive corrections like
+    #    "ƒß"→"ħ" or "Ü¢"→"ܢ" are unstable — ftfy would try to
+    #    "fix" the output again on a second pass.
+    if _HAS_FTFY:
+        refixed = _ftfy_fix_with_sentinel(fixed)
+        if refixed != fixed:
+            return False
+
+    # 0b. Clean-text merge guard: reject if ftfy reduces length AND
+    #     the original text has no "garble indicators" — characters
+    #     that are typical artifacts of misinterpreted encodings.
+    #     Real mojibake always includes at least one of:
+    #       Sc (currency: €¤), So (symbols: ™©®), Sk (modifiers: ¯ˆ),
+    #       Cc (control: U+0080-U+009F C1 controls), Cf (format),
+    #       Cn (unassigned), Cs (surrogate)
+    #     False positives like "ƒß"→"ħ" contain only letters, digits,
+    #     and standard punctuation — no garble indicators.
+    _GARBLE_CATEGORIES = {"Sc", "So", "Sk", "Cc", "Cf", "Cn", "Cs"}
+    if len(fixed) < len(original) and not any(
+        unicodedata.category(c) in _GARBLE_CATEGORIES for c in original
+    ):
+        return False
 
     # 1. Symbol injection: reject if new "Other Symbol" (So) chars appear
     #    when the original had none (catches Pallas symbol U+26B4, etc.)
@@ -353,6 +440,14 @@ def _validate_ftfy_output(original, fixed):
         # isolated injection (suspicious).  Full mojibake repair changes
         # most of the text.
         if len(fixed) > 0 and new_script_count / len(fixed) < 0.5:
+            return False
+        # Short-text guard: for very short texts (≤4 printable chars),
+        # a full script change is almost always a false positive —
+        # ftfy misinterprets a couple of Latin/Common chars as an
+        # encoded form.  Real mojibake at this length is extremely rare
+        # and not worth the false-positive risk.
+        orig_printable = sum(1 for c in original if c.isprintable())
+        if orig_printable <= 4 and new_script_count > 0:
             return False
 
     return True
@@ -483,6 +578,45 @@ def strip_invisible_chars(text):
         result_parts.append(seg_text)
 
     return "".join(result_parts)
+
+
+def strip_invisible_chars_concat(text):
+    """Remove invisible/control characters by simple concatenation.
+
+    Unlike ``strip_invisible_chars()`` which attempts word-boundary
+    restoration (inserting spaces between multi-char groups), this
+    function simply removes all invisible characters and concatenates
+    the remaining visible characters.
+
+    This produces the correct result for mid-word ZWS splitting
+    (e.g. "Ign<ZWS>ore" -> "Ignore") and real spaces are preserved
+    since they are visible characters (not category Cf/Cc/Cn/Cs).
+
+    Used as a complementary view for rule matching: when the heuristic
+    space-insertion in ``strip_invisible_chars()`` incorrectly splits
+    words at syllable boundaries, this concatenated view recovers the
+    original word for keyword matching.
+
+    Parameters
+    ----------
+    text : str
+        Input text potentially containing invisible characters.
+
+    Returns
+    -------
+    str
+        Text with all invisible/control characters removed, no space
+        insertion at removal points.
+    """
+    result = []
+    for char in text:
+        cat = unicodedata.category(char)
+        if cat == "Cs":
+            continue
+        if cat in ("Cf", "Cc", "Cn") and char not in "\n\r\t ":
+            continue
+        result.append(char)
+    return "".join(result)
 
 
 def _ftfy_fix_with_sentinel(text):
@@ -639,7 +773,7 @@ def _strip_variation_selectors(text):
     )
 
 
-def normalize_text(text):
+def normalize_text(text, _idempotency_pass=False):
     """Run all Layer 0 normalization steps in order.
 
     Returns (normalized_text, chars_stripped, anomaly_flags).
@@ -684,6 +818,24 @@ def normalize_text(text):
     text, homoglyph_count = normalize_homoglyphs(text)
     if homoglyph_count > 0:
         flags.append("mixed_script_homoglyphs")
+
+    # Step 1.7: Combining diacritical mark detection (D5.6)
+    # Combining marks (U+0300-U+036F) compose with base characters under
+    # NFKC into precomposed accented characters (e.g. o + combining grave
+    # -> ò).  These accented characters differ from their base letters,
+    # so rules matching "ignore" will NOT match "ignòre".
+    #
+    # NOTE: We do NOT strip combining marks in the primary pipeline because
+    # that would destroy legitimate accented characters (e.g. French é, ñ).
+    # Instead, combining mark stripping happens in quick_normalize_concat()
+    # which is used as an additional rule-matching surface in classify_prompt().
+    #
+    # Here we only DETECT the presence of combining marks for the anomaly
+    # flag, which serves as an obfuscation signal for score boosting.
+    _pre_diacritics = text
+    _check_text, diacritics_count = _strip_combining_diacriticals(text)
+    if diacritics_count > 0:
+        flags.append("combining_diacritics_stripped")
 
     # Step 1.9: Unicode Tag Character steganography extraction (D5.2+)
     # MUST run BEFORE Step 2 (invisible char stripping) because tag chars
@@ -742,4 +894,95 @@ def normalize_text(text):
     text = _EXCESSIVE_TABS_RE.sub("\t", text)
 
     chars_stripped = original_len - len(text)
+
+    # Idempotency guard: earlier steps (invisible-char stripping, NFKC,
+    # etc.) can create character sequences that ftfy misinterprets as
+    # mojibake on a subsequent call.  We detect this by running the
+    # pipeline once more.  If the second pass changes the text, we
+    # return the second-pass result (which is guaranteed to be stable
+    # because we only do one re-run).
+    if not _idempotency_pass and _HAS_FTFY:
+        text2, _, flags2 = normalize_text(text, _idempotency_pass=True)
+        if text2 != text:
+            # Second pass changed the text — use the stable result.
+            # Merge flags from both passes (deduplicated).
+            seen = set(flags)
+            for f in flags2:
+                if f not in seen:
+                    flags.append(f)
+                    seen.add(f)
+            text = text2
+            chars_stripped = original_len - len(text)
+
     return text, chars_stripped, flags
+
+
+_LITERAL_UNICODE_ESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
+
+
+def _decode_literal_escapes(text):
+    """Decode literal \\uXXXX escape sequences into actual Unicode characters.
+
+    Attackers embed literal escape sequences like ``Ign\\u200bore`` to evade
+    keyword matching.  The text contains the ASCII characters ``\\``, ``u``,
+    ``2``, ``0``, ``0``, ``b`` — not the actual zero-width space.
+
+    Returns ``(decoded_text, n_decoded)`` where *n_decoded* is the count of
+    escape sequences replaced.
+    """
+    count = 0
+
+    def _replace(m):
+        nonlocal count
+        count += 1
+        return chr(int(m.group(1), 16))
+
+    decoded = _LITERAL_UNICODE_ESCAPE.sub(_replace, text)
+    return decoded, count
+
+
+def quick_normalize_concat(text):
+    """Fast concat-based normalization for use as an additional rule surface.
+
+    Produces a normalized view of *text* where invisible characters are
+    stripped by simple concatenation (no space insertion at removal
+    points).  This complements ``normalize_text()``'s heuristic
+    word-boundary restoration which can incorrectly split words at
+    syllable boundaries (e.g. "Ign<ZWS>ore" -> "Ign ore").
+
+    Steps applied (subset of ``normalize_text``):
+      1. NFKC normalization
+      2. Combining diacritical mark stripping (U+0300-U+036F)
+      3. Invisible character removal (concat, no space insertion)
+      4. Whitespace canonicalization (braille blank, exotic spaces)
+      5. Multi-space collapse
+
+    This is intentionally lightweight: no ftfy, no stego extraction,
+    no homoglyph normalization (those are already handled by the
+    primary ``normalize_text`` pipeline).  Its purpose is to provide
+    a clean rule-matching surface for cases where the heuristic
+    space-insertion creates false word breaks.
+
+    Parameters
+    ----------
+    text : str
+        Raw input text.
+
+    Returns
+    -------
+    str
+        Normalized text with invisible chars stripped by concatenation.
+    """
+    # Decode literal \uXXXX escape sequences (evasion via ASCII escapes)
+    text, _ = _decode_literal_escapes(text)
+    # NFKC normalization
+    text = unicodedata.normalize("NFKC", text)
+    # Strip combining diacritical marks
+    text, _ = _strip_combining_diacriticals(text)
+    # Strip invisible chars by concatenation (no space insertion)
+    text = strip_invisible_chars_concat(text)
+    # Whitespace canonicalization (braille blank, exotic spaces -> ASCII space)
+    text = _UNICODE_WHITESPACE_RE.sub(" ", text)
+    # Collapse multiple spaces and strip
+    text = _MULTI_SPACE_RE.sub(" ", text).strip()
+    return text

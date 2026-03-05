@@ -70,6 +70,22 @@ _ANALYSIS_FRAMING_RE = safe_compile(
     re.IGNORECASE,
 )
 
+# Security research / documentation context: MITRE ATLAS, bug bounty,
+# security advisory, red team, pentest, incident response.  These are
+# professional security contexts where injection-related vocabulary
+# appears naturally as DATA being discussed, not attacks being executed.
+_SECURITY_RESEARCH_RE = safe_compile(
+    r'\b('
+    r'MITRE\s+ATLAS|MITRE\s+ATT&CK|'
+    r'bug\s+bounty|security\s+advisory|security\s+bulletin|'
+    r'red\s+team\s+report|pentest\s+(?:report|findings?)|'
+    r'penetration\s+test|incident\s+response|'
+    r'CVE-\d{4}|OWASP\s+(?:LLM|Top)|'
+    r'threat\s+model|vulnerability\s+(?:report|disclosure|assessment)'
+    r')\b',
+    re.IGNORECASE,
+)
+
 
 def calculate_safe_content_score(
     text: str,
@@ -138,5 +154,10 @@ def calculate_safe_content_score(
     if _ANALYSIS_FRAMING_RE.search(text):
         score += 0.08
         reasons.append("analysis_framing")
+
+    # Security research / documentation context
+    if _SECURITY_RESEARCH_RE.search(text):
+        score += 0.08
+        reasons.append("security_research")
 
     return min(score, _MAX_SAFE_SCORE), reasons

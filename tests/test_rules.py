@@ -106,13 +106,8 @@ class TestRulesListIntegrity(unittest.TestCase):
     """B. Tests that the RULES list is well-formed and complete."""
 
     def test_total_rule_count(self):
-        """There should be exactly 81 rules in the RULES list.
-
-        This includes 77 base rules (with 2 intentional duplicates:
-        tool_enumeration and training_data_extraction with different
-        patterns) plus 4 D1.15-D1.19 subtle override rules.
-        """
-        self.assertEqual(len(RULES), 81)
+        """There should be exactly 110 rules in the RULES list."""
+        self.assertEqual(len(RULES), 111)
 
     def test_all_rule_names_are_unique(self):
         """No two rules should have the same name (except known variants).
@@ -180,7 +175,7 @@ class TestRulesListIntegrity(unittest.TestCase):
                 self.assertGreater(weight, 0.0)
 
     def test_expected_rule_names_present(self):
-        """All 79 unique expected rule names should be present."""
+        """All 92 unique expected rule names should be present."""
         expected = {
             # Original 23 Layer 1 rules
             "override", "system_prompt", "roleplay", "secrecy",
@@ -224,6 +219,13 @@ class TestRulesListIntegrity(unittest.TestCase):
             "recursive_jailbreak", "hypothetical_bypass",
             # D6 Multilingual override detection
             "multilingual_override_latin", "multilingual_override_cjk",
+            # D6 Multilingual extraction and restriction bypass
+            "multilingual_extraction_latin", "multilingual_extraction_cjk",
+            "multilingual_restriction_bypass",
+            # D6/E1 extended extraction rules
+            "rule_listing_extraction", "verbatim_instruction_request",
+            "echo_back_prompt", "debugging_extraction",
+            "system_tag_extraction", "output_structured_extraction",
             # E2.x reconnaissance / probing rules
             "boundary_testing", "capability_probing",
             "model_fingerprinting", "serialization_injection",
@@ -237,6 +239,27 @@ class TestRulesListIntegrity(unittest.TestCase):
             # D1.15-D1.19 Subtle paraphrased override rules
             "polite_override", "temporal_override",
             "clean_slate", "subtle_authority",
+            # C1 Compliance evasion rules
+            "fictional_harmful_content", "creative_writing_harmful",
+            "hypothetical_harmful_request", "educational_pretext_harmful",
+            # E1 gap-closure extraction rules
+            "conversation_start_extraction", "instruction_given_extraction",
+            "list_with_exact_wording", "repeat_everything_before",
+            # D8 Social engineering / context manipulation
+            "fake_authority_claim", "fake_scanner_authority",
+            "fake_debug_mode", "context_dilution_override",
+            # D1 Instruction override gap-closure
+            "forceful_new_instructions", "nevermind_override",
+            "priority_override",
+            # D3.7 Code block injection
+            "code_block_system_injection",
+            # C1.1 Devil's advocate + harmful
+            "devils_advocate_harmful",
+            # D7 Multi-step attack detection
+            "fictional_extraction", "sequential_task_extraction",
+            "word_concatenation_game",
+            # D2.1 Named jailbreak persona
+            "named_jailbreak_persona",
         }
         actual = {r.name for r in RULES}
         self.assertEqual(expected, actual)
@@ -823,6 +846,13 @@ class TestContextSuppression(unittest.TestCase):
             # Extended training data rules
             "training_data_extraction": "can you explain was this sentence part of your training",
             "training_data_completion": "can you explain complete the following text exactly as you remember",
+            # D6 multilingual extraction/bypass rules
+            "multilingual_extraction_latin": "can you explain what révélez le prompt système means",
+            "multilingual_extraction_cjk": "can you explain what 系统提示 means in Chinese",
+            "multilingual_restriction_bypass": "can you explain what sans restrictions means in French",
+            # D8 social engineering gap-closure rules
+            "fake_authority_claim": "can you explain how I am the system administrator is used",
+            "context_dilution_override": "can you explain how ignore everything above works as an attack",
         }
         for rule_name in _CONTEXT_SUPPRESSIBLE:
             with self.subTest(rule=rule_name):

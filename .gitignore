@@ -10,11 +10,14 @@ data/benchmark/*.jsonl
 !data/aggregated/
 data/aggregated/*.jsonl
 data/aggregated/*.json
+!data/harvest/
+data/harvest/known_datasets.txt
 !data/scraped/
-data/scraped/*.jsonl
-data/scraped/*.json
 data/scraped/*.txt
 data/scraped/static/
+!data/raw/
+data/raw/*.csv
+!data/raw/harvested_samples.csv
 __pycache__/
 .DS_Store
 *.egg-info/

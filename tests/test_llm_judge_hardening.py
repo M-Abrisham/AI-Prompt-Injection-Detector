@@ -10,6 +10,7 @@ Verifies that:
 All external API calls are mocked -- no network access or API keys required.
 """
 
+import importlib
 import json
 import os
 import sys
@@ -18,9 +19,15 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-pytest.importorskip("groq", reason="groq package not installed -- skipping LLM judge tests")
+# Check if groq is available. The module-level flag is used with
+# @unittest.skipUnless on each test class so that both pytest and the
+# unittest CLI runner handle the skip gracefully (unittest.SkipTest
+# raised at module level is not caught by the unittest loader).
+try:
+    importlib.import_module("groq")
+    _GROQ_AVAILABLE = True
+except ImportError:
+    _GROQ_AVAILABLE = False
 
 # Disable scan timeout for tests (thread/signal workaround).
 # Must be set BEFORE any na0s imports.
@@ -29,24 +36,27 @@ os.environ["SCAN_TIMEOUT_SEC"] = "0"
 # Ensure src is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from na0s.llm_judge import (
-    JUDGE_SYSTEM_PROMPT,
-    JUDGE_INPUT_MAX_CHARS,
-    FEW_SHOT_EXAMPLES,
-    JudgeVerdict,
-    LLMJudge,
-    LLMJudgeWithCircuitBreaker,
-    _patch_few_shot_nonce,
-    _safe_error,
-    _KEY_RE,
-    _CONTROL_RE,
-)
-from na0s.llm_checker import (
-    SYSTEM_PROMPT as CHECKER_SYSTEM_PROMPT,
-    CHECKER_INPUT_MAX_CHARS,
-    LLMChecker,
-    _parse_response as checker_parse_response,
-)
+# Conditional imports -- only import when groq is available to avoid
+# cascading ImportErrors on the groq dependency.
+if _GROQ_AVAILABLE:
+    from na0s.llm_judge import (
+        JUDGE_SYSTEM_PROMPT,
+        JUDGE_INPUT_MAX_CHARS,
+        FEW_SHOT_EXAMPLES,
+        JudgeVerdict,
+        LLMJudge,
+        LLMJudgeWithCircuitBreaker,
+        _patch_few_shot_nonce,
+        _safe_error,
+        _KEY_RE,
+        _CONTROL_RE,
+    )
+    from na0s.llm_checker import (
+        SYSTEM_PROMPT as CHECKER_SYSTEM_PROMPT,
+        CHECKER_INPUT_MAX_CHARS,
+        LLMChecker,
+        _parse_response as checker_parse_response,
+    )
 
 
 # ============================================================================
@@ -92,6 +102,7 @@ def _make_judge(use_few_shot=False):
 # 1. System prompt hardening
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestJudgeSystemPromptHardening(unittest.TestCase):
     """Verify that system prompts contain anti-injection clauses."""
 
@@ -117,6 +128,7 @@ class TestJudgeSystemPromptHardening(unittest.TestCase):
 # 2. _build_messages wrapping and truncation
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestBuildMessagesWrapping(unittest.TestCase):
     """Verify _build_messages wraps input in delimiters and supports nonce."""
 
@@ -168,6 +180,7 @@ class TestBuildMessagesWrapping(unittest.TestCase):
 # 3. Checker input wrapping
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestCheckerInputWrapping(unittest.TestCase):
     """Verify LLMChecker wraps and truncates input."""
 
@@ -223,6 +236,7 @@ class TestCheckerInputWrapping(unittest.TestCase):
 # 4. Nonce verification
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestNonceVerification(unittest.TestCase):
     """Verify nonce generation and verification in LLMJudge.classify()."""
 
@@ -277,6 +291,7 @@ class TestNonceVerification(unittest.TestCase):
 # 5. Cascade passes clean (L0-sanitized) text to judge
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestCascadePassesCleanText(unittest.TestCase):
     """Verify cascade.py passes L0-sanitized text to the LLM judge."""
 
@@ -381,6 +396,7 @@ class TestCascadePassesCleanText(unittest.TestCase):
 # 6. Strict nonce field verification (Gap 1)
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestStrictNonceFieldVerification(unittest.TestCase):
     """Verify _verify_nonce uses JSON field matching, not substring search."""
 
@@ -443,6 +459,7 @@ class TestStrictNonceFieldVerification(unittest.TestCase):
 # 7. Parse response fallback returns UNKNOWN (Gap 2)
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestParseResponseReturnsUnknown(unittest.TestCase):
     """Verify _parse_response returns UNKNOWN on parse failure, not keyword guess."""
 
@@ -513,6 +530,7 @@ class TestParseResponseReturnsUnknown(unittest.TestCase):
 # 8. Checker _parse_response also returns UNKNOWN (Gap 2 in llm_checker.py)
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestCheckerParseResponseReturnsUnknown(unittest.TestCase):
     """Verify llm_checker._parse_response returns UNKNOWN on parse failure."""
 
@@ -559,6 +577,7 @@ class TestCheckerParseResponseReturnsUnknown(unittest.TestCase):
 # 9. API key redaction (Gap 9)
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestAPIKeyRedaction(unittest.TestCase):
     """Verify _safe_error redacts API keys from exception messages."""
 
@@ -625,6 +644,7 @@ class TestAPIKeyRedaction(unittest.TestCase):
 # 10. Few-shot nonce injection (Gap 3)
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestFewShotNonceInjection(unittest.TestCase):
     """Verify _patch_few_shot_nonce injects nonce into assistant examples."""
 
@@ -677,6 +697,7 @@ class TestFewShotNonceInjection(unittest.TestCase):
 # 11. classify_with_consistency voting (Gap 4)
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestConsistencyVoting(unittest.TestCase):
     """Verify classify_with_consistency with MIN_REQUIRED, UNKNOWN filtering,
     fail-safe tie-breaking, and correct confidence calculation."""
@@ -831,6 +852,7 @@ class TestConsistencyVoting(unittest.TestCase):
 # 12. Circuit breaker thread safety (Gap 5)
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestCircuitBreakerThreadSafety(unittest.TestCase):
     """Verify LLMJudgeWithCircuitBreaker is thread-safe."""
 
@@ -937,6 +959,7 @@ class TestCircuitBreakerThreadSafety(unittest.TestCase):
 # 13. Nonce position — at TOP of system prompt (Gap 6)
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestNoncePosition(unittest.TestCase):
     """Verify nonce is prepended (not appended) to the system prompt."""
 
@@ -978,6 +1001,7 @@ class TestNoncePosition(unittest.TestCase):
 # 14. Reasoning control character sanitization (Gap 7)
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestReasoningSanitization(unittest.TestCase):
     """Verify _parse_response strips control characters from reasoning."""
 
@@ -1056,6 +1080,7 @@ class TestReasoningSanitization(unittest.TestCase):
 # 15. Circuit breaker wraps classify_with_consistency (Gap 8)
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestCircuitBreakerConsistency(unittest.TestCase):
     """Verify LLMJudgeWithCircuitBreaker wraps classify_with_consistency."""
 
@@ -1171,6 +1196,7 @@ class TestCircuitBreakerConsistency(unittest.TestCase):
 # 16. NaN/Inf confidence guard in llm_judge._parse_response (P0-2 fix)
 # ============================================================================
 
+@unittest.skipUnless(_GROQ_AVAILABLE, "groq package not installed")
 class TestJudgeConfidenceNanInfGuard(unittest.TestCase):
     """Verify NaN, Inf, -Inf in confidence are caught in llm_judge._parse_response.
 

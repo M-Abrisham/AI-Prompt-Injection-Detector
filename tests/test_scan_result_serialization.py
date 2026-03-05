@@ -33,6 +33,7 @@ class TestScanResultToDict:
             "rejected",
             "rejection_reason",
             "cascade_stage",
+            "embedding_score",
             "elapsed_ms",
         }
         assert set(d.keys()) == expected_keys

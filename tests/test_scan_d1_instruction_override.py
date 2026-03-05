@@ -195,7 +195,6 @@ class TestD1_1_IgnorePrevious(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_set_aside_earlier_guidelines(self):
         """Subtle 'set aside the earlier guidelines' -- soft language.
 

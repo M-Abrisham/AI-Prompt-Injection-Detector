@@ -22,6 +22,9 @@ class ScanResult:
                                    # "weighted", "embedding", "judge",
                                    # "positive_validation", "blocked", or ""
                                    # (empty when produced by predict.scan())
+    embedding_score: float = 0.0   # Layer 5: centroid-based semantic similarity
+                                   # score in [0.0, 0.20].  0.0 when the
+                                   # embedding classifier is not available.
     elapsed_ms: float = 0.0
 
     def to_dict(self) -> dict:

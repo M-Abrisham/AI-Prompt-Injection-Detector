@@ -76,6 +76,7 @@ all = [
 dev = [
     "coverage>=7.0",
     "flake8>=6.0",
+    "groq>=0.4",
     "hypothesis>=6.0",
     "langdetect>=0.1.1",
     "pytest>=7.0",

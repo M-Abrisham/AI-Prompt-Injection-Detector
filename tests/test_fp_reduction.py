@@ -126,7 +126,6 @@ class TestFPReduction_NowSafe(unittest.TestCase):
             "Professional email should be SAFE: " + _fmt(r),
         )
 
-    @unittest.expectedFailure  # FP: 'structural:role_assignment' fires on quoted "Pretend to be..."; harder case requiring context suppression
     def test_waf_flagged_prompt_analysis(self):
         """'Hi team, this prompt was flagged by our WAF...'"""
         r = _scan(

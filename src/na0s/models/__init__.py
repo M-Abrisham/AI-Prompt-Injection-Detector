@@ -24,8 +24,9 @@ import importlib.resources
 # Authoritative SHA-256 hex digests for every bundled pickle file.
 # Update this dict whenever a model is retrained.
 KNOWN_HASHES = {
-    "model.pkl": "5458775d4a6eff0d194d77d1e914b5ffefc803f265f9485f4ca2e7aada2d830f",
-    "tfidf_vectorizer.pkl": "440b41396908baba576c2510a3d17260c67b76c529e326b572107a8067a3ef2b",
+    "model.pkl": "db28b5c8b952c75830a59de63a564dfac70f72fb7fab7a089f90301595491319",
+    "tfidf_vectorizer.pkl": "280c8705936527b5cbbaacb206d13a8f366feb503ba88a4c792515e61c0c0ac4",
+    "model_embedding.pkl": "09209a059188b2417bb79687218b1e6ef10714025a31b1e7283de42dbec15c2e",
 }
 
 

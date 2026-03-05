@@ -60,18 +60,21 @@
 # ---------------------------------------------------------------------------
 
 import logging
+import os
+import re
 import sqlite3
 import threading
 import time
 
 logger = logging.getLogger(__name__)
 
-from .layer0 import layer0_sanitize, register_malicious
+from .layer0 import layer0_sanitize, register_malicious, quick_normalize_concat
 from .layer0.timeout import (
     Layer0TimeoutError,
     SCAN_TIMEOUT,
     with_timeout,
 )
+from .layer1.context import _is_legitimate_roleplay, _has_contextual_framing
 from .layer2 import obfuscation_scan
 from .rules import rule_score_detailed, RULES, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
@@ -97,6 +100,22 @@ try:
     _HAS_STRUCTURAL_FEATURES = True
 except ImportError:
     _HAS_STRUCTURAL_FEATURES = False
+
+# Layer 5: Centroid-based Embedding Classifier — optional import
+# Uses semantic similarity to pre-computed attack pattern centroids.
+# Requires sentence-transformers; degrades gracefully to NoOp if absent.
+try:
+    from .embedding_classifier import get_embedding_classifier
+    _HAS_EMBEDDING_CLASSIFIER = True
+except ImportError:
+    _HAS_EMBEDDING_CLASSIFIER = False
+
+# Runtime toggle: set NA0S_EMBEDDING_ENABLED=0 to disable the embedding
+# classifier even when sentence-transformers / sklearn is installed.
+# Any value other than "0" or "false" (case-insensitive) keeps the default.
+_embedding_env = os.environ.get("NA0S_EMBEDDING_ENABLED", "").strip().lower()
+if _embedding_env in ("0", "false"):
+    _HAS_EMBEDDING_CLASSIFIER = False
 
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
@@ -152,6 +171,56 @@ def _get_cached_models():
 # which is critical for thread-safety in multi-threaded web servers.
 _RULE_SEVERITY = {rule.name: rule.severity for rule in RULES}
 _RULE_SEVERITY["decoded_payload_malicious"] = "critical"
+_RULE_SEVERITY["decoded_escape_malicious"] = "critical"
+
+# ---------------------------------------------------------------------------
+# Literal Unicode escape sequence decoding (D5 — \uXXXX evasion)
+# ---------------------------------------------------------------------------
+_UNICODE_ESCAPE_RE = re.compile(r"\\u([0-9a-fA-F]{4})")
+_MIN_ESCAPE_COUNT = 3
+
+
+def _decode_literal_escapes(text):
+    """Decode literal \\uXXXX sequences and strip non-printable results.
+
+    Returns (decoded_text, had_evasion_escapes) where had_evasion_escapes
+    is True only when non-printable characters were actually decoded.
+    """
+    matches = _UNICODE_ESCAPE_RE.findall(text)
+    if len(matches) < _MIN_ESCAPE_COUNT:
+        return text, False
+
+    def _replace(m):
+        try:
+            return chr(int(m.group(1), 16))
+        except (ValueError, OverflowError):
+            return m.group(0)
+
+    decoded = _UNICODE_ESCAPE_RE.sub(_replace, text)
+
+    non_printable_stripped = 0
+    cleaned = []
+    for ch in decoded:
+        if ch in ("\n", "\r", "\t", " "):
+            cleaned.append(ch)
+        elif ch.isprintable():
+            cleaned.append(ch)
+        else:
+            non_printable_stripped += 1
+
+    result = "".join(cleaned)
+    had_evasion = non_printable_stripped > 0
+    return result, had_evasion
+
+
+# ---------------------------------------------------------------------------
+# Tail scan threshold for context-dilution defense (D8)
+# ---------------------------------------------------------------------------
+_TAIL_SCAN_CHAR_THRESHOLD = 300
+_TAIL_SCAN_CHARS = 200
+
+# Build a lookup from rule name -> technique_ids for technique-family boost.
+_RULE_TECHNIQUE_IDS = {rule.name: rule.technique_ids for rule in RULES}
 
 # ---------------------------------------------------------------------------
 # Chunked analysis for long inputs (D7.1 benign-padding, D8.1 context-flooding)
@@ -191,6 +260,32 @@ def _head_tail_extract(text, head_tokens=_HEAD_TOKENS, tail_tokens=_TAIL_TOKENS)
     return " ".join(head + tail)
 
 
+# ---------------------------------------------------------------------------
+# D7.8 Token concatenation game extraction
+# ---------------------------------------------------------------------------
+_CONCAT_GAME_PATTERN = re.compile(
+    r"(?:word|token|letter|piece)\s+(\d+)\s*[:=]\s*(\w+)",
+    re.IGNORECASE,
+)
+
+
+def _extract_concatenation_game(text):
+    """Extract words from numbered word game patterns and return assembled text.
+
+    Returns the concatenated sentence for rule matching, or empty string
+    if fewer than 3 words found.
+    """
+    matches = _CONCAT_GAME_PATTERN.findall(text)
+    if len(matches) < 3:
+        return ""
+    try:
+        sorted_words = sorted(matches, key=lambda m: int(m[0]))
+    except (ValueError, IndexError):
+        return ""
+    assembled = " ".join(word for _, word in sorted_words)
+    return assembled
+
+
 def predict_prompt():
     """Return (vectorizer, model) — cached after first load.
 
@@ -223,9 +318,9 @@ def predict(text, vectorizer, model):
 
 
 def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
-                       threshold=DECISION_THRESHOLD):
-    """Combine ML confidence, rule severity, obfuscation, and structural
-    features into a composite score.
+                       embedding_score=0.0, threshold=DECISION_THRESHOLD):
+    """Combine ML confidence, rule severity, obfuscation, structural
+    features, and embedding similarity into a composite score.
 
     Parameters
     ----------
@@ -241,6 +336,10 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
         Structural features dict from extract_structural_features().
         When provided, injection-signal features contribute additional
         weight to the composite score.
+    embedding_score : float
+        Layer 5 centroid-based embedding similarity score in [0.0, 0.20].
+        Represents semantic closeness to known attack pattern centroids.
+        Default 0.0 (no embedding signal / model not available).
 
     Returns (label_str, composite_score).
     """
@@ -309,12 +408,15 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
         if structural.get("repetition_score", 0) > 0.3:
             structural_weight += 0.05
 
+    # --- Layer 5: Embedding similarity signal ---
+    embedding_weight = min(embedding_score, 0.20)  # cap at 0.20
+
     # --- Signal co-occurrence boost ---
     boost_score, _boost_reasons = calculate_boost_from_names(
         hits, obs_flags,
     )
 
-    composite = ml_weight + rule_weight + obf_weight + structural_weight + boost_score
+    composite = ml_weight + rule_weight + obf_weight + structural_weight + embedding_weight + boost_score
 
     # --- FP Reduction: ML-only uncertain zone cap ---
     # When ML flags input as malicious with moderate confidence (0.35-0.80)
@@ -345,7 +447,35 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
     #     2+ critical rules, pushing the composite above threshold
     #     naturally via the rule_weight sum.
     if severities_seen & {"critical_content"}:
-        composite = max(composite, 0.60)
+        # When ML independently agrees, saturate to 1.0 — the pattern is
+        # extremely specific (near-zero FP) AND ML confirms, so this is an
+        # unambiguous attack that should be caught at any threshold.
+        if "MALICIOUS" in ml_label and ml_prob_malicious >= 0.6:
+            composite = 1.0
+        else:
+            composite = max(composite, 0.60)
+
+    # --- Critical E1 extraction rule floor ---
+    # When a critical-severity E1 rule fires (e.g., repeat_above,
+    # direct_prompt_request) AND a structural imperative signal is
+    # present, this is strong evidence of a system prompt extraction
+    # attempt.  Floor the composite above threshold.
+    #
+    # This solves the cold-start problem: E1 extraction patterns are
+    # very specific ("repeat the text above verbatim") and combined
+    # with imperative_start (the text IS a command), FP risk is near
+    # zero.  Without this floor, repeat_above scores ~0.40-0.50 due
+    # to ML safe-confidence, requiring FingerprintStore confirmation
+    # that isn't available on first encounter.
+    if severities_seen & {"critical"} and structural_weight > 0.0:
+        _has_e1_critical = any(
+            _RULE_SEVERITY.get(h) == "critical" and any(
+                "E1" in tid for tid in _RULE_TECHNIQUE_IDS.get(h, [])
+            )
+            for h in hits
+        )
+        if _has_e1_critical:
+            composite = max(composite, threshold + 0.01)
 
     # Compute ML safe-confidence once for use by multiple mechanisms below.
     ml_safe_confidence = ml_prob if "SAFE" in ml_label else (1.0 - ml_prob)
@@ -354,7 +484,9 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
     # If ML is confidently safe (>0.8), only medium rules fired, no
     # obfuscation, and no structural injection signals, trust the ML
     # and return SAFE regardless of composite.
-    if (ml_safe_confidence > 0.8
+    # GUARD: threshold=0.0 means "flag everything" — never override.
+    if (threshold > 0.0
+            and ml_safe_confidence > 0.8
             and severities_seen <= {"medium"}
             and not obs_flags
             and structural_weight == 0.0):
@@ -370,7 +502,8 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
     # non-lexical signals when the ML model and L1 rules both agree
     # the input is safe.
     has_decoded_payload = "decoded_payload_malicious" in hits
-    if (ml_safe_confidence > 0.65
+    if (threshold > 0.0
+            and ml_safe_confidence > 0.65
             and rule_weight == 0.0
             and not has_decoded_payload):
         composite = min(composite, threshold - 0.01)
@@ -399,7 +532,9 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
     if structural_weight > 0:
         signal_layers += 1               # L3: structural features
     if ml_prob_malicious > 0.5:
-        signal_layers += 1               # L4/L5: ML classifier
+        signal_layers += 1               # L4: ML classifier (TF-IDF)
+    if embedding_weight > 0:
+        signal_layers += 1               # L5: embedding similarity
 
     has_strong_anchor = bool(
         severities_seen & {"high", "critical", "critical_content"}
@@ -419,6 +554,32 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
         boost = _AGREEMENT_BOOST.get(signal_layers, 0.15)
         composite = min(composite + boost, 1.0)
 
+    # --- Technique-family boost ---
+    # When 2+ rules from the same technique family fire (e.g., two E1 rules
+    # or two D6 rules), the concentrated evidence within one family deserves
+    # an extra boost.  This bridges near-miss scores where each individual
+    # rule adds weight but the composite still falls just short.
+    #
+    # Implementation: group rule hits by their technique ID prefix (D1, D6,
+    # E1, etc.) and add a small boost per family with 2+ hits.
+    # Cap at +0.10 total to avoid over-inflation.
+    # Count unique RULES per technique family (not technique IDs).
+    # A single rule with technique_ids=["D2.1", "D2.2"] should count as
+    # 1 rule in the D2 family, not 2.
+    technique_family_rules: dict = {}
+    for hit_name in hits:
+        for tid in _RULE_TECHNIQUE_IDS.get(hit_name, []):
+            family = tid.split(".")[0] if "." in tid else tid
+            technique_family_rules.setdefault(family, set()).add(hit_name)
+
+    family_boost = 0.0
+    for family, rule_set in technique_family_rules.items():
+        if len(rule_set) >= 2:
+            family_boost += 0.05
+    family_boost = min(family_boost, 0.10)  # cap total family boost
+    if family_boost > 0:
+        composite = min(composite + family_boost, 1.0)
+
     # Clamp composite to [0, 1] — the raw sum of ml_weight + rule_weight +
     # obf_weight + structural_weight can exceed 1.0 when multiple high/critical
     # rules fire simultaneously.  Downstream consumers (ScanResult.risk_score,
@@ -434,7 +595,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     label, prob, l0 = predict(text, vectorizer, model)
 
     if l0.rejected:
-        return label, prob, [], l0, []
+        return label, prob, [], l0, [], {"score": 0.0, "technique_matches": []}
 
     clean = l0.sanitized_text
 
@@ -448,7 +609,71 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
             if rh.name not in hit_names_seen:
                 detailed_hits.append(rh)
                 hit_names_seen.add(rh.name)
+
+    # D5 FIX: Concat-normalized view — strip invisible chars by simple
+    # concatenation (no space insertion) to handle mid-word ZWS splitting.
+    # Also strips combining diacritical marks and replaces braille blank.
+    # Also decodes literal \uXXXX escape sequences.
+    concat_view = quick_normalize_concat(text)
+    _pre_concat_hit_count = len(detailed_hits)
+    if concat_view != clean and concat_view != text:
+        for rh in rule_score_detailed(concat_view):
+            if rh.name not in hit_names_seen:
+                detailed_hits.append(rh)
+                hit_names_seen.add(rh.name)
+    # Track how many rules fired ONLY on concat view (not on clean/raw).
+    # This is evidence of intentional evasion: the attacker hid the payload
+    # behind Unicode tricks or literal escape sequences.
+    _concat_only_hits = len(detailed_hits) - _pre_concat_hit_count
+
     hits = [h.name for h in detailed_hits]
+
+    # --- D7.8 Token concatenation game extraction ---
+    assembled_game = _extract_concatenation_game(clean)
+    if assembled_game:
+        for rh in rule_score_detailed(assembled_game):
+            if rh.name not in hit_names_seen:
+                detailed_hits.append(rh)
+                hit_names_seen.add(rh.name)
+                hits.append(rh.name)
+        X_assembled = vectorizer.transform([assembled_game])
+        if model.predict(X_assembled)[0] == 1:
+            if "decoded_payload_malicious" not in hit_names_seen:
+                hits.append("decoded_payload_malicious")
+                hit_names_seen.add("decoded_payload_malicious")
+
+    # --- D5: Literal Unicode escape sequence decoding ---
+    escape_decoded_text, had_escapes = _decode_literal_escapes(clean)
+    if had_escapes and escape_decoded_text != clean:
+        # Count ALL rules that match the decoded text (including
+        # rules already found on concat view), because escape
+        # decoding + rule match = confirmed evasion.
+        _esc_rule_hits = rule_score_detailed(escape_decoded_text)
+        for rh in _esc_rule_hits:
+            if rh.name not in hit_names_seen:
+                detailed_hits.append(rh)
+                hit_names_seen.add(rh.name)
+                hits.append(rh.name)
+        # Add synthetic critical hit when ML OR any rules fire on the
+        # decoded escape text.  Evasion via literal escape sequences
+        # is strong evidence — the escape decoding itself proves
+        # deliberate obfuscation.
+        _esc_ml_mal = False
+        X_esc = vectorizer.transform([escape_decoded_text])
+        if model.predict(X_esc)[0] == 1:
+            _esc_ml_mal = True
+        if (_esc_ml_mal or len(_esc_rule_hits) > 0) and "decoded_escape_malicious" not in hit_names_seen:
+            hits.append("decoded_escape_malicious")
+            hit_names_seen.add("decoded_escape_malicious")
+
+    # --- D8: Tail scan for context-dilution defense ---
+    if len(clean) > _TAIL_SCAN_CHAR_THRESHOLD:
+        tail = clean[-_TAIL_SCAN_CHARS:]
+        for rh in rule_score_detailed(tail):
+            if rh.name not in hit_names_seen:
+                detailed_hits.append(rh)
+                hit_names_seen.add(rh.name)
+                hits.append(rh.name)
 
     # Layer 3: Structural Features — extract non-lexical signals
     structural = None
@@ -457,6 +682,15 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
             structural = extract_structural_features(clean)
         except Exception:
             structural = None  # graceful degradation
+
+    # Suppress structural role_assignment signal for legitimate roleplay.
+    # "act as a code reviewer" triggers role_assignment (+0.10) but when
+    # _is_legitimate_roleplay() confirms a benign role, suppress it.
+    if structural is not None and structural.get("role_assignment", 0):
+        if _is_legitimate_roleplay(clean) or (
+            _has_contextual_framing(clean) and _is_legitimate_roleplay(text)
+        ):
+            structural.role_assignment = 0
 
     # Obfuscation scan — detect encoded payloads and classify decoded views
     obs = obfuscation_scan(clean)
@@ -505,10 +739,138 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     if decoded_malicious:
         hits.append("decoded_payload_malicious")
 
+    # Layer 5: Centroid-based embedding classifier — optional.
+    # Computes semantic similarity to known attack pattern centroids.
+    # Returns (embedding_score, technique_matches) where embedding_score
+    # is in [0.0, 0.20] and technique_matches is a list of technique IDs.
+    embedding_score = 0.0
+    embedding_technique_matches = []
+    if _HAS_EMBEDDING_CLASSIFIER:
+        try:
+            _emb_clf = get_embedding_classifier()
+            embedding_score, embedding_technique_matches = _emb_clf.classify(clean)
+        except Exception:
+            embedding_score = 0.0
+            embedding_technique_matches = []
+
     label, composite = _weighted_decision(ml_prob=prob, ml_label=label,
                                           hits=hits, obs_flags=obs_flags,
                                           structural=structural,
+                                          embedding_score=embedding_score,
                                           threshold=threshold)
+
+    # --- E1 extraction floor ---
+    # When a critical-severity E1 rule fires AND the embedding classifier
+    # independently matches E1, this is extremely strong evidence of a
+    # system prompt extraction attempt.  The ML model often predicts SAFE
+    # on these because the individual words ("system", "prompt", "what",
+    # "instructions") are common in benign training data, but the rule +
+    # embedding agreement confirms malicious intent.
+    #
+    # Floor at 0.56 (just above the 0.55 threshold) to ensure detection
+    # without inflating scores unnecessarily.
+    #
+    # FP safety: critical E1 rules require extremely specific patterns
+    # (e.g., "what is your system prompt", "exact words in your initial
+    # instructions") that are near-zero FP on benign text.  The embedding
+    # E1 match adds a second independent semantic check.
+    # Check if any critical E1 rule fired (e.g., repeat_above, direct_prompt_request)
+    _has_critical_e1 = False
+    for dh in detailed_hits:
+        if dh.severity == "critical" and any(
+            "E1" in tid for tid in _RULE_TECHNIQUE_IDS.get(dh.name, [])
+        ):
+            _has_critical_e1 = True
+            break
+
+    # Path A: critical E1 rule + embedding E1 match (strongest evidence)
+    if _has_critical_e1 and embedding_technique_matches and "E1" in embedding_technique_matches:
+        if composite < threshold + 0.01:
+            composite = max(composite, threshold + 0.01)
+            label = "MALICIOUS"
+
+    # --- E1 high-severity + FingerprintStore floor ---
+    # When a high-severity E1 rule (e.g., repeat_above, translation_extraction)
+    # fires AND the FingerprintStore independently confirms the text as
+    # known-malicious, this is strong evidence of a system prompt extraction
+    # attempt.  The FingerprintStore match is an independent second signal
+    # that corroborates the rule match.
+    #
+    # This covers the gap where the embedding classifier does NOT match E1
+    # (e.g., the embedding score is below threshold) but the FingerprintStore
+    # does recognize the text from prior malicious registrations.
+    #
+    # FP safety: requires BOTH a high-severity E1 rule (specific patterns
+    # like "repeat the text above verbatim") AND a FingerprintStore match
+    # (text SHA-256 or token pattern previously registered as malicious).
+    if "SAFE" in label and composite < threshold:
+        _fingerprint_confirmed = any(
+            f in l0.anomaly_flags for f in (
+                "known_malicious_exact",
+                "known_malicious_normalized",
+                "known_malicious_token_pattern",
+            )
+        )
+        if _fingerprint_confirmed:
+            _has_high_e1 = False
+            for dh in detailed_hits:
+                if dh.severity in ("high", "critical") and any(
+                    "E1" in tid for tid in _RULE_TECHNIQUE_IDS.get(dh.name, [])
+                ):
+                    _has_high_e1 = True
+                    break
+            if _has_high_e1:
+                composite = max(composite, threshold + 0.01)
+                label = "MALICIOUS"
+
+    # --- D5 Unicode obfuscation signal ---
+    # When Layer 0 detects Unicode evasion (combining diacritics, braille blank,
+    # invisible chars), boost the composite score slightly.
+    _UNICODE_OBFUSCATION_FLAGS = frozenset({
+        "combining_diacritics_stripped",
+        "invisible_chars_found",
+        "unicode_whitespace_normalized",
+        "nfkc_changed",
+        "mixed_script_homoglyphs",
+    })
+    unicode_obf_flags = _UNICODE_OBFUSCATION_FLAGS & set(l0.anomaly_flags)
+    # Also detect literal escape evasion: if concat_view decoded escapes
+    # and is much shorter than original, that's obfuscation evidence.
+    # Ratio < 0.5 means more than half the text was escape sequences.
+    _escape_decoded = (
+        concat_view != text
+        and len(text) > 20
+        and len(concat_view) < len(text) * 0.5
+    )
+    if (unicode_obf_flags and concat_view != text) or _escape_decoded:
+        _n_signals = len(unicode_obf_flags) + (1 if _escape_decoded else 0)
+        unicode_obf_weight = 0.05 if _n_signals == 1 else 0.10
+        composite = min(composite + unicode_obf_weight, 1.0)
+        if composite >= threshold and "SAFE" in label:
+            label = "MALICIOUS"
+    # Concat-only-hit boost: when rules fire exclusively on the decoded
+    # view (not on clean/raw text), the attacker deliberately obfuscated
+    # the payload.  This deserves a stronger signal than normal rules
+    # because evasion + attack pattern = high confidence malicious.
+    if _concat_only_hits > 0 and _pre_concat_hit_count == 0:
+        # All hits came from concat view only — strong evasion evidence.
+        concat_boost = min(_concat_only_hits * 0.10, 0.20)
+        composite = min(composite + concat_boost, 1.0)
+        if composite >= threshold and "SAFE" in label:
+            label = "MALICIOUS"
+
+    # --- Narrative / legitimate-role dampening ---
+    # When no L1 rules fired, no obfuscation, and the text has clear benign
+    # context (narrative frame or legitimate roleplay), ML-only signals are
+    # likely FPs.  Cap score below threshold.
+    from .layer1.context import _NARRATIVE_FRAME
+    if threshold > 0.0 and not detailed_hits and not obs_flags:
+        _is_narrative = bool(_NARRATIVE_FRAME.search(clean))
+        _is_legit_role = _is_legitimate_roleplay(clean) or _is_legitimate_roleplay(text)
+        if _is_narrative or _is_legit_role:
+            composite = min(composite, threshold - 0.01)
+            if "MALICIOUS" in label:
+                label = "SAFE"
 
     # --- FP Reduction: Safe content score ---
     # Subtract a small safe-content bonus when the input matches
@@ -538,7 +900,13 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
         except (sqlite3.Error, OSError) as e:
             logger.warning("FingerprintStore registration failed: %s", e)
 
-    return label, composite, hits, l0, detailed_hits
+    # Pack embedding results for scan() to consume.
+    embedding_info = {
+        "score": embedding_score,
+        "technique_matches": embedding_technique_matches,
+    }
+
+    return label, composite, hits, l0, detailed_hits, embedding_info
 
 
 def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
@@ -566,7 +934,7 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
         vectorizer, model = predict_prompt()
 
     try:
-        label, prob, hits, l0, detailed_hits = with_timeout(
+        label, prob, hits, l0, detailed_hits, embedding_info = with_timeout(
             classify_prompt,
             SCAN_TIMEOUT,
             text, vectorizer, model, threshold,
@@ -625,6 +993,26 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
         for tid in _RULE_TECHNIQUE_IDS.get(hit_name, []):
             if tid not in technique_tags:
                 technique_tags.append(tid)
+
+    # Layer 5: Merge embedding technique matches into technique_tags.
+    # The embedding classifier detects technique categories (D1, D2, E1, ...)
+    # via semantic similarity to attack pattern centroids.  These are broader
+    # than L1 rule technique IDs (e.g., "D1" vs "D1.1") but still useful for
+    # taxonomy attribution when no specific L1 rule fired.
+    #
+    # GUARD: Only merge embedding technique tags when the result is malicious.
+    # Embedding similarity can produce low-confidence matches on benign text
+    # (e.g., "What is the capital of France?" matching E2 centroid because
+    # of shared "What is..." question structure).  Adding technique tags to
+    # safe results creates confusing false-positive metadata.
+    if is_mal:
+        for emb_tid in embedding_info.get("technique_matches", []):
+            if emb_tid not in technique_tags:
+                technique_tags.append(emb_tid)
+
+    # Add embedding signal to rule_hits for visibility in ScanResult
+    if embedding_info.get("score", 0) > 0:
+        hits.append("embedding_similarity")
 
     # Chunked analysis for long inputs -- detect buried payloads
     word_count = len(l0.sanitized_text.split())
@@ -827,6 +1215,8 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
         "timeout_html": "A1.1",
         "timeout_tokenize": "A1.1",
         "timeout_pipeline": "A1.1",
+        # D5: Literal Unicode escape sequence decoding
+        "decoded_escape_malicious": "D5",
     }
     for flag in list(l0.anomaly_flags) + hits:
         mapped = _L0_FLAG_MAP.get(flag)
@@ -911,6 +1301,7 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
         ml_confidence=round(prob, 4),
         ml_label="malicious" if "MALICIOUS" in label else "safe",
         anomaly_flags=l0.anomaly_flags,
+        embedding_score=round(embedding_info.get("score", 0.0), 4),
     )
     result.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
     return result
@@ -928,7 +1319,7 @@ if __name__ == "__main__":
 
     print("\n--- Prompt Injection Detector ---\n")
     for prompt in test_prompts:
-        label, confidence, hits, l0, _detailed = classify_prompt(prompt, vectorizer, model)
+        label, confidence, hits, l0, _detailed, _emb_info = classify_prompt(prompt, vectorizer, model)
 
         if l0.rejected:
             print("BLOCKED: {0} | reason: {1}".format(prompt[:50], l0.rejection_reason))

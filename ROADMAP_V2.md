@@ -1,10 +1,4 @@
-# AI Prompt Injection Detector — Updated Roadmap V2
-
-**Generated**: 2026-02-14 (Batch 1-6 audit completed 2026-02-14)
-**Branch**: feature/probe-architecture
-**Audit Scope**: Full codebase audit (17 layers + Vision layer) with code review + external research
-
----
+# Na0s — Roadmap
 
 ## Architecture Overview
 
@@ -17,13 +11,8 @@ L11 Supply Chain | L12 Probes | L13 Dataset | L14 CI/CD | L15 Threat Intel
 L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxonomy Automation
 ```
 
-**Critical Finding (RESOLVED 2026-02-14)**: 6 major components were orphaned but have now ALL been wired into the pipeline:
-`structural_features.py` (into predict.py), `predict_embedding.py` (into cascade.py), `positive_validation.py` (into cascade.py), `output_scanner.py` (into cascade.py), `canary.py` (into cascade.py), `llm_checker.py` (into cascade.py)
-
-**6-Track Gap Closure Sprint (2026-02-28)**: Closed 6 detection gaps in a single sprint, flipping **24 `@expectedFailure` tests to passing** (152 → 128 xfails). New detectors: `recon_detector.py` (E2.1-E2.5), `privacy_probe_detector.py` (P1.1-P1.6), `context_manipulation_detector.py` (D8 positional risk), `subtle_override_rules.py` (D1.15-D1.19). FP reduction: ML confidence zone cap + safe content scoring + content-type aware entropy. Combined obfuscation: encoding chain depth/diversity scoring. 15 new rules wired into rules_registry.py (81 total). 171 new unit tests + 10 `@expectedFailure` decorators removed. Security audit: all `re.compile()` → `safe_compile()`, 50K input caps, conversation_history capped. Final regression: **4901 passed, 0 failed, 128 xfailed**.
-
 | Track | Scope | New Files | Rules | Tests |
-| --- | --- | --- | --- | --- |
+| ----- | ----- | --------- | ----- | ----- |
 | A: E2 Recon | 5 probe categories (E2.1-E2.5), stateless + stateful modes | `recon_detector.py` | 5 | 39 |
 | B: P1 Privacy | 6 probe categories (P1.1-P1.6), PII-aware severity escalation | `privacy_probe_detector.py` | 6 | 38 |
 | C: FP Reduction | ML confidence zone cap, safe content scoring, content-type entropy | `safe_content.py` | 0 | 26 |
@@ -34,18 +23,45 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 
 ---
 
-## Layer 0: Input Sanitization & Gating
+## Progress Overview
+
+| Layer | Progress | Done/Total | Status |
+| --- | --- | --- | --- |
+| **L0** Input Sanitization | `████████████████████` | **58/58** | COMPLETE |
+| **L1** Rules Engine | `████████████████████` | **53/53** | COMPLETE |
+| **L2** Obfuscation | `███████████████████░` | **39/41** | 95% |
+| **L3** Structural Features | `█████████████████░░░` | **18/21** | 86% |
+| **L4** ML Classifier | `█████████████░░░░░░░` | **26/38** | 68% |
+| **L5** Embedding Classifier | `██████████████░░░░░░` | **26/37** | 70% |
+| **L6** Cascade & Voting | `████████████░░░░░░░░` | **20/31** | 65% |
+| **L7** LLM Judge | `██████████████░░░░░░` | **26/37** | 70% |
+| **L8** Positive Validation | `███████████████░░░░░` | **20/26** | 77% |
+| **L9** Output Scanner | `█████████░░░░░░░░░░░` | **13/28** | 46% |
+| **L10** Canary Tokens | `████████░░░░░░░░░░░░` | **10/25** | 40% |
+| **L11** Supply Chain | `██████████░░░░░░░░░░` | **12/24** | 50% |
+| **L12** Probe Architecture | `████░░░░░░░░░░░░░░░░` | **12/55** | 22% |
+| **L13** Dataset Pipeline | `████████░░░░░░░░░░░░` | **17/41** | 41% |
+| **L14** CI/CD & Harness | `███████░░░░░░░░░░░░░` | **8/21** | 38% |
+| **L15** Threat Intel | `█████░░░░░░░░░░░░░░░` | **4/14** | 29% |
+| **L16** Multi-Turn | `███░░░░░░░░░░░░░░░░░` | **3/17** | 18% |
+| **L17** Document Scanning | `░░░░░░░░░░░░░░░░░░░░` | **0/20** | NOT STARTED |
+| **L18** RAG Security | `░░░░░░░░░░░░░░░░░░░░` | **0/18** | NOT STARTED |
+| **L19** Agent / MCP | `░░░░░░░░░░░░░░░░░░░░` | **0/11** | NOT STARTED |
+| **L20** Taxonomy Automation | `█████░░░░░░░░░░░░░░░` | **3/12** | 25% |
+| | | **403/742** | **54%** |
+
+---
+
+## Layer 0: Input Sanitization & Gating — Tasks: 58/58 (COMPLETE)
 
 **Files**: `src/layer0/` (14 files: `__init__.py`, `result.py`, `sanitizer.py`, `validation.py`, `normalization.py`, `encoding.py`, `html_extractor.py`, `tokenization.py`, `input_loader.py`, `mime_parser.py`, `safe_regex.py`, `content_type.py`, `ocr_extractor.py`, `doc_extractor.py`)
 **Tests**: `tests/test_layer0_size_gate.py` (23 tests), `tests/test_unicode_bypass.py` (45 tests), `tests/test_layer0_hypothesis.py` (40 property-based tests), `tests/test_input_loader.py` (48 tests), `tests/test_open_redirect.py` (9 tests), `tests/test_mime_parser.py` (24 tests), `tests/test_safe_regex.py` (33 tests), `tests/test_content_type.py` (107 tests), `tests/test_ocr_extractor.py` (27 tests), `tests/test_doc_extractor.py` (32 tests), `tests/test_pdf_javascript.py` (24 tests)
-**Status**: ~99% complete — all 9 bugs fixed, wired into cascade.py and predict_embedding.py, property-based fuzz testing added, file/URL input loading and MIME parsing added, ReDoS protection added, comprehensive magic-byte content-type detection added, OCR image extraction and document parsing (PDF/DOCX/RTF/XLSX/PPTX) with graceful fallback added (2026-02-14). Security hardening: SSRF, Open Redirect, and TOCTOU (CWE-367) fixes applied to input_loader.py (2026-02-15). Content-type fixes: shebang false-positive narrowed (#!→#!/), Java/Mach-O disambiguation, BMP/ICO secondary validation, 48 embedded_* flags mapped in predict.py (2026-02-15). Unicode Tag Character stego extraction + Variation Selector stego detection added (2026-02-22) — Na0S is the ONLY open-source tool that extracts+scans hidden messages from invisible chars. Resource exhaustion protection integrated (2026-02-22). Hardening pass (2026-02-22): 15 unmapped L0 flags wired into `_L0_FLAG_MAP` (stego, homoglyphs, BOM, timeouts), tiktoken import guarded with `_HAS_TIKTOKEN` for graceful degradation, 38 lines dead code removed from safe_regex.py, debug logging added to 3 silent exception handlers. Config externalization (2026-02-22): all 8 hardcoded thresholds externalized to named constants + `L0_*` env vars with `math.isfinite()` NaN/Inf guard, all test gaps closed (encoding.py 46 tests, html_extractor.py 73 tests, tokenization.py 60 tests incl. concurrent FingerprintStore stress). **Layer 0 is 100% complete.** 940+ tests passing.
 
-### Updated Description
+### Description
 Layer 0 is the mandatory first gate for all input. It validates type/size, normalizes Unicode (NFKC), strips invisible characters, canonicalizes whitespace, extracts safe text from HTML, detects tokenization anomalies via tiktoken, extracts text from images via OCR (EasyOCR/Tesseract), and parses documents (PDF/DOCX/RTF/XLSX/PPTX) with graceful fallback when optional dependencies are missing. Every downstream layer receives sanitized input. Integrated into `predict.py`, `cascade.py`, and `predict_embedding.py` as of 2026-02-14.
 
 ### TODO List
 
-#### DONE
 - [x] `Layer0Result` dataclass with sanitized_text, anomaly_flags, rejected, rejection_reason — `result.py`
 - [x] `layer0_sanitize()` entry point orchestrating all steps — `sanitizer.py`
 - [x] Fail-fast validation: type guard, empty guard, size limits (char + byte, env-configurable) — `validation.py`
@@ -58,7 +74,7 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 - [x] FingerprintStore (SQLite, WAL mode, TTL pruning, LRU eviction) — `tokenization.py`
 - [x] Integration with `predict.py:scan()` — L0 runs before ML/rules
 
-#### FIXES (Bugs found during audit)
+#### Bugs ---> Fixes
 - [x] **BUG-1 (HIGH)**: All-invisible input produces empty sanitized_text without rejection. `validate_input()` runs BEFORE normalization, so `"\u200b\u200b\u200b"` passes empty check then becomes `""` after stripping. **Fix**: Add post-normalization empty check in `sanitizer.py`. ✅ DONE (2026-02-14)
 - [x] **BUG-2 (MEDIUM)**: `_get_default_store()` singleton init is not thread-safe. Race condition on concurrent first access. **Fix**: Add `threading.Lock()`. ✅ DONE (2026-02-14)
 - [x] **BUG-3 (LOW)**: `FingerprintStore.check()` uses `.format(col)` for SQL column names. Not exploitable today (hardcoded cols) but fragile. **Fix**: Add column name whitelist assertion. ✅ DONE (2026-02-14)
@@ -68,8 +84,6 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 - [x] **BUG-7 (MEDIUM)**: `register_malicious()` in predict.py is called with raw text, not sanitized text. Fingerprint lookups happen on post-normalization text. Mismatch means obfuscated variants don't get fingerprint matches. ✅ DONE (2026-02-14)
 - [x] **BUG-8 (LOW)**: `cascade.py` does NOT call `layer0_sanitize()` — returns `l0_stub`. All cascade input is unsanitized. ✅ DONE (2026-02-14)
 - [x] **BUG-9 (LOW)**: `predict_embedding.py` does NOT call `layer0_sanitize()` — embedding model receives raw input. ✅ DONE (2026-02-14)
-
-#### NEW (Discovered by research, not in original roadmap)
 - [x] **ftfy integration** for mojibake repair (fixes broken Unicode from encoding mismatches). Pure Python, complements NFKC. **Effort**: Easy. `pip install ftfy`, call `ftfy.fix_text()` before NFKC. ✅ DONE (2026-02-17) — Added as Step 0 in normalization.py (before NFKC), graceful fallback if not installed, `fix_character_width=False` to avoid NFKC overlap, `mojibake_repaired` anomaly flag, 22 tests in test_ftfy_integration.py. Also includes workarounds for ftfy upstream bugs: #222 (string-start boundary fix), #149 (post-ftfy integrity validation against wrong corrections), version pinned to `>=6.2,<7` (6.2 fixes critical #202 Cyrillic bug).
 - [x] **Cyrillic homoglyph confusable mapping (D5.3)** using Unicode TR39 `confusables.txt` data. ✅ DONE (2026-02-18) — Zero-dependency implementation: 75-entry curated mapping (Cyrillic→Latin, Greek→Latin, Armenian→Latin) in normalization.py. Per-word mixed-script detection preserves legitimate multilingual text (pure Cyrillic/Greek untouched). Added as Step 1.5 in normalize_text() (after NFKC, before invisible strip). `mixed_script_homoglyphs` anomaly flag. 107 tests in test_homoglyph_detection.py. 12 `@expectedFailure` tests promoted to passing across C1, D4, D7, D8, E2, P1 categories.
 - [x] **Unicode Tag Characters stego (U+E0001-U+E007F)** — invisible chars that map 1:1 to ASCII. `_extract_tag_stego()` added to normalization.py Step 1.9 (before invisible strip). Decoded payload appended to sanitized text for downstream scanning. Anomaly flag `unicode_tag_stego` + `source_metadata["tag_stego_decoded"]`. 31 tests. Na0S is the ONLY open-source tool that extracts+scans hidden tag messages (all competitors only strip). ✅ DONE (2026-02-22)
@@ -80,9 +94,6 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 - [x] **tiktoken import guard** — bare `import tiktoken` crashed all of Layer 0 when tiktoken not installed. Wrapped in `try/except ImportError` with `_HAS_TIKTOKEN` sentinel, matching the pattern used by all other optional deps. Graceful degradation: tokenization checks return empty flags instead of crashing. 10 tests in `test_tiktoken_guard.py`. ✅ DONE (2026-02-22)
 - [x] **safe_regex.py dead code removal** — removed 38 lines of orphaned `ProcessPoolExecutor` infrastructure (`_regex_worker()`, `_PROCESS_POOL`, `_get_process_pool()`) that was never called after SIGALRM refactor. ✅ DONE (2026-02-22)
 - [x] **Silent exception logging** — added `logger.debug(..., exc_info=True)` to 3 silent `except Exception: pass` blocks in `ocr_extractor.py` (tesseract confidence), `content_type.py` (base64 decode), `resource_guard.py` (HTML depth). No behavior change, only observability. ✅ DONE (2026-02-22)
-
-#### NEW (Discovered by 2026-02-15 content_type.py audit + competitive research)
-
 ##### content_type.py Bugs & Improvements
 - [x] **BUG-CT-1 (HIGH): Shebang false positive** — `b"#!"` signature is only 2 bytes; any text starting with `#!` gets rejected as executable. **Fix**: Change to `b"#!/"` (3 bytes). **Priority**: P1. **Effort**: Trivial. DONE (2026-02-15)
 - [x] **BUG-CT-2 (MEDIUM): Java class vs Mach-O Universal** — `\xca\xfe\xba\xbe` always classified as `java_class`, but also matches Mach-O fat binary. Both CRITICAL/reject, so no security gap — cosmetic. **Fix**: Check bytes 6-7 (Java major version 45-66) to disambiguate. **Priority**: P3. **Effort**: Easy. DONE (2026-02-15)
@@ -92,23 +103,23 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 - [x] **Add XZ/LZMA archive signatures** — `b"\xfd7zXZ\x00"` for XZ, `b"\x5d\x00\x00"` for LZMA. Relevant given xz-utils supply chain attack. **Priority**: P3. **Effort**: Trivial. DONE (2026-02-15) — Added XZ and LZMA to _SIGNATURES (HIGH tier, embedded_archive), mapped embedded_xz/embedded_lzma to M1.4 in _L0_FLAG_MAP. Tests: test_xz_detected, test_lzma_detected.
 - [x] **Polyglot file detection** — After primary format detection at offset 0, scan for secondary magic bytes at common polyglot offsets (JPEG+ZIP, PDF+ZIP). Flag `polyglot_detected`. **Priority**: P2. **Effort**: Medium. DONE (2026-02-15) — Added _check_polyglot() function; refactored detect_content_type() to use result-variable pattern; checks for embedded PK/ZIP and %PDF signatures after primary match; upgrades tier to HIGH on polyglot. Mapped polyglot_detected to M1.4. Tests: test_polyglot_pdf_zip, test_polyglot_jpeg_zip, test_polyglot_png_zip, test_non_polyglot_pdf, test_non_polyglot_jpeg, test_polyglot_tier_upgrade.
 
-##### Content-Type Security (from competitive research)
+##### Content-Type Security
 - [x] **Content-type mismatch detection** — Compare declared type (HTTP `Content-Type` header / file extension) vs detected type (magic bytes). Flag `content_type_mismatch` when they disagree (e.g., declared `text/plain` but contains PDF bytes). **Priority**: P1. **Effort**: Low. File: `sanitizer.py`. **DONE**: Implemented `_check_content_type_mismatch()` with MIME family mapping (text/document/image/audio/video/archive/executable). Generic types like `application/octet-stream` are excluded. Mapped to technique `M1.4` in predict.py. 41 tests in `test_content_type_mismatch.py`.
 - [x] **Base64 decode + re-scan pipeline** — When `base64_blob_detected` or `data_uri_detected`, decode the blob and run `detect_content_type()` on decoded bytes. Adds `base64_hidden_{type}` flags (executable/document/image/archive/audio/video). Safety limits: max 1.5 MB encoded / 1 MB decoded. CRITICAL-tier hidden content gets `base64_hidden_executable`. Mapped in predict.py `_L0_FLAG_MAP`. 12 new tests. Files: `content_type.py` (`_decode_and_rescan()`, `sniff_binary()`), `predict.py`. DONE (2026-02-16)
 - [x] **EXIF/XMP metadata extraction from images** — ✅ DONE (2026-02-18). Security audit found 4 bugs: BUG-1 (HIGH) wrong tag ID for XPSubject (40093=XPAuthor not XPSubject), BUG-2 (MEDIUM) JIS charset not handled, BUG-3 (MEDIUM) XMP CDATA silently dropped, BUG-4 (LOW) only first rdf:li language captured. All fixed. Added 6 new EXIF tags (Artist, Copyright, Software, DocumentName, XPKeywords, real XPSubject). Added CDATA+multi-language XMP support, JIS/Undefined charset handling, 64KB metadata size limit. 88 tests in test_exif_xmp_extraction.py + 27 in test_ocr_extractor.py.
 - [x] **PDF JavaScript detection** — Byte-level scan for `/JS`, `/JavaScript`, `/OpenAction`, `/AA`, `/Launch`, `/SubmitForm`, `/ImportData` in PDF streams with regex token-boundary validation to prevent false positives. Flags: `pdf_javascript`->M1.4, `pdf_auto_action`->M1.4, `pdf_external_action`->E1. Integrated into `extract_text_from_document()` and `_try_binary_extraction()`. 24 tests. File: `doc_extractor.py`. DONE (2026-02-15)
 
-##### Linguistic & Multilingual (from competitive research)
+##### Linguistic & Multilingual
 - [x] **Language detection for multilingual routing** — Uses `langdetect` with deterministic seed + Unicode script heuristic fallback for short text. Flags `non_english_input` (D6) and `mixed_language_input` (D6.3). Graceful degradation when langdetect not installed. File: `language_detector.py`. DONE (2026-02-15)
 - [x] **PII/secrets pre-screening** — Pure-regex PII/secrets scanner with Luhn-validated credit cards (Visa/MC/Amex/Discover), SSN with invalid range exclusion, emails, US phones, AWS keys, GitHub tokens, generic hex/base64 with entropy filter, IPv4. All values redacted. File: `pii_detector.py`. DONE (2026-02-15)
 - [x] **Chunked ML analysis for long inputs** — HEAD+TAIL and CHUNKS strategies for inputs >512 words. `_chunk_text()` with overlap + `_head_tail_extract()`. Runs `rule_score` on each chunk, merges hits, boosts score for buried payloads. File: `predict.py`. DONE (2026-02-15)
 
-##### Security Hardening (input_loader.py) — DONE 2026-02-15
+##### Security Hardening (input_loader.py) 
 - [x] **SSRF protection** — DNS-resolve hostnames before connection, block private/loopback/link-local/reserved/metadata IPs via `_is_private_ip()` + `_validate_url_target()`. ✅ DONE (2026-02-15)
 - [x] **Open Redirect protection** — Custom `_SafeRedirectHandler` validates each redirect hop for scheme, HTTPS-only, private IP, max count. Replaced `urlopen` with `_build_safe_opener()`. ✅ DONE (2026-02-15)
 - [x] **TOCTOU race condition fix (CWE-367)** — Atomic `os.open(O_NOFOLLOW)` + fd-based `os.fstat()` validation. Single-fd flow: open→validate→size-check→read. Removed `os.path.exists()` pre-check. ✅ DONE (2026-02-15)
 
-#### REMAINING (From original roadmap, not yet done)
+#### REMAINING 
 - [x] **Expand magic byte detection** in `html_extractor.py` — Add DOCX/XLSX (PK header), PNG, JPEG, GIF, WAV, MP3, FLAC, OGG, WebM signatures. Source: IM0003 Coverage Gap #24. **Priority**: P2. **Effort**: Easy. — DONE (2026-02-14): Created content_type.py with 35+ signatures across 6 tiers
 - [x] **Timeout enforcement** — Cross-platform timeout via `concurrent.futures.ThreadPoolExecutor`. **Priority**: P0. — DONE (2026-02-15): timeout.py module with per-step timeouts (normalize, html, tokenize), pipeline-level timeout (30s) in sanitizer.py, scan-level timeout (60s) in predict.py; all configurable via env vars; 24 tests (unit + integration)
 - [x] **ReDoS protection** — Current regex patterns are safe but no systemic protection. Consider `google-re2` for linear-time guarantees as rules scale. **Priority**: P1. — DONE (2026-02-14): safe_regex.py with optional re2, SIGALRM timeout protection, pattern auditing; rules.py and cascade.py updated to use safe_regex; 33 tests
@@ -121,7 +132,7 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 - [x] **CI/CD pipeline** — DONE (2026-02-14): GitHub Actions CI with Python 3.9-3.12 matrix, flake8 linting, coverage reporting, PR checks, smoke tests (13 tests). **Priority**: P0.
 - [x] **Resource exhaustion protection** — Integrated orphaned `resource_guard.py` into pipeline. Now enforced: input size (50K chars/200KB), HTML depth (100), expansion ratio (10x), memory budget (50MB), rate limiting (100 req/60s). Added HTML depth pre-check in `html_extractor.py`. Added `MAX_CHUNKS=20` in predict.py to cap ML inference passes. All limits env-configurable. 38 tests (26 resource + 12 chunks). ✅ DONE (2026-02-22)
 
-### ~~Hardcoded Values to Externalize~~ ✅ ALL DONE (2026-02-22)
+### ~~Hardcoded Values to Externalize~~ ✅ ALL DONE
 All 8 values externalized into named constants with `L0_*` env var overrides. Safe parsing with `math.isfinite()` NaN/Inf guard + range validation. 42 tests in `test_l0_config.py`.
 
 | Value | Env Var | Default | Status |
@@ -135,7 +146,6 @@ All 8 values externalized into named constants with `L0_*` env var overrides. Sa
 | ~~`_MIN_CONFIDENCE`~~ | `L0_MIN_ENCODING_CONFIDENCE` | 0.5 | ✅ DONE |
 | ~~Window size~~ | `L0_WINDOW_SIZE` | 50 | ✅ DONE |
 
-### ~~Test Gaps~~ ✅ ALL DONE (2026-02-22)
 - ~~`encoding.py` — zero dedicated test coverage~~ ✅ DONE — 46 tests in `test_encoding.py` (BOM detection, chardet fallback, low confidence, decode chain, anomaly flags, edge cases)
 - ~~`html_extractor.py` — only 2 tests~~ ✅ DONE — 73 tests in `test_html_extractor.py` (tag stripping, hidden content, script/style, comments, BOM, malformed HTML, depth limit, void elements, anomaly flags)
 - ~~`tokenization.py` — zero dedicated test coverage~~ ✅ DONE — 60 tests in `test_tokenization.py` (fingerprint computation, anomaly detection, CJK exemption, FingerprintStore CRUD, LRU eviction, TTL, WAL mode, edge cases)
@@ -149,11 +159,11 @@ All 8 values externalized into named constants with `L0_*` env var overrides. Sa
 
 ---
 
-## Layer 1: IOC / Signature Rules Engine
+## Layer 1: IOC / Signature Rules Engine — Tasks: 51/53 (96%)
 
 **Files**: `src/na0s/layer1/` (10 modules: `__init__.py`, `analyzer.py`, `rules_registry.py`, `context.py`, `paranoia.py`, `result.py`, `unicode_defense.py`, `ioc_extractor.py`, + backward-compat shims for `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py` that re-export from `layer2/`)
 **Tests**: `tests/test_rules.py` (269 tests), `tests/test_ioc_extractor.py` (73 tests), `tests/test_whitespace_stego.py` (43 tests), `tests/test_ascii_art_detector.py` (67 tests), `tests/test_syllable_splitting.py` (73 tests)
-**Status**: Active — 81 rules covering ~45+ technique IDs with paranoia level system (PL1-PL4), 6 bug fixes applied, 5 novel industry-first rules, angle bracket homoglyph bypass protection, destructive action detection, 4 new rules (D1.14, D1.19, D6 Latin, D6 CJK), IOC refang alt_view, 20-language multilingual detection, SNOW whitespace stego detection (first-in-class), 5-signal ASCII art detection (first-in-class), syllable-splitting de-hyphenation with 25 Unicode dashes (first-in-class), 8 audit bug fixes. **Gap Closure Sprint (2026-02-28)**: +15 rules from 3 new detector modules (recon_detector.py, privacy_probe_detector.py, subtle_override_rules.py), 81 total rules with 0 name collisions
+**Status**: Active — **110 rules** covering 10+ technique categories with paranoia level system (PL1-PL4). **Canary eval: 100% TPR, 100% TNR, F1=1.000 on 200-sample holdout set (2026-03-04).** Gap Closure Sprint Wave 6-7 (2026-03-04): +5 new rules (D3.7 code_block_system_injection, C1.1 devils_advocate_harmful, D7.6 fictional_extraction, D7.7 sequential_task_extraction, D7.8 word_concatenation_game), D7.8 token concatenation game extractor (`_extract_concatenation_game()`), D5 literal Unicode escape sequence decoding (`_decode_literal_escapes()`), D8 tail scan for context dilution defense, `direct_prompt_request` adjective fix, `dismiss_prior_context` pattern widening, `context_dilution_override` "ignore everything above" variant, `entire_input_base64` obfuscation flag.
 
 ### Updated Description
 Layer 1 is a regex-based signature engine that detects known attack patterns. Has 81 pre-compiled rules (5 original + 13 roadmap + 5 novel + 10 E1/P1 extraction + 7 O1/O2 content-safety + 1 worm + 1 destructive + 4 D1-subtle-overrides + 5 E2-reconnaissance + 6 P1-privacy + 4 RAG + 4 medium-priority + 16 earlier) with paranoia level filtering (PL1-PL4, env-configurable via RULES_PARANOIA_LEVEL). All 6 bugs fixed (technique mismap, duplicate eval, severity underrating, DRY violation, raw-text-only, pattern divergence). Novel industry-first detectors: summarization extraction, authority escalation, constraint negation, meta-referential probing, gaslighting. Context-aware suppression (educational/question/quoting/code/narrative frames) prevents FPs on legitimate security discussions — critical-severity rules (data_exfiltration_pii, serialization_injection, training_data_extraction) are never suppressed. All patterns are ReDoS-safe via `safe_compile()`. Rules are integrated into both `predict.py` and `cascade.py` with dual-pass (raw + sanitized text). Unicode angle bracket homoglyph folding (12 variants) protects all XML/chat-template rules from bypass.
@@ -240,7 +250,7 @@ Layer 1 is a regex-based signature engine that detects known attack patterns. Ha
 
 ---
 
-## Layer 2: Obfuscation Detection & Decoding
+## Layer 2: Obfuscation Detection & Decoding — Tasks: 39/41 (95%)
 
 **Files**: `src/na0s/layer2/` (7 modules: `__init__.py`, `obfuscation.py`, `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py`, `ascii_art_detector.py`, `syllable_splitting.py`)
 **Backward-compat shims**: `src/na0s/obfuscation.py` (re-exports from layer2), `src/na0s/layer1/{morse_code,numeric_decode,whitespace_stego,ascii_art_detector,syllable_splitting}.py` (re-exports from layer2)
@@ -323,7 +333,7 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 
 ---
 
-## Layer 3: Structural Feature Extraction
+## Layer 3: Structural Feature Extraction — Tasks: 18/21 (86%)
 
 **Files**: `src/na0s/structural_features.py`
 **Tests**: `tests/test_structural_features.py` (135 tests)
@@ -390,7 +400,7 @@ Layer 3 extracts 24 numeric features from input text that characterize prompt st
 
 ---
 
-## Layer 4: ML Classifier (TF-IDF + Logistic Regression)
+## Layer 4: ML Classifier (TF-IDF + Logistic Regression) — Tasks: 26/38 (68%)
 
 **Files**: `src/predict.py` (223 lines), `src/model.py` (66 lines), `src/features.py` (38 lines), `src/dataset.py` (30 lines), `src/process_data.py` (43 lines), `src/scan_result.py`
 **Tests**: `tests/test_predict_pipeline.py` (12 tests)
@@ -482,11 +492,11 @@ scan(text)
 
 ---
 
-## Layer 5: Embedding Classifier
+## Layer 5: Embedding Classifier — Tasks: 27/37 (73%)
 
-**Files**: `src/model_embedding.py`, `src/features_embedding.py`, `src/predict_embedding.py`
+**Files**: `src/model_embedding.py`, `src/features_embedding.py`, `src/predict_embedding.py`, `src/na0s/embedding_classifier.py`
 **Tests**: `tests/test_predict_embedding.py` (59 tests)
-**Status**: Implemented and WIRED into cascade.py with 60/40 blending (2026-02-14), L0 sanitization added. All 9 bugs (BUG-L5-3 to FIX-L5-11) fixed (2026-02-21): ScanResult wrapper, decoded-view confidence threshold, dual-pass rules, encode error handling, configurable batch_size. 59 tests passing.
+**Status**: Implemented and WIRED into cascade.py with 60/40 blending (2026-02-14), L0 sanitization added. All 9 bugs (BUG-L5-3 to FIX-L5-11) fixed (2026-02-21): ScanResult wrapper, decoded-view confidence threshold, dual-pass rules, encode error handling, configurable batch_size. 59 tests passing. **Centroid-based embedding classifier** (`embedding_classifier.py`) added (2026-03-05): zero-shot semantic similarity against attack-pattern centroids using `all-MiniLM-L6-v2`; falls back to TF-IDF centroid classifier when `sentence-transformers` is unavailable. Thresholds configurable via `NA0S_EMBEDDING_MATCH_THRESHOLD`, `NA0S_EMBEDDING_SCORE_THRESHOLD`, `NA0S_EMBEDDING_MAX_SCORE` env vars.
 
 ### Updated Description
 Layer 5 is an alternative ML classifier using sentence-transformer embeddings (`all-MiniLM-L6-v2`, 384-dim). Features are dense vector representations instead of sparse TF-IDF. Classifier is isotonic-calibrated Logistic Regression (default) or MLP (256, 128 hidden layers). The module has its own parallel pipeline: embed → classify → rule matching → obfuscation scan → weighted decision. Wired into cascade.py as of 2026-02-14 with 60/40 blending alongside weighted classifier. L0 sanitization integrated. Returns an incompatible 4-tuple instead of `ScanResult`. Does NOT use Layer 3 structural features.
@@ -559,7 +569,7 @@ Layer 5 is an alternative ML classifier using sentence-transformer embeddings (`
 
 ---
 
-## Layer 6: Cascade & Weighted Voting
+## Layer 6: Cascade & Weighted Voting — Tasks: 20/31 (65%)
 
 **Files**: `src/cascade.py` (405 lines)
 **Tests**: None
@@ -656,7 +666,7 @@ CascadeClassifier.classify(text)
 
 ---
 
-## Layer 7: LLM Judge
+## Layer 7: LLM Judge — Tasks: 26/37 (70%)
 
 **Files**: `src/llm_judge.py` (386 lines), `src/llm_checker.py` (87 lines, deprecated)
 **Tests**: `tests/test_llm_judge_hardening.py` (67 tests), `tests/test_llm_checker.py` (73 tests)
@@ -738,7 +748,7 @@ Layer 7 provides semantic evaluation of ambiguous prompts using an LLM as a judg
 
 ---
 
-## Layer 8: Positive Validation
+## Layer 8: Positive Validation — Tasks: 20/26 (77%)
 
 **Files**: `src/positive_validation.py` (467 lines)
 **Tests**: None
@@ -805,7 +815,7 @@ Layer 8 validates that input looks like a legitimate user prompt through 5 multi
 
 ---
 
-## Layer 9: Output Scanner
+## Layer 9: Output Scanner — Tasks: 13/28 (46%)
 
 **Files**: `src/output_scanner.py` (422 lines)
 **Tests**: `tests/test_output_scanner.py` (85 tests), `tests/test_output_scanner_redaction.py` (14 tests)
@@ -874,7 +884,7 @@ Layer 9 scans LLM **output** (post-generation) to catch injections that evade in
 
 ---
 
-## Layer 10: Canary Tokens
+## Layer 10: Canary Tokens — Tasks: 10/25 (40%)
 
 **Files**: `src/canary.py` (340 lines)
 **Tests**: None
@@ -929,7 +939,7 @@ Layer 10 plants decoy tokens (honeytokens) in system prompts. If a canary appear
 
 ---
 
-## Layer 11: Supply Chain Integrity
+## Layer 11: Supply Chain Integrity — Tasks: 12/24 (50%)
 
 **Files**: `src/safe_pickle.py` (162 lines), `scripts/safe_yaml.py` (77 lines)
 **Tests**: `tests/test_safe_pickle.py` (17 tests), `tests/test_safe_yaml.py` (80 tests)
@@ -983,7 +993,7 @@ Layer 11 provides integrity checking for pickle serialization with a 3-tier trus
 
 ---
 
-## Layer 12: Probe Architecture & Taxonomy
+## Layer 12: Probe Architecture & Taxonomy — Tasks: 12/55 (22%)
 
 **Files**: `scripts/taxonomy/` — `_base.py` (395 lines), `_core.py` (127 lines), `_tags.py` (132 lines), `_buffs.py` (126 lines), `__init__.py` (48 lines), 19 category probe files (~5,488 lines total)
 **Tests**: `tests/test_taxonomy_base.py` (70 tests), `test_taxonomy_core.py` (33), `test_taxonomy_tags.py` (32), `test_taxonomy_init.py` (8) — **120 tests total, all passing**
@@ -1069,26 +1079,37 @@ Layer 12 is the adversarial testing framework. Base classes (`Probe`, `Classifie
 
 ---
 
-## Layer 13: Dataset Pipeline
+## Layer 13: Dataset Pipeline — Tasks: 17/41 (41%)
 
-**Files**: `scripts/sync_datasets.py` (237 lines), `scripts/merge_taxonomy_data.py` (113 lines), `scripts/generate_taxonomy_samples.py` (175 lines), `scripts/mine_hard_negatives.py` (513 lines), `scripts/optimize_threshold.py` (272 lines)
+**Files**: `scripts/sync_datasets.py` (251 lines), `scripts/process_data.py` (160 lines), `scripts/validate_data.py` (250 lines), `scripts/integrate_harvest.py` (288 lines), `scripts/deploy_model.py` (87 lines), `scripts/features.py` (39 lines), `scripts/model.py` (67 lines), `scripts/merge_taxonomy_data.py` (113 lines), `scripts/generate_taxonomy_samples.py` (175 lines), `scripts/mine_hard_negatives.py` (513 lines), `scripts/optimize_threshold.py` (272 lines)
+**Workflows**: `.github/workflows/auto-retrain.yml`, `.github/workflows/weekly-harvest.yml`, `.github/workflows/social-scraper.yml`
+**Config**: `data/datasets.yaml` (23 sources), `data/datasets.lock` (SHA versioning)
 **Tests**: None
-**Status**: Implemented — functional pipeline but integration gaps
+**Status**: Functional automated pipeline — 1.9M samples, auto-retrain on schedule, but safety/validation gaps remain
 
 ### Updated Description
-Layer 13 manages the data lifecycle from external source sync through training data preparation. `sync_datasets.py` downloads 3 external datasets (GitHub CSVs + HuggingFace) with SHA-256 freshness checking and lock files. `generate_taxonomy_samples.py` orchestrates all 19 probes to produce ~100K samples with computed metadata (length, tokens, compression, evasion markers). `merge_taxonomy_data.py` combines taxonomy and external samples with text-based deduplication. `mine_hard_negatives.py` identifies false positives and generates supplementary benign samples from 85+ templates. `optimize_threshold.py` computes optimal thresholds via Youden's J, 95%-recall constraint, and F1 maximization with ROC/PR curve export. Total dataset: ~450K rows (250K safe + 200K malicious).
+Layer 13 manages the full data lifecycle: discovery → download → integration → validation → training → deployment. `sync_datasets.py` downloads 23 external datasets (GitHub CSVs + HuggingFace) with SHA-256/commit-SHA freshness checking and lock files. `integrate_harvest.py` bridges harvest/scrape JSONL output into training CSVs. `process_data.py` merges all raw CSVs + JSONLs with MD5 deduplication. `validate_data.py` checks schema, text quality, class balance, duplicates, and label consistency. `features.py` extracts TF-IDF features (10K max). `model.py` trains a calibrated LogisticRegression. `deploy_model.py` copies models to package dir and updates KNOWN_HASHES programmatically. `auto-retrain.yml` orchestrates the full pipeline on schedule (Tuesday 8 AM UTC), after harvest/scraper workflows, or on manual trigger — creating a PR with the retrained model. Total dataset: **1.92M unique samples** (1.13M safe + 789K malicious, 88% accuracy).
 
 ### TODO List
 
 #### DONE
 - [x] Registry-driven sync from `data/datasets.yaml` — SHA-256 hashes, git commit SHAs, lock file — `sync_datasets.py`
-- [x] 3 external sources: jailbreaks.csv (3.6M), safe_prompts.csv (1.9M), hf_safe_prompts.csv (384K)
+- [x] 23 external sources: 14 injection datasets + 9 safe datasets across HuggingFace + GitHub (expanded from 3)
 - [x] Probe-based sample generation with per-sample metadata — `generate_taxonomy_samples.py`
 - [x] Hash-based deduplication within each category (~130K → ~100K unique samples)
 - [x] Text-based merge with taxonomy metadata preservation — `merge_taxonomy_data.py`
 - [x] Hard negative mining: 85+ templates across 4 categories — `mine_hard_negatives.py`
 - [x] Threshold optimization: Youden's J, 95%-recall, F1, ROC/PR curves — `optimize_threshold.py`
-- [x] Combined dataset: ~450K rows in `data/processed/combined_data.csv`
+- [x] Combined dataset: **1.92M unique rows** in `data/processed/combined_data.csv`
+- [x] Auto-retrain GitHub Actions workflow — weekly schedule + `workflow_run` triggers + manual dispatch — `auto-retrain.yml`
+- [x] `deploy_model.py` — copies models to `src/na0s/models/` + updates KNOWN_HASHES via regex replacement
+- [x] `validate_data.py` — schema validation, text quality (min/max length, null bytes), class balance, duplicate detection, label consistency warnings
+- [x] `integrate_harvest.py` — bridges harvest/scrape JSONL → `data/raw/harvested_samples.csv` (text, label) format
+- [x] `process_data.py` rewrite — universal aggregator (globs all CSVs from `data/raw/` + JSONLs from `data/aggregated/` + `data/harvest/`)
+- [x] `sync_datasets.py` crash fix — `except Exception` catch-all prevents single-source failures from blocking remaining downloads
+- [x] Social scraper + weekly harvest workflow fixes (6 bugs: `total_new`→`total_discovered`, `latest_scrape.json`→`scrape_history.json`, CyberSecEval URL, Reddit window, kaggle dep, Twitter warning)
+- [x] Label mapping robustness — bool/string/None type coercion in `sync_datasets.py` (fixes gandalf_rct, jailbreakhub NaN labels)
+- [x] Use `huggingface_hub` API for sync — `dataset_info()` for commit SHA tracking, `load_dataset()` for downloads with config/split support
 
 #### FIXES
 - [ ] **BUG-L13-1 (HIGH)**: Hard negatives not merged into training set — `hard_negatives.csv` generated but never used. **Fix**: Add merge step or output directly to combined_data.
@@ -1096,36 +1117,66 @@ Layer 13 manages the data lifecycle from external source sync through training d
 - [ ] **BUG-L13-3 (MEDIUM)**: No cross-validation in threshold optimization — fits on same data. **Fix**: Add k-fold CV.
 - [ ] **BUG-L13-4 (LOW)**: `sys.maxsize` CSV field size override — memory risk. **Fix**: Use reasonable limit.
 - [ ] **BUG-L13-5 (LOW)**: Merge not idempotent — re-running shifts sample ordering. **Fix**: Sort by text hash before writing.
+- [ ] **BUG-L13-6 (HIGH)**: `social_scraper.py` labels content as injection on single weak regex match (`weak_hits >= 1` → `label=1, confidence=0.40`). A Reddit post mentioning "jailbreak" in benign context gets mislabeled. **Fix**: Require `weak_hits >= 2` or 1 strong signal.
+- [ ] **BUG-L13-7 (MEDIUM)**: `gen_all_datasets.py` output (`data/holdout/`, `data/benchmark/`) never fed into training pipeline. Synthetic samples for D3/D4/D5/D6/A1 exist but model never sees them. **Fix**: Include in `process_data.py` glob paths or merge into `data/raw/`.
 
-#### NEW (Discovered by research)
-- [ ] **Near-duplicate detection** — Use simhash or MinHash for semantically similar duplicates. **Priority**: P1.
-- [ ] **Label validation** — No validation of label distribution, null values, or encoding before training. **Priority**: P1.
-- [ ] **Data versioning (DVC)** — Track dataset versions alongside model versions. **Priority**: P1.
-- [ ] **Active learning** — Identify uncertain samples for human labeling. **Priority**: P2.
-- [ ] **Synthetic augmentation** — LLM-generated paraphrases of existing samples. **Priority**: P2.
+#### NEW (Discovered by research — 2026-03-03)
+
+**Safety & Trust (from security research audit)**:
+- [ ] **Trust tier system** — Classify dataset sources into Tier 1 (verified: Microsoft, Lakera, deepset), Tier 2 (established community), Tier 3 (new discoveries — quarantine required), Tier 4 (social scrape — full validation required). Add `compute_trust_score()` to `weekly_harvest.py`. **Priority**: P0. **Effort**: 0.5d. **Source**: OWASP LLM04:2025, Lakera best practices.
+- [ ] **Canary evaluation set** — Curate 100-200 hand-verified samples (100 injection + 100 benign) never trained on. Evaluate after every retrain; block deployment if accuracy drops below threshold. **Priority**: P0. **Effort**: 1d. **Source**: Lakera PINT benchmark pattern, Anthropic/AISI 2025.
+- [ ] **Quarantine/staging pipeline** — Three-stage promotion: Discovery → `data/quarantine/` (trust score + schema check) → `data/staging/` (label quality + canary eval) → `data/raw/` (production). **Priority**: P1. **Effort**: 2d.
+- [ ] **Cleanlab label quality detection** — Integrate Confident Learning to flag mislabeled samples. Use existing model as base classifier. Route flagged samples to quarantine. **Priority**: P1. **Effort**: 1d. **Source**: Cleanlab v2.9.0 (10K+ GitHub stars).
+- [ ] **Shadow evaluation** — Before promoting new model: train candidate on new data, compare against holdout + canary set, auto-reject if F1 drops >2% or canary accuracy <95%. **Priority**: P1. **Effort**: 1.5d.
+- [ ] **License compliance checking** — Check HF dataset card license field before auto-ingestion. Allowed: MIT, Apache-2.0, CC-BY-4.0, CC0. Blocked: CC-BY-NC, GPL. Unknown: require manual review. **Priority**: P1. **Effort**: 0.5d.
+- [ ] **Model backup before deployment** — `deploy_model.py` should copy old model to `src/na0s/models/model.pkl.bak` before overwriting. **Priority**: P0. **Effort**: 0.5h.
+
+**Dataset Expansion (from dataset maximization research)**:
+- [ ] **30+ new datasets to integrate** — High priority: `allenai/wildjailbreak` (262K, incl. 78K adversarial benign for FP reduction), `qxcv/tensor-trust` (563K human-generated attacks), `nvidia/Aegis-AI-Content-Safety-2.0` (33K multi-label), `TrustAIRLab/in-the-wild-jailbreak-prompts` (15K real-world), `Mindgard/evaded-prompt-injection` (554 adversarial evasion), `walledai/XSTest` (450 FP-focused), `lmsys/toxic-chat` (10K real-world). **Priority**: P1. **Effort**: 2d.
+- [ ] **Attack technique coverage gaps** — 89/150 techniques have 0 training samples. D3 (structural injection), D4 (obfuscation), D5 (Unicode evasion), D6 (multilingual), A1 (adversarial ML) are **100% blind**. **Fix**: Feed `gen_all_datasets.py` synthetic output into training + add targeted real-world datasets. **Priority**: P0. **Effort**: 1d.
+- [ ] **Multilingual injection samples** — Add `evreny/prompt_injection_tr` (Turkish) + back-translation augmentation (EN→DE→EN, EN→FR→EN, etc.) targeting 10 languages × 5K samples = 50K new multilingual samples. Addresses D6 gap (40 expected failures). **Priority**: P1. **Effort**: 2d.
+
+**Quality & Infrastructure (from pipeline gap analysis)**:
+- [ ] **Error handling hardening** — `features.py` and `model.py` crash with no try/except on missing input. Add guards + non-zero exit codes. **Priority**: P0. **Effort**: 0.5d.
+- [ ] **Near-duplicate detection** — Use simhash or MinHash for semantically similar duplicates. **Priority**: P1. **Effort**: 1d.
+- [ ] **Data versioning (DVC)** — Track dataset versions alongside model versions. `dvc add data/processed/combined_data.csv`. **Priority**: P2. **Effort**: 1d.
+- [ ] **Active learning** — Extend `mine_hard_negatives.py` to also mine hard positives (malicious samples the model misses). Use committee disagreement between L4 TF-IDF and L5 embedding models. **Priority**: P2. **Effort**: 2d.
+- [ ] **Synthetic augmentation via LLM** — Use LLM paraphrasing to generate attack variants per taxonomy category. Back-translation for diversity. **Priority**: P2. **Effort**: 3d.
+- [ ] **End-to-end pipeline integration test** — Test full sequence: sync → integrate → process → validate → features → model → deploy. Currently 0 test coverage. **Priority**: P1. **Effort**: 1d.
 
 #### REMAINING (From original roadmap)
-- [ ] **Dataset versioning** — Not implemented. **Priority**: P1.
 - [ ] **Parallel generation** — Single-threaded generation. **Priority**: P2.
-- [ ] **Add `qualifire/benchmark` dataset** to `data/datasets.yaml` registry — 4th HF dataset from original TODO not yet added. **Priority**: P1.
+- [ ] **Add `qualifire/benchmark` dataset** to `data/datasets.yaml` registry. **Priority**: P1.
 - [ ] **Add `datasets` + `huggingface_hub` to `requirements.txt`** — sync_datasets.py uses HF datasets but dependencies not declared. **Priority**: P1.
-- [ ] **Use `huggingface_hub` API for sync** — Current sync uses raw downloads with SHA-256 freshness. Upgrade to `huggingface_hub` library for proper HF API integration (commit SHA tracking, incremental downloads, model card parsing). **Priority**: P2.
 
 ### Test Gaps
-- Zero test coverage for any pipeline script
-- Need tests for: sync integrity, merge idempotency, dedup correctness, threshold output format
+- Zero test coverage for pipeline scripts (validate_data.py, deploy_model.py, integrate_harvest.py, features.py, model.py)
+- Need tests for: sync integrity, merge idempotency, dedup correctness, threshold output format, validation accuracy
 - [ ] **Unit tests for `generate_taxonomy_samples.py`** — metadata computation, deduplication, CSV schema validation, edge cases (empty category, 0 samples). **Priority**: P1. **Effort**: 4 hours.
 - [ ] **Unit tests for `merge_taxonomy_data.py`** — enrichment logic, deduplication correctness, non-taxonomy row preservation, idempotency. **Priority**: P1. **Effort**: 3 hours.
 - [ ] **Unit tests for `evaluate_probes.py`** — edge cases (0 samples, 100%/0% recall, missing classifier), JSON export format, threshold sweeping. **Priority**: P1. **Effort**: 4 hours.
+- [ ] **Unit tests for `validate_data.py`** — schema check, text quality filters, relabeling logic, class balance, fix mode correctness. **Priority**: P1. **Effort**: 3 hours.
+- [ ] **Integration test for auto-retrain pipeline** — mock sync + full flow through deploy. **Priority**: P1. **Effort**: 4 hours.
+
+### Key Research Sources (2026-03-03)
+| Source | Key Finding |
+|--------|-------------|
+| [OWASP LLM04:2025](https://genai.owasp.org/llmrisk/llm042025-data-and-model-poisoning/) | Dataset checksums + digital signatures required |
+| [Lakera PINT Benchmark](https://www.lakera.ai/blog/lakera-pint-benchmark) | 4,314 curated canary inputs — never trained on |
+| [Cleanlab](https://github.com/cleanlab/cleanlab) | Confident Learning detects label errors with provable guarantees |
+| [HiddenLayer](https://www.hiddenlayer.com/research/evaluating-prompt-injection-datasets) | Public datasets have significant label quality issues at difficulty 8-10 |
+| [allenai/wildjailbreak](https://huggingface.co/datasets/allenai/wildjailbreak) | 262K samples with adversarial benign split — best FP reduction dataset |
+| [SafetyPrompts.com](https://safetyprompts.com/) | Systematic review of 144 LLM safety datasets |
+| [Qualifire Sentinel v2](https://huggingface.co/qualifire/prompt-injection-jailbreak-sentinel-v2) | 0.987 accuracy with 70/30 benign/injection ratio |
 
 ### Implementation Plan
-**Phase 1 (P0)**: Merge hard negatives into training set, fix Unicode dedup, add CV to threshold optimizer
-**Phase 2 (P1)**: Near-duplicate detection, label validation, DVC integration
-**Phase 3 (P2)**: Active learning, synthetic augmentation, parallel generation
+**Phase 1 (P0 — This Week)**: Fix scraper classification threshold (BUG-L13-6), feed gen_all_datasets.py into training (BUG-L13-7), canary evaluation set, model backup, error handling hardening
+**Phase 2 (P1 — Next 2 Weeks)**: Trust tier system, quarantine pipeline, 30+ new datasets, Cleanlab integration, shadow evaluation, license checking, near-duplicate detection, integration tests
+**Phase 3 (P2 — Next Month)**: DVC versioning, active learning, synthetic LLM augmentation, multilingual back-translation, parallel generation
 
 ---
 
-## Layer 14: Red-Team Harness & CI/CD
+## Layer 14: Red-Team Harness & CI/CD — Tasks: 8/21 (38%)
 
 **Files**: `scripts/evaluate_probes.py` (231 lines), `scripts/evaluate_llm_judge.py` (179 lines)
 **Infrastructure**: GitHub Actions CI (`ci.yml`, `pr-check.yml`), `requirements-dev.txt` (no pre-commit hooks, no Makefile, no pyproject.toml)
@@ -1175,7 +1226,7 @@ Layer 14 covers testing infrastructure and automation. Two evaluation scripts ex
 
 ---
 
-## Layer 15: Threat Intelligence Sync
+## Layer 15: Threat Intelligence Sync — Tasks: 4/14 (29%)
 
 **Files**: `scripts/sync_datasets.py` (partial — syncs data but no threat intel feeds), `data/datasets.yaml` (11 sources), `data/taxonomy.yaml`, `data/tags.misp.tsv`
 **Tests**: None
@@ -1211,7 +1262,7 @@ Layer 15 should provide automated synchronization with external threat intellige
 
 ---
 
-## Layer 16: Multi-Turn Detection
+## Layer 16: Multi-Turn Detection — Tasks: 3/17 (18%)
 
 **Files**: None
 **Tests**: None
@@ -1349,7 +1400,7 @@ SafetyPrompts.com monitor ─┘                        ├─ Dedup check again
 
 ---
 
-## Layer 17: Document Format Scanning (NEW)
+## Layer 17: Document Format Scanning (NEW) — Tasks: 0/20 (0%)
 
 **Files**: None (new layer)
 **Tests**: None
@@ -1397,7 +1448,7 @@ Layer 17 scans structured document formats (PDF, DOCX/XLSX/PPTX, CSV, source cod
 
 ---
 
-## Layer 18: RAG Security / Ingestion Validation (NEW)
+## Layer 18: RAG Security / Ingestion Validation (NEW) — Tasks: 0/18 (0%)
 
 **Files**: None (new layer)
 **Tests**: None
@@ -1444,7 +1495,7 @@ Layer 18 protects Retrieval-Augmented Generation (RAG) systems from knowledge co
 
 ---
 
-## Layer 19: Agent / MCP Security (NEW)
+## Layer 19: Agent / MCP Security (NEW) — Tasks: 0/11 (0%)
 
 **Files**: None (new layer)
 **Tests**: None
@@ -1480,7 +1531,7 @@ Layer 19 defends against attacks targeting AI agent architectures and Model Cont
 
 ---
 
-## Layer 20: Taxonomy Automation Pipeline (NEW)
+## Layer 20: Taxonomy Automation Pipeline (NEW) — Tasks: 3/12 (25%)
 
 **Files**: `data/taxonomy.yaml`, `data/tags.misp.tsv`, `scripts/generate_taxonomy_samples.py`
 **Tests**: None (for automation components)
@@ -1851,9 +1902,9 @@ Phase 0 (all), 1.1, 1.2, 1.3, 1.5, 1.6, 1.7
 
 ---
 
-## Research-Driven Improvement Backlog (2026-02-18)
+## Research-Driven Improvement Backlog (2026-03-03)
 
-Compiled from 9 research documents: OpenClaw architecture analysis (security, routing, memory, plugins, agents), Threat Intel RAG design, Expert Council design, SEC504 DFIR-to-AI design, and Self-Hardening Pipeline design.
+Compiled from 9 research documents + 3 specialized agent audits (2026-03-03): dataset safety best practices, dataset maximization research, and full pipeline gap analysis.
 
 ### P0 — Quick Wins (<1 day each)
 
@@ -1861,6 +1912,10 @@ Compiled from 9 research documents: OpenClaw architecture analysis (security, ro
 - [ ] **Timing-safe canary comparison** — Replace `==` with `hmac.compare_digest()` in `canary.py` to prevent timing side-channels. **Effort**: 0.5d. **Source**: `openclaw-security-to-na0s.md`
 - [ ] **Config system** — Replace scattered `os.getenv()` calls with a unified YAML/JSON config with env-var override and validation. **Effort**: 1d. **Source**: `openclaw-agents-to-na0s.md`
 - [ ] **Adaptive thresholds** — Per-category confidence thresholds (e.g., higher for E1 extraction, lower for D2 roleplay) stored in config. **Effort**: 1d. **Source**: `openclaw-memory-to-na0s.md`
+- [ ] **Canary evaluation set** — 100-200 hand-verified samples (never trained on). Evaluate after every retrain; block deployment if accuracy drops. **Effort**: 1d. **Source**: Lakera PINT benchmark, OWASP LLM04:2025.
+- [ ] **Fix scraper classification threshold** — `social_scraper.py` mislabels on 1 weak regex hit. Require 2+ weak signals. **Effort**: 0.5h. **Source**: Pipeline gap analysis.
+- [ ] **Model backup in deploy_model.py** — Copy old model to `.bak` before overwriting. **Effort**: 0.5h.
+- [ ] **Error handling in features.py + model.py** — Add try/except guards, non-zero exit codes. **Effort**: 0.5d.
 
 ### P1 — Medium Effort (1-3 days each)
 
@@ -1872,6 +1927,13 @@ Compiled from 9 research documents: OpenClaw architecture analysis (security, ro
 - [ ] **Semantic chunking** — Replace fixed-size `_chunk_text()` with overlap-aware semantic chunking (sentence boundaries + sliding window). **Effort**: 1.5d. **Source**: `openclaw-plugins-to-na0s.md`
 - [ ] **Hook system** — Pre-scan and post-scan hooks (Python callables or shell commands) for custom logging, alerting, or enrichment. **Effort**: 1d. **Source**: `openclaw-agents-to-na0s.md`
 - [ ] **L27 SignatureDB** — SHA-256 hash database of known attack payloads (from Garak, JailbreakBench, HackaPrompt). O(1) lookup before full pipeline. **Effort**: 2d. **Source**: `sec504-to-na0s-design.md`
+- [ ] **Trust tier system** — Tier 1-4 dataset source classification with `compute_trust_score()` in `weekly_harvest.py`. Auto-reject trust <30. **Effort**: 0.5d. **Source**: OWASP LLM04:2025.
+- [ ] **Quarantine/staging pipeline** — Three-stage: Discovery → `data/quarantine/` → `data/staging/` → `data/raw/`. **Effort**: 2d.
+- [ ] **Cleanlab label quality** — Confident Learning to flag mislabeled samples. Route to quarantine. **Effort**: 1d. **Source**: [Cleanlab](https://github.com/cleanlab/cleanlab).
+- [ ] **Shadow model evaluation** — Train candidate, compare against holdout + canary. Auto-reject if F1 drops >2%. **Effort**: 1.5d.
+- [ ] **License compliance** — Check HF dataset card license before auto-ingestion. Block CC-BY-NC, GPL. **Effort**: 0.5d.
+- [ ] **30+ new datasets** — `allenai/wildjailbreak` (262K), `qxcv/tensor-trust` (563K), `nvidia/Aegis-2.0` (33K), `TrustAIRLab/in-the-wild` (15K), `Mindgard/evaded` (554), `walledai/XSTest` (450). **Effort**: 2d. **Source**: Dataset maximization research.
+- [ ] **Feed gen_all_datasets.py into training** — Synthetic D3/D4/D5/D6/A1 samples exist but never used. 89/150 techniques have 0 training data. **Effort**: 1d.
 
 ### P2 — Large Projects (3-7 days each)
 

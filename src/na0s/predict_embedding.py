@@ -1,4 +1,18 @@
-"""Inference using embedding-based classifier.
+"""DEPRECATED: This module is not part of the primary scan() entry point.
+
+The embedding classification functionality is now handled by:
+  - embedding_classifier.py  (standalone embedding inference, used by predict.py)
+  - ensemble.py              (TF-IDF + embedding weighted average, used by cascade.py)
+
+This module is still imported by cascade.py (legacy ``enable_embedding`` path)
+and ensemble.py (for ``classify_prompt_embedding`` and ``load_models``).
+It is retained for backward compatibility and reference.  New code should
+use ensemble.py or embedding_classifier.py instead.
+
+---------------------------------------------------------------------------
+Original docstring:
+
+Inference using embedding-based classifier.
 
 Drop-in alternative to predict.py that uses semantic embeddings
 instead of TF-IDF for better context understanding.

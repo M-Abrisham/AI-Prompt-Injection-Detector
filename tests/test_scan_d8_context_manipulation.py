@@ -948,7 +948,6 @@ class TestD8_SafePrompts(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure  # Known FP: D8 context manipulation flags benign Q&A (risk~0.648)
     def test_safe_long_qa_conversation(self):
         """Long benign Q&A conversation history.
         KNOWN FP: FingerprintStore contamination from prior test runs

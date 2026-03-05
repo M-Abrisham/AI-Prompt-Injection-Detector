@@ -1,6 +1,6 @@
 """Layer 1: Regex-based signature rule engine for prompt injection detection.
 
-62 pre-compiled rules covering 30+ technique IDs with:
+110 pre-compiled rules covering 30+ technique IDs with:
 - 4-level paranoia system (PL1-PL4, env-configurable via RULES_PARANOIA_LEVEL)
 - Context-aware suppression (25 suppressible rules)
 - Unicode evasion defenses (homoglyph folding, Zalgo stripping, IOC refanging)

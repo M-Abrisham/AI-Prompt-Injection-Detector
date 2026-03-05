@@ -669,7 +669,7 @@ class TestBuildParser(unittest.TestCase):
         parser = build_parser()
         args = parser.parse_args([])
         self.assertEqual(args.output_dir, "data/scraped")
-        self.assertEqual(args.since_hours, 3)
+        self.assertEqual(args.since_hours, 24)
         self.assertEqual(args.sources, "reddit,twitter,datasets")
         self.assertFalse(args.dry_run)
         self.assertFalse(args.verbose)

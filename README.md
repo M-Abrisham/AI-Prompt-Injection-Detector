@@ -11,7 +11,7 @@
 <br/>
 
 <p>
-  <strong>15-Layer Defense | 103+ Attack Techniques | 126K Samples</strong>
+  <strong>17-Layer Defense | 104 Attack Techniques | 1.9M Samples</strong>
 </p>
 
 </div>
@@ -26,7 +26,7 @@ Na0S is under active development and **cannot guarantee 100% protection** agains
 
 ## Overview
 
-Na0s is a **defense-in-depth prompt injection detector** — 15 independent layers working in parallel, a **[threat taxonomy](docs/TAXONOMY.md) of 19 attack categories and 103+ techniques** (the most comprehensive open-source classification available), and an ML ensemble trained on 126K+ samples.
+Na0s is a **defense-in-depth prompt injection detector** — 17 independent layers working in parallel, a **[threat taxonomy](docs/TAXONOMY.md) of 19 attack categories and 104 techniques** (the most comprehensive open-source classification available), and an ML ensemble trained on 1.9M+ samples from 24 public datasets.
 
 **Prompt injection** is the [#1 security risk for LLM apps](https://genai.owasp.org/) (OWASP LLM Top 10, 2025).
 
@@ -142,6 +142,7 @@ VERDICT: MALICIOUS (87.8%)
 | [Taxonomy](docs/TAXONOMY.md) | 19 attack categories, 103+ techniques, coverage matrix |
 | [Training & Stats](docs/TRAINING.md) | Datasets, tech stack, project metrics |
 | [Standards](docs/STANDARDS.md) | OWASP, MITRE ATLAS, AVID, LMRC mappings |
+| [Agent Team](docs/AGENT_TEAM.md) | Multi-agent operating model for detection, ML, validation, and release |
 | [Roadmap](ROADMAP_V2.md) | Planned features, open tasks |
 
 ---

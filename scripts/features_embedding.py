@@ -90,6 +90,10 @@ def build_embedding_features():
     2. Encodes every text with the sentence-transformer
     3. Saves ``(X_embeddings, y)`` to ``data/processed/features_embedding.pkl``
        using SHA-256 verified pickle I/O.
+
+    Set the ``EMBEDDING_MAX_SAMPLES`` environment variable to an integer
+    to stratified-sample the dataset before encoding (useful for large
+    datasets that would take too long to encode in full).
     """
     t0 = time.time()
 
@@ -99,6 +103,21 @@ def build_embedding_features():
     print("Loading training data from {0}".format(INPUT_PATH))
     df = pd.read_csv(INPUT_PATH)
     df["text"] = df["text"].fillna("").astype(str)
+
+    # Optional stratified subsampling for large datasets
+    max_samples = os.environ.get("EMBEDDING_MAX_SAMPLES")
+    if max_samples is not None:
+        max_samples = int(max_samples)
+        if len(df) > max_samples:
+            from sklearn.model_selection import train_test_split
+            print("  Subsampling {0} -> {1} (stratified)".format(
+                len(df), max_samples))
+            df, _ = train_test_split(
+                df, train_size=max_samples, random_state=42,
+                stratify=df["label"],
+            )
+            df = df.reset_index(drop=True)
+
     texts = df["text"].tolist()
     y = df["label"].values  # 0 = safe, 1 = malicious
 

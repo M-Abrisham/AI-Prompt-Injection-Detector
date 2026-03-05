@@ -1,0 +1,114 @@
+{
+  "alert_adversarial": {
+    "repo": "Babelscape/ALERT",
+    "rows": 30968,
+    "sha": "c76d0637f4573742982d5fe961a31bdb3d1e2c80",
+    "type": "huggingface"
+  },
+  "alert_standard": {
+    "repo": "Babelscape/ALERT",
+    "rows": 14763,
+    "sha": "c76d0637f4573742982d5fe961a31bdb3d1e2c80",
+    "type": "huggingface"
+  },
+  "alpaca": {
+    "repo": "tatsu-lab/alpaca",
+    "rows": 2000,
+    "sha": "dce01c9b08f87459cf36a430d809084718273017",
+    "type": "huggingface"
+  },
+  "awesome_chatgpt_prompts": {
+    "content_hash": "3c26190100b49c1e3a144b34f107595d4c9826a37b2788bbdb525fecdddafc62",
+    "rows": 1391,
+    "type": "github_csv"
+  },
+  "ctf_satml24": {
+    "repo": "ethz-spylab/ctf-satml24",
+    "rows": 10000,
+    "sha": "11426babe61ee16b0efe7b55e0430359e0fc4235",
+    "type": "huggingface"
+  },
+  "deepset_injections": {
+    "repo": "deepset/prompt-injections",
+    "rows": 546,
+    "sha": "4f61ecb038e9c3fb77e21034b22511b523772cdd",
+    "type": "huggingface"
+  },
+  "dolly": {
+    "repo": "databricks/databricks-dolly-15k",
+    "rows": 2000,
+    "sha": "bdd27f4d94b9c1f951818a7da7fd7aeea5dbff1a",
+    "type": "huggingface"
+  },
+  "gandalf_rct": {
+    "repo": "Lakera/gandalf-rct",
+    "rows": 50000,
+    "sha": "c6698079a298210175f675959d2dd7744dc8aa38",
+    "type": "huggingface"
+  },
+  "geekyrakshit": {
+    "repo": "geekyrakshit/prompt-injection-dataset",
+    "rows": 50000,
+    "sha": "82b3fb5c31860aacba83b3cec87947afdf3272b6",
+    "type": "huggingface"
+  },
+  "imoxto_cleaned": {
+    "repo": "imoxto/prompt_injection_cleaned_dataset-v2",
+    "rows": 50000,
+    "sha": "3a8590a413e66d218051d506124970b308810d48",
+    "type": "huggingface"
+  },
+  "jailbreak_llms": {
+    "content_hash": "e9257095be35d18246db926aace6a1d934b4a395e470eaad1df4c9fb9be1bb46",
+    "rows": 1405,
+    "type": "github_csv"
+  },
+  "jailbreakhub": {
+    "repo": "walledai/JailbreakHub",
+    "rows": 15140,
+    "sha": "1a33b351b53167e37a64bd9bf7e286e435ba4a31",
+    "type": "huggingface"
+  },
+  "jailbreakv_28k": {
+    "repo": "JailbreakV-28K/JailBreakV-28k",
+    "rows": 28000,
+    "sha": "f949ca582fff13d396ac8fce59596afafb2b78d3",
+    "type": "huggingface"
+  },
+  "llmail_inject": {
+    "repo": "microsoft/llmail-inject-challenge",
+    "rows": 50000,
+    "sha": "1063bdf01ec8762b812d5e06ee768a06faa5a6f7",
+    "type": "huggingface"
+  },
+  "openassistant": {
+    "repo": "OpenAssistant/oasst1",
+    "rows": 1000,
+    "sha": "fdf72ae0827c1cda404aff25b6603abec9e3399b",
+    "type": "huggingface"
+  },
+  "safeguard": {
+    "repo": "xTRam1/safe-guard-prompt-injection",
+    "rows": 8236,
+    "sha": "a3a877d608f37b7d20d9945671902df895ecdb46",
+    "type": "huggingface"
+  },
+  "salad_data_attack": {
+    "repo": "OpenSafetyLab/Salad-Data",
+    "rows": 5000,
+    "sha": "70a1ddce6be3f0239b2fe7c70d0d96cb3be1fcad",
+    "type": "huggingface"
+  },
+  "salad_data_base": {
+    "repo": "OpenSafetyLab/Salad-Data",
+    "rows": 21318,
+    "sha": "70a1ddce6be3f0239b2fe7c70d0d96cb3be1fcad",
+    "type": "huggingface"
+  },
+  "spml": {
+    "repo": "reshabhs/SPML_Chatbot_Prompt_Injection",
+    "rows": 16011,
+    "sha": "02ce8084e979bc7d4c24ee35d22ecb7f2db96ff5",
+    "type": "huggingface"
+  }
+}

@@ -25,6 +25,11 @@ from .models import get_model_path
 from .signal_boost import calculate_boost
 
 # Layer 5: Embedding-based classifier — optional import
+# DEPRECATED PATH: This import supports the legacy ``enable_embedding=True``
+# code path (Path B below) which does ad-hoc 60/40 blending of the embedding
+# result with the TF-IDF weighted result.  New callers should prefer
+# ``enable_ensemble=True`` (Path A) which uses ensemble.py for a principled
+# weighted average of calibrated probabilities from both models.
 try:
     from .predict_embedding import classify_prompt_embedding, load_models as _load_embedding_models
     _HAS_EMBEDDING = True
@@ -32,6 +37,9 @@ except ImportError:
     _HAS_EMBEDDING = False
 
 # Layer 4+5 Ensemble — optional import
+# CANONICAL PATH: This is the recommended way to combine TF-IDF and embedding
+# signals.  Uses ensemble.py which does a proper weighted average of
+# calibrated P(malicious) from both models.
 try:
     from .ensemble import ensemble_scan as _ensemble_scan
     _HAS_ENSEMBLE = True
@@ -361,11 +369,24 @@ class CascadeClassifier:
         self._judge = llm_judge  # Optional LLMJudge or LLMJudgeWithCircuitBreaker
 
         # Layer 5: Embedding classifier — optional
+        # NOTE: There are TWO mutually-exclusive embedding integration paths:
+        #
+        #   Path A (CANONICAL): enable_ensemble=True
+        #     Uses ensemble.py for a principled weighted average of calibrated
+        #     probabilities from both TF-IDF and embedding models.  This is
+        #     the recommended path for new deployments.
+        #
+        #   Path B (LEGACY): enable_embedding=True (and enable_ensemble=False)
+        #     Uses predict_embedding.py directly with ad-hoc 60/40 blending
+        #     and hard-coded confidence thresholds for disagreement resolution.
+        #     Retained for backward compatibility only.
+        #
+        # If both are True, Path A takes precedence (via the elif in classify).
         self._embedding_model = None
         self._embedding_classifier = None
         self._enable_embedding = enable_embedding and _HAS_EMBEDDING
 
-        # Layer 4+5 Ensemble — optional
+        # Layer 4+5 Ensemble — optional (Path A, canonical)
         self._enable_ensemble = enable_ensemble and _HAS_ENSEMBLE
         self._ensemble_used = 0
 
@@ -492,9 +513,21 @@ class CascadeClassifier:
         )
         self._classified += 1
 
-        # Layer 4+5: Ensemble (TF-IDF + Embedding weighted average)
-        # When ensemble is enabled, it replaces the ad-hoc embedding blending
-        # with a principled weighted average of calibrated probabilities.
+        # ---------------------------------------------------------------
+        # Embedding integration: TWO mutually-exclusive paths.
+        #
+        # Path A (CANONICAL) -- enable_ensemble=True:
+        #   Uses ensemble.py for a principled weighted average of calibrated
+        #   P(malicious) from TF-IDF and embedding models.  Preferred.
+        #
+        # Path B (LEGACY) -- enable_embedding=True, enable_ensemble=False:
+        #   Ad-hoc 60/40 blending with hard-coded disagreement thresholds.
+        #   Retained for backward compatibility; see predict_embedding.py.
+        #
+        # Path A takes precedence when both flags are set (via elif).
+        # ---------------------------------------------------------------
+
+        # Path A: Ensemble (TF-IDF + Embedding weighted average)
         if self._enable_ensemble and _HAS_ENSEMBLE:
             try:
                 ensemble_result = _ensemble_scan(
@@ -512,8 +545,9 @@ class CascadeClassifier:
             except Exception:
                 pass  # Ensemble failure is non-fatal
 
-        # Layer 5: Embedding classifier (legacy ad-hoc blending)
+        # Path B (LEGACY): Embedding classifier with ad-hoc blending.
         # Only used when ensemble is NOT enabled but embedding IS enabled.
+        # Superseded by Path A (ensemble); retained for backward compatibility.
         elif self._enable_embedding:
             try:
                 if self._ensure_embedding_model():

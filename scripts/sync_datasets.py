@@ -104,11 +104,12 @@ def _download_huggingface(cfg, output_path):
         return 0
 
     repo = cfg["repo"]
+    config_name = cfg.get("config")
     split = cfg.get("split", "train")
     text_col = cfg["text_column"]
     max_samples = cfg.get("max_samples")
 
-    ds = load_dataset(repo, split=split)
+    ds = load_dataset(repo, name=config_name, split=split)
 
     # Apply row-level filter if specified
     row_filter = cfg.get("filter")
@@ -129,10 +130,23 @@ def _download_huggingface(cfg, output_path):
     fixed_label = cfg.get("label")
 
     if label_col and label_map:
+        # Build a robust lookup that handles bool/string mismatches
+        # (YAML parses "true" as Python True, but HF may store "true" string)
+        _lmap = {}
+        for k, v in label_map.items():
+            _lmap[k] = v
+            _lmap[str(k).lower()] = v
+            if isinstance(k, bool):
+                _lmap["true" if k else "false"] = v
+                # Also map None → same as False (e.g. gandalf_rct: None = not successful)
+                if not k:
+                    _lmap[None] = v
         labels = []
         for row in ds:
             raw = row.get(label_col)
-            mapped = label_map.get(raw, label_map.get(str(raw)))
+            mapped = _lmap.get(raw)
+            if mapped is None and raw is not None:
+                mapped = _lmap.get(str(raw).lower())
             if mapped is not None:
                 labels.append(mapped)
             else:
@@ -217,7 +231,7 @@ def sync(force=False, only=None):
 
             print("{} rows".format(count))
             updated += 1
-        except (OSError, ValueError, KeyError) as e:
+        except Exception as e:
             print("ERROR: {}".format(e))
 
     _save_lock(lock)
