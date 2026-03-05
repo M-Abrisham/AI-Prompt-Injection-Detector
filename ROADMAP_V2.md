@@ -1079,7 +1079,7 @@ Layer 12 is the adversarial testing framework. Base classes (`Probe`, `Classifie
 
 ---
 
-## Layer 13: Dataset Pipeline — Tasks: 17/41 (41%)
+## Layer 13: Dataset Pipeline — Tasks: 24/41 (59%)
 
 **Files**: `scripts/sync_datasets.py` (251 lines), `scripts/process_data.py` (160 lines), `scripts/validate_data.py` (250 lines), `scripts/integrate_harvest.py` (288 lines), `scripts/deploy_model.py` (87 lines), `scripts/features.py` (39 lines), `scripts/model.py` (67 lines), `scripts/merge_taxonomy_data.py` (113 lines), `scripts/generate_taxonomy_samples.py` (175 lines), `scripts/mine_hard_negatives.py` (513 lines), `scripts/optimize_threshold.py` (272 lines)
 **Workflows**: `.github/workflows/auto-retrain.yml`, `.github/workflows/weekly-harvest.yml`, `.github/workflows/social-scraper.yml`
@@ -1088,7 +1088,7 @@ Layer 12 is the adversarial testing framework. Base classes (`Probe`, `Classifie
 **Status**: Functional automated pipeline — 1.9M samples, auto-retrain on schedule, but safety/validation gaps remain
 
 ### Updated Description
-Layer 13 manages the full data lifecycle: discovery → download → integration → validation → training → deployment. `sync_datasets.py` downloads 23 external datasets (GitHub CSVs + HuggingFace) with SHA-256/commit-SHA freshness checking and lock files. `integrate_harvest.py` bridges harvest/scrape JSONL output into training CSVs. `process_data.py` merges all raw CSVs + JSONLs with MD5 deduplication. `validate_data.py` checks schema, text quality, class balance, duplicates, and label consistency. `features.py` extracts TF-IDF features (10K max). `model.py` trains a calibrated LogisticRegression. `deploy_model.py` copies models to package dir and updates KNOWN_HASHES programmatically. `auto-retrain.yml` orchestrates the full pipeline on schedule (Tuesday 8 AM UTC), after harvest/scraper workflows, or on manual trigger — creating a PR with the retrained model. Total dataset: **1.92M unique samples** (1.13M safe + 789K malicious, 88% accuracy).
+Layer 13 manages the full data lifecycle: discovery → download → integration → validation → training → deployment. `sync_datasets.py` downloads 23 external datasets (GitHub CSVs + HuggingFace) with SHA-256/commit-SHA freshness checking and lock files. `integrate_harvest.py` bridges harvest/scrape JSONL output into training CSVs. `process_data.py` merges all raw CSVs + JSONLs with Unicode-normalized SHA-256 deduplication and stable hash ordering. `validate_data.py` checks schema, text quality, class balance, duplicates, and label consistency. `features.py` extracts TF-IDF features (10K max). `model.py` trains a calibrated LogisticRegression. `deploy_model.py` copies models to package dir and updates KNOWN_HASHES programmatically. `auto-retrain.yml` orchestrates the full pipeline on schedule (Tuesday 8 AM UTC), after harvest/scraper workflows, or on manual trigger — creating a PR with the retrained model. Total dataset: **1.92M unique samples** (1.13M safe + 789K malicious, 88% accuracy).
 
 ### TODO List
 
@@ -1112,13 +1112,13 @@ Layer 13 manages the full data lifecycle: discovery → download → integration
 - [x] Use `huggingface_hub` API for sync — `dataset_info()` for commit SHA tracking, `load_dataset()` for downloads with config/split support
 
 #### FIXES
-- [ ] **BUG-L13-1 (HIGH)**: Hard negatives not merged into training set — `hard_negatives.csv` generated but never used. **Fix**: Add merge step or output directly to combined_data.
-- [ ] **BUG-L13-2 (MEDIUM)**: Deduplication doesn't normalize Unicode — exact text match only. NFKC variants create duplicates. **Fix**: Apply NFKC before dedup.
-- [ ] **BUG-L13-3 (MEDIUM)**: No cross-validation in threshold optimization — fits on same data. **Fix**: Add k-fold CV.
-- [ ] **BUG-L13-4 (LOW)**: `sys.maxsize` CSV field size override — memory risk. **Fix**: Use reasonable limit.
-- [ ] **BUG-L13-5 (LOW)**: Merge not idempotent — re-running shifts sample ordering. **Fix**: Sort by text hash before writing.
-- [ ] **BUG-L13-6 (HIGH)**: `social_scraper.py` labels content as injection on single weak regex match (`weak_hits >= 1` → `label=1, confidence=0.40`). A Reddit post mentioning "jailbreak" in benign context gets mislabeled. **Fix**: Require `weak_hits >= 2` or 1 strong signal.
-- [ ] **BUG-L13-7 (MEDIUM)**: `gen_all_datasets.py` output (`data/holdout/`, `data/benchmark/`) never fed into training pipeline. Synthetic samples for D3/D4/D5/D6/A1 exist but model never sees them. **Fix**: Include in `process_data.py` glob paths or merge into `data/raw/`.
+- [x] **BUG-L13-1 (HIGH)**: Hard negatives not merged into training set — `hard_negatives.csv` generated but never used. **Fix**: Add merge step or output directly to combined_data. ✅ DONE (2026-03-05) — `mine_hard_negatives.py` Phase 4 now writes merged output to canonical `data/processed/combined_data.csv` (in addition to `combined_data_with_negatives.csv`) so downstream training consumes hard negatives automatically.
+- [x] **BUG-L13-2 (MEDIUM)**: Deduplication doesn't normalize Unicode — exact text match only. NFKC variants create duplicates. **Fix**: Apply NFKC before dedup. ✅ DONE (2026-03-05) — `process_data.py` now canonicalizes text with Unicode NFKC + whitespace normalization before hashing for dedup.
+- [x] **BUG-L13-3 (MEDIUM)**: No cross-validation in threshold optimization — fits on same data. **Fix**: Add k-fold CV. ✅ DONE (2026-03-05) — `optimize_threshold.py` now computes out-of-fold probabilities via stratified k-fold CV before threshold sweep.
+- [x] **BUG-L13-4 (LOW)**: `sys.maxsize` CSV field size override — memory risk. **Fix**: Use reasonable limit. ✅ DONE (2026-03-05) — `merge_taxonomy_data.py` now uses bounded field-size limit (`NA0S_CSV_FIELD_LIMIT`, default 5 MB) instead of `sys.maxsize`.
+- [x] **BUG-L13-5 (LOW)**: Merge not idempotent — re-running shifts sample ordering. **Fix**: Sort by text hash before writing. ✅ DONE (2026-03-05) — both `process_data.py` and `mine_hard_negatives.py` now sort by stable normalized text hash before writing output.
+- [x] **BUG-L13-6 (HIGH)**: `social_scraper.py` labels content as injection on single weak regex match (`weak_hits >= 1` → `label=1, confidence=0.40`). A Reddit post mentioning "jailbreak" in benign context gets mislabeled. **Fix**: Require `weak_hits >= 2` or 1 strong signal. ✅ DONE (2026-03-05) — `_classify_injection()` now treats `weak_hits == 1` as benign.
+- [x] **BUG-L13-7 (MEDIUM)**: `gen_all_datasets.py` output (`data/holdout/`, `data/benchmark/`) never fed into training pipeline. Synthetic samples for D3/D4/D5/D6/A1 exist but model never sees them. **Fix**: Include in `process_data.py` glob paths or merge into `data/raw/`. ✅ DONE (2026-03-05) — `process_data.py` ingestion is validated to include JSONL files from both `data/holdout/` and `data/benchmark/`.
 
 #### NEW (Discovered by research — 2026-03-03)
 
