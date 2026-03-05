@@ -44,8 +44,14 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: python -m scripts.sync_datasets
 
-      - name: Integrate harvest & scrape data
+      - name: Ingest harvest & scrape data (quarantine-aware)
         run: python -m scripts.integrate_harvest
+
+      - name: Validate quarantined datasets
+        run: python -m scripts.quarantine --validate-quarantined
+
+      - name: Promote validated quarantined datasets
+        run: python -m scripts.quarantine --promote-validated
 
       - name: Merge and deduplicate all data
         run: python -m scripts.process_data
@@ -149,12 +155,14 @@ jobs:
 
           **Pipeline steps completed:**
           1. Synced all datasets from \`data/datasets.yaml\`
-          2. Integrated harvest & scrape data
-          3. Merged and deduplicated into \`combined_data.csv\`
-          4. Extracted TF-IDF features (10K max)
-          5. Trained calibrated LogisticRegression
-          6. Deployed model + updated \`KNOWN_HASHES\`
-          7. Ran canary evaluation (200 hand-verified samples)
+          2. Ingested harvest/scrape discoveries via quarantine routing
+          3. Ran quarantine validation (\`--validate-quarantined\`)
+          4. Explicitly promoted validated quarantine entries
+          5. Merged and deduplicated into \`combined_data.csv\`
+          6. Extracted TF-IDF features (10K max)
+          7. Trained calibrated LogisticRegression
+          8. Deployed model + updated \`KNOWN_HASHES\`
+          9. Ran canary evaluation (200 hand-verified samples)
 
           **Training samples:** ~${SAMPLE_COUNT}
 

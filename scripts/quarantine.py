@@ -29,6 +29,7 @@ Usage::
     python scripts/quarantine.py --ingest <file> --source <source_id>
     python scripts/quarantine.py --review
     python scripts/quarantine.py --promote <name>
+    python scripts/quarantine.py --promote-validated
     python scripts/quarantine.py --reject <name>
     python scripts/quarantine.py --status
     python scripts/quarantine.py --validate-quarantined
@@ -641,6 +642,79 @@ def promote(name, config=None):
     }
 
 
+def promote_validated(config=None):
+    """Promote all quarantine entries that already passed validation.
+
+    Returns:
+        dict: Summary with counts for promoted/pending/failed/rejected/errors.
+    """
+    if config is None:
+        config = load_trust_config()
+
+    summary = {
+        "eligible_entries": 0,
+        "promoted": 0,
+        "pending": 0,
+        "failed": 0,
+        "rejected": 0,
+        "errors": 0,
+    }
+
+    if not os.path.isdir(QUARANTINE_DIR):
+        print("  No quarantine directory found.")
+        return summary
+
+    for name in sorted(os.listdir(QUARANTINE_DIR)):
+        entry_dir = os.path.join(QUARANTINE_DIR, name)
+        if not os.path.isdir(entry_dir):
+            continue
+
+        data_files = [
+            f for f in os.listdir(entry_dir)
+            if f.endswith((".csv", ".jsonl"))
+        ]
+        if not data_files:
+            continue
+
+        summary["eligible_entries"] += 1
+        meta = _read_metadata(entry_dir) or {}
+        vstatus = meta.get("validation_status", "pending")
+
+        if vstatus == "passed":
+            result = promote(name, config)
+            if result.get("action") == "promoted":
+                summary["promoted"] += 1
+            else:
+                summary["errors"] += 1
+        elif vstatus == "pending":
+            summary["pending"] += 1
+            print(
+                f"  SKIP: {name} remains pending validation. "
+                "Run --validate-quarantined first."
+            )
+        elif vstatus == "failed":
+            summary["failed"] += 1
+            print(
+                f"  SKIP: {name} failed validation. "
+                "Review and --reject or fix source data."
+            )
+        elif vstatus == "rejected":
+            summary["rejected"] += 1
+            print(f"  SKIP: {name} already rejected.")
+        else:
+            summary["errors"] += 1
+            print(f"  SKIP: {name} has unknown validation status '{vstatus}'.")
+
+    print("\n  Promotion summary")
+    print(f"    Eligible entries: {summary['eligible_entries']}")
+    print(f"    Promoted:         {summary['promoted']}")
+    print(f"    Pending:          {summary['pending']}")
+    print(f"    Failed:           {summary['failed']}")
+    print(f"    Rejected:         {summary['rejected']}")
+    print(f"    Errors:           {summary['errors']}")
+    return summary
+
+
 def reject(name, reason="manual_rejection", config=None):
     """Reject and remove a quarantined dataset.
 
@@ -790,6 +864,11 @@ def build_parser():
         help="Promote a validated quarantine entry to aggregated/.",
     )
     group.add_argument(
+        "--promote-validated",
+        action="store_true",
+        help="Promote all entries with validation_status=passed.",
+    )
+    group.add_argument(
         "--reject",
         metavar="NAME",
         help="Reject and remove a quarantined dataset.",
@@ -862,6 +941,10 @@ def main(argv=None):
     elif args.promote:
         result = promote(args.promote, config)
         return 0 if result.get("action") == "promoted" else 1
+
+    elif args.promote_validated:
+        result = promote_validated(config)
+        return 0 if result.get("errors", 0) == 0 else 1
 
     elif args.reject:
         result = reject(args.reject, reason=args.reason, config=config)
