@@ -18,7 +18,9 @@ matplotlib.use('Agg')
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.base import clone
 from sklearn.metrics import roc_curve, precision_recall_curve, auc
+from sklearn.model_selection import StratifiedKFold
 
 from na0s.safe_pickle import safe_load
 
@@ -32,6 +34,38 @@ DATA_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'combined_data.csv')
 ROC_PLOT_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'roc_curve.png')
 PR_PLOT_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'pr_curve.png')
 THRESHOLD_JSON_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'optimal_threshold.json')
+CV_FOLDS = 5
+
+
+def _compute_oof_probabilities(model, X, labels, n_splits=CV_FOLDS):
+    """Return out-of-fold P(malicious) probabilities via stratified k-fold CV."""
+    labels = np.asarray(labels)
+    n_samples = labels.shape[0]
+    if n_samples == 0:
+        return np.array([])
+
+    class_counts = np.bincount(labels.astype(int), minlength=2)
+    min_class = int(class_counts.min()) if class_counts.size else 0
+    if min_class < 2:
+        # Not enough samples for CV; fall back to in-sample probabilities.
+        return model.predict_proba(X)[:, 1]
+
+    folds = min(int(n_splits), min_class)
+    if folds < 2:
+        return model.predict_proba(X)[:, 1]
+
+    splitter = StratifiedKFold(
+        n_splits=folds,
+        shuffle=True,
+        random_state=42,
+    )
+
+    oof_probs = np.zeros(n_samples, dtype=float)
+    for train_idx, valid_idx in splitter.split(np.zeros(n_samples), labels):
+        fold_model = clone(model)
+        fold_model.fit(X[train_idx], labels[train_idx])
+        oof_probs[valid_idx] = fold_model.predict_proba(X[valid_idx])[:, 1]
+    return oof_probs
 
 
 def main():
@@ -55,11 +89,11 @@ def main():
           f"malicious={int((labels == 1).sum())})")
 
     # ------------------------------------------------------------------
-    # 3. Compute predicted probabilities
+    # 3. Compute out-of-fold predicted probabilities (k-fold CV)
     # ------------------------------------------------------------------
-    print("[3/7] Computing predicted probabilities ...")
+    print(f"[3/7] Computing out-of-fold predicted probabilities ({CV_FOLDS}-fold CV) ...")
     X = vectorizer.transform(texts)
-    probs = model.predict_proba(X)[:, 1]  # P(malicious)
+    probs = _compute_oof_probabilities(model, X, labels, n_splits=CV_FOLDS)
 
     # ------------------------------------------------------------------
     # 4. Sweep thresholds 0.01 .. 0.99

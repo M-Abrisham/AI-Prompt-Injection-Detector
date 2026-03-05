@@ -11,9 +11,17 @@ New taxonomy samples are appended with their computed metadata.
 
 import csv
 import os
-import sys
 
-csv.field_size_limit(sys.maxsize)
+_DEFAULT_CSV_FIELD_LIMIT = 5_000_000  # 5 MB per field
+_field_limit_env = os.environ.get("NA0S_CSV_FIELD_LIMIT", "").strip()
+if _field_limit_env:
+    try:
+        _limit = max(1024, int(_field_limit_env))
+    except ValueError:
+        _limit = _DEFAULT_CSV_FIELD_LIMIT
+else:
+    _limit = _DEFAULT_CSV_FIELD_LIMIT
+csv.field_size_limit(_limit)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)

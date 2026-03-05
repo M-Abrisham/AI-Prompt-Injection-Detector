@@ -224,7 +224,9 @@ def _classify_injection(text):
     if weak_hits >= 2:
         return 1, 0.40
     if weak_hits == 1:
-        return 1, 0.30
+        # Single weak keyword is too noisy on social posts (e.g., benign
+        # discussion mentioning "jailbreak"), so keep as benign.
+        return 0, 0.20
     return 0, 0.15
 
 

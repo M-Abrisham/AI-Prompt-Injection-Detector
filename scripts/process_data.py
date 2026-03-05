@@ -9,6 +9,8 @@ data/processed/combined_data.csv.
 import glob
 import hashlib
 import os
+import re
+import unicodedata
 
 import pandas as pd
 
@@ -80,19 +82,35 @@ def _load_jsonl(path):
     out["text"] = df[text_col].astype(str)
 
     if label_col is not None:
-        out["label"] = df[label_col]
+        out["label"] = pd.to_numeric(df[label_col], errors="coerce")
     else:
         print(f"  WARN: skipping {os.path.basename(path)} "
               f"(no label column found among {LABEL_CANDIDATES})")
         return None
 
-    out = out.dropna(subset=["text"])
+    out = out.dropna(subset=["text", "label"])
+    out["label"] = out["label"].astype(int)
+    out = out[out["label"].isin([0, 1])]
     return out
+
+
+def _normalize_for_dedup(text):
+    """Canonicalize text before hashing to improve duplicate detection.
+
+    Uses Unicode NFKC normalization plus whitespace collapsing so that
+    visually equivalent strings (e.g., fullwidth/compatibility variants)
+    deduplicate to the same hash.
+    """
+    text = str(text)
+    text = unicodedata.normalize("NFKC", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 
 def _text_hash(text):
     """Fast content hash for deduplication."""
-    return hashlib.md5(text.encode("utf-8", errors="replace")).hexdigest()
+    norm = _normalize_for_dedup(text)
+    return hashlib.sha256(norm.encode("utf-8", errors="replace")).hexdigest()
 
 
 def merge_datasets():
@@ -129,7 +147,7 @@ def merge_datasets():
 
     if not frames:
         print("ERROR: No usable datasets found.")
-        return
+        return None
 
     # ── 3. Concatenate ────────────────────────────────────────────
     combined = pd.concat(frames, axis=0, ignore_index=True)
@@ -138,17 +156,16 @@ def merge_datasets():
     # ── 4. Deduplicate by text hash ───────────────────────────────
     combined["_hash"] = combined["text"].apply(_text_hash)
     combined = combined.drop_duplicates(subset=["_hash"])
+    # Stable idempotent ordering: sort by hash before writing.
+    combined = combined.sort_values("_hash", kind="mergesort").reset_index(drop=True)
     combined = combined.drop(columns=["_hash"])
     dupes_removed = total_before - len(combined)
 
-    # ── 5. Shuffle ────────────────────────────────────────────────
-    combined = combined.sample(frac=1, random_state=42).reset_index(drop=True)
-
-    # ── 6. Save ───────────────────────────────────────────────────
+    # ── 5. Save ───────────────────────────────────────────────────
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     combined.to_csv(OUTPUT_PATH, index=False)
 
-    # ── 7. Report ─────────────────────────────────────────────────
+    # ── 6. Report ─────────────────────────────────────────────────
     print(f"\n--- Per-source counts ---")
     for src, cnt in sorted(source_counts.items()):
         print(f"  {src}: {cnt}")
@@ -157,6 +174,7 @@ def merge_datasets():
     print(f"Final dataset size:        {len(combined)}")
     print(f"Label distribution:\n{combined['label'].value_counts().to_string()}")
     print(f"\nSaved to {OUTPUT_PATH}")
+    return combined
 
 
 if __name__ == "__main__":
