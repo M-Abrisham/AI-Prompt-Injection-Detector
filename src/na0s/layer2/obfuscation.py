@@ -5,6 +5,7 @@ import hashlib
 import math
 import os
 import re
+import unicodedata
 import urllib.parse
 import zlib
 from dataclasses import dataclass
@@ -31,6 +32,25 @@ BASE64_PATTERN = re.compile(r"^[A-Za-z0-9+/=\s]+$")
 HEX_PATTERN = re.compile(r"^[0-9a-fA-F]+$")
 URLENCODED_PATTERN = re.compile(r"%(?:[0-9a-fA-F]{2})")
 
+# ---------------------------------------------------------------------------
+# Zero-width characters used in whitespace injection attacks
+# ---------------------------------------------------------------------------
+# These invisible Unicode characters can be inserted between letters of
+# attack keywords (e.g., "i\u200bg\u200bn\u200bo\u200br\u200be") to evade
+# regex-based detection.  L0 strips these during normalization, but L2
+# independently detects them as an obfuscation technique for defense-in-depth
+# and to provide decoded views with provenance in the audit chain.
+#
+# Characters covered:
+#   U+200B  Zero Width Space (ZWSP)
+#   U+200C  Zero Width Non-Joiner (ZWNJ)
+#   U+200D  Zero Width Joiner (ZWJ)
+#   U+FEFF  Byte Order Mark / Zero Width No-Break Space
+#   U+2060  Word Joiner
+# ---------------------------------------------------------------------------
+_ZERO_WIDTH_CHARS = frozenset("\u200b\u200c\u200d\ufeff\u2060")
+_ZERO_WIDTH_RE = re.compile("[\u200b\u200c\u200d\ufeff\u2060]+")
+
 # Standard English letter frequencies (from large corpora).
 # Used for KL-divergence calculation to distinguish obfuscated text
 # from natural English.  Source: Lewand (2000), Cryptological Mathematics.
@@ -47,6 +67,86 @@ _ENGLISH_LETTER_FREQ = {
 # Markdown tables use pipes and dashes; code fences use backticks.
 _MARKDOWN_TABLE_RE = re.compile(r"\|.*\|")
 _CODE_FENCE_RE = re.compile(r"^```", re.MULTILINE)
+
+# ---------------------------------------------------------------------------
+# Externalized thresholds -- named constants with optional env var overrides
+# ---------------------------------------------------------------------------
+# Each constant has a sensible default.  Operators can override via
+# environment variables prefixed with NA0S_ for deployment-time tuning
+# without code changes.
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a float from the environment, falling back to *default*.
+
+    Returns *default* when the variable is absent, empty, or cannot be
+    parsed as a float.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an int from the environment, falling back to *default*.
+
+    Returns *default* when the variable is absent, empty, or cannot be
+    parsed as an int.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        return default
+
+
+# Punctuation-flood: ratio of punctuation characters to total length.
+# Text above this ratio (and not structured data) triggers "punctuation_flood".
+PUNCTUATION_FLOOD_RATIO = _env_float("NA0S_PUNCTUATION_FLOOD_RATIO", 0.40)
+
+# Weird-casing: minimum absolute number of case transitions required.
+CASING_TRANSITION_THRESHOLD = _env_int("NA0S_CASING_TRANSITION_THRESHOLD", 6)
+
+# Weird-casing: minimum ratio of transitions to alpha characters.
+CASING_TRANSITION_RATIO = _env_float("NA0S_CASING_TRANSITION_RATIO", 0.12)
+
+# Default max_decodes parameter for obfuscation_scan (legacy compatibility).
+# Raised from 2 to 5 to support deeper recursive unwrapping.
+DEFAULT_MAX_DECODES = _env_int("NA0S_MAX_DECODES", 5)
+
+# Minimum length for a standalone base64 candidate (before decode attempt).
+MIN_BASE64_LENGTH = _env_int("NA0S_MIN_BASE64_LENGTH", 16)
+
+# Minimum length for a standalone hex candidate (before decode attempt).
+MIN_HEX_LENGTH = _env_int("NA0S_MIN_HEX_LENGTH", 8)
+
+# Minimum printable characters required for an embedded decode to be accepted.
+MIN_PRINTABLE_CHARS = _env_int("NA0S_MIN_PRINTABLE_CHARS", 3)
+
+# Minimum ratio of printable characters in a decoded candidate.
+MIN_PRINTABLE_RATIO = _env_float("NA0S_MIN_PRINTABLE_RATIO", 0.7)
+
+# Minimum alpha characters for ROT13 / reversed / leetspeak candidate checks.
+MIN_CANDIDATE_ALPHA = _env_int("NA0S_MIN_CANDIDATE_ALPHA", 10)
+
+# Minimum text length for composite entropy check to fire.
+MIN_ENTROPY_TEXT_LENGTH = _env_int("NA0S_MIN_ENTROPY_TEXT_LENGTH", 10)
+
+# Minimum letters required for meaningful KL-divergence computation.
+MIN_KL_LETTERS = _env_int("NA0S_MIN_KL_LETTERS", 5)
+
+# Minimum stripped length for a decoded view to be accepted during recursion.
+MIN_DECODED_STRIP_LENGTH = _env_int("NA0S_MIN_DECODED_STRIP_LENGTH", 2)
+
+# Zlib compression level used in compression-ratio analysis (0-9).
+ZLIB_COMPRESSION_LEVEL = _env_int("NA0S_ZLIB_COMPRESSION_LEVEL", 6)
+
 
 # Calc String Randomness (High = Encrypted/gibberish)
 def shannon_entropy(text):
@@ -67,7 +167,7 @@ def shannon_entropy(text):
 
 def _base64(text):
     stripped = "".join(text.split())
-    if len(stripped) < 16 or len(stripped) % 4 != 0: #reject len (% 4 == 1 )
+    if len(stripped) < MIN_BASE64_LENGTH or len(stripped) % 4 != 0: #reject len (% 4 == 1 )
         return False
     if not BASE64_PATTERN.match(stripped):
         return False
@@ -115,7 +215,7 @@ def _extract_embedded_base64(text):
             # and looks like text (not random binary)
             printable_count = sum(1 for c in decoded_str
                                   if c.isprintable() or c.isspace())
-            if printable_count >= 3 and printable_count / max(len(decoded_str), 1) > 0.7:
+            if printable_count >= MIN_PRINTABLE_CHARS and printable_count / max(len(decoded_str), 1) > MIN_PRINTABLE_RATIO:
                 results.append((decoded_str, "base64"))
         except (ValueError, binascii.Error, UnicodeDecodeError):
             continue
@@ -124,7 +224,7 @@ def _extract_embedded_base64(text):
 
 def _hex(text):
     stripped = "".join(text.split())
-    if len(stripped) < 8 or len(stripped) % 2 != 0:
+    if len(stripped) < MIN_HEX_LENGTH or len(stripped) % 2 != 0:
         return False
     return bool(HEX_PATTERN.match(stripped))
 
@@ -161,7 +261,7 @@ def _extract_embedded_hex(text):
             # Only accept if decoded looks like text
             printable_count = sum(1 for c in decoded_str
                                   if c.isprintable() or c.isspace())
-            if printable_count >= 3 and printable_count / max(len(decoded_str), 1) > 0.7:
+            if printable_count >= MIN_PRINTABLE_CHARS and printable_count / max(len(decoded_str), 1) > MIN_PRINTABLE_RATIO:
                 results.append((decoded_str, "hex"))
         except (ValueError, UnicodeDecodeError):
             continue
@@ -310,7 +410,7 @@ def _kl_divergence_from_english(text):
             counts[char] = counts.get(char, 0) + 1
             total += 1
 
-    if total < 5:
+    if total < MIN_KL_LETTERS:
         # Too few letters to compute meaningful KL-divergence
         return 0.0
 
@@ -336,7 +436,7 @@ def _compression_ratio(text):
     if not text:
         return 0.0
     text_bytes = text.encode("utf-8")
-    compressed = zlib.compress(text_bytes, 6)
+    compressed = zlib.compress(text_bytes, ZLIB_COMPRESSION_LEVEL)
     if len(compressed) == 0:
         return 0.0
     return len(text_bytes) / float(len(compressed))
@@ -405,7 +505,7 @@ def _composite_entropy_check(text, entropy=None):
       because zlib header overhead makes shorter text always appear to
       compress poorly.
     """
-    if len(text) < 10:
+    if len(text) < MIN_ENTROPY_TEXT_LENGTH:
         return False
 
     # Signal 1: Shannon entropy
@@ -542,7 +642,7 @@ def _is_rot13_candidate(text):
 
     # Skip very short text or text with too few letters
     alpha_count = sum(1 for c in text if c.isalpha())
-    if alpha_count < 10:
+    if alpha_count < MIN_CANDIDATE_ALPHA:
         return False, ""
 
     decoded = _decode_rot13(text)
@@ -897,7 +997,7 @@ def _is_reversed_candidate(text):
     Requires >= 10 alpha characters.
     """
     alpha_count = sum(1 for c in text if c.isalpha())
-    if alpha_count < 10:
+    if alpha_count < MIN_CANDIDATE_ALPHA:
         return False, []
 
     candidates = []
@@ -990,7 +1090,7 @@ def _is_leetspeak_candidate(text):
     - Leet density above threshold (>= 10% of alpha+digit chars are leet subs)
     - Normalized text contains attack keywords
     """
-    if len(text) < 10:
+    if len(text) < MIN_CANDIDATE_ALPHA:
         return False, ""
 
     density = _leet_density(text)
@@ -1078,6 +1178,70 @@ def _is_numeric_candidate(text):
     return False, "", ""
 
 
+def _scan_invisible_chars(text):
+    """Detect invisible Unicode characters used as obfuscation.
+
+    Checks for Unicode categories that are invisible when rendered but can
+    be used to split tokens, hide payloads, or evade pattern matching:
+
+      - Cf (Format): Zero-width spaces (U+200B), zero-width joiners (U+200D),
+        RTL/LTR overrides (U+202A-U+202E), word joiners (U+2060), BOM (U+FEFF),
+        and Unicode Tag Characters (U+E0001-U+E007F).
+      - Cs (Surrogate): Lone surrogates -- invalid in UTF-8 interchange.
+      - Cc (Control): Control chars excluding legitimate whitespace (\\n, \\r, \\t).
+      - Cn (Unassigned): Unassigned codepoints used to probe LLM tokenizers.
+
+    Also detects Variation Selector abuse (Mn category, U+FE00-FE0F and
+    U+E0100-E01EF) when present in suspicious density (>= 3 selectors),
+    as these are exploited for steganographic payload hiding ("Sneaky Bits").
+
+    Returns (has_invisible, count, stripped_text) where:
+      - has_invisible: True if invisible chars were found
+      - count: number of invisible characters detected
+      - stripped_text: text with invisible chars removed (decoded view)
+
+    NOTE: This is complementary to L0's strip_invisible_chars().  L0 strips
+    invisible chars during normalization BEFORE L2 runs, so this detector
+    primarily catches cases where L2 is called directly on raw text (e.g.,
+    from tests, CLI tools, or custom integrations that bypass L0).  When
+    called from the standard predict.py pipeline, the text will already be
+    clean and this will be a no-op -- the invisible_chars evasion flag will
+    instead be bridged from L0's anomaly_flags (see predict.py).
+    """
+    count = 0
+    vs_count = 0
+    stripped = []
+
+    for ch in text:
+        cp = ord(ch)
+        cat = unicodedata.category(ch)
+
+        # Variation Selectors (Mn category) -- count separately
+        if (0xFE00 <= cp <= 0xFE0F) or (0xE0100 <= cp <= 0xE01EF):
+            vs_count += 1
+            continue  # strip from output
+
+        # Standard invisible/control categories
+        if cat == "Cf":  # Format chars (ZWSP, ZWNJ, ZWJ, RTL overrides, tags)
+            count += 1
+            continue
+        if cat == "Cs":  # Lone surrogates
+            count += 1
+            continue
+        if cat in ("Cc", "Cn") and ch not in "\n\r\t":
+            count += 1
+            continue
+
+        stripped.append(ch)
+
+    # Only count VS abuse if >= 3 (a single VS on an emoji is normal)
+    if vs_count >= 3:
+        count += vs_count
+
+    stripped_text = "".join(stripped)
+    return count > 0, count, stripped_text
+
+
 def _scan_single_layer(text):
     """Scan a single layer of text for obfuscation signals.
 
@@ -1090,6 +1254,18 @@ def _scan_single_layer(text):
     """
     flags = []
     decoded_pairs = []  # list of (decoded_text, encoding_type)
+
+    # --- Invisible character detection ---
+    # Detect invisible Unicode chars used for token splitting, payload
+    # hiding, or pattern-matching evasion.  Produces both a flag and a
+    # decoded view with the invisible chars stripped so downstream layers
+    # (L1 rules, ML) can match the reconstituted text.
+    has_invisible, invis_count, stripped_text = _scan_invisible_chars(text)
+    if has_invisible and invis_count >= 2:
+        flags.append("invisible_chars")
+        # Only add decoded view if stripping actually changed the text
+        if stripped_text != text and stripped_text.strip():
+            decoded_pairs.append((stripped_text, "invisible_chars_stripped"))
 
     # --- High-entropy check (composite 2-of-3 voting) ---
     #
@@ -1137,7 +1313,7 @@ def _scan_single_layer(text):
     # We raise the threshold from 0.30 to 0.40 AND exempt detected
     # structured-data formats (tables, code blocks) to further reduce FPs.
     punct_ratio = _punctuation_ratio(text)
-    if punct_ratio >= 0.40 and not _is_structured_data(text):
+    if punct_ratio >= PUNCTUATION_FLOOD_RATIO and not _is_structured_data(text):
         flags.append("punctuation_flood")
 
     # --- Weird-casing check ---
@@ -1152,8 +1328,8 @@ def _scan_single_layer(text):
     # We require BOTH a minimum absolute count AND a ratio above 0.12
     # (above most normal English, catches saturation attacks at 0.13+).
     casing_ratio = _casing_transition_ratio(text)
-    if (_casing_transitions(text) >= 6
-            and casing_ratio >= 0.12
+    if (_casing_transitions(text) >= CASING_TRANSITION_THRESHOLD
+            and casing_ratio >= CASING_TRANSITION_RATIO
             and not _is_structured_data(text)):
         flags.append("weird_casing")
 
@@ -1248,6 +1424,20 @@ def _scan_single_layer(text):
     if is_numeric and numeric_decoded:
         decoded_pairs.append((numeric_decoded, numeric_type))
         flags.append(numeric_type)
+
+    # --- Whitespace injection detection (D4 / roadmap gap closure) ---
+    # Zero-width characters inserted between letters of attack keywords
+    # evade regex matching (e.g., "i\u200bg\u200bn\u200bo\u200br\u200be").
+    # L0 normalization strips these chars, but L2 independently detects
+    # the technique for defense-in-depth and to produce a decoded view
+    # with encoding provenance in the audit chain.
+    #
+    # Strategy: strip all zero-width chars; if the result differs from
+    # the input, add it as a decoded view with encoding="whitespace_injection".
+    stripped_zw = _ZERO_WIDTH_RE.sub("", text)
+    if stripped_zw != text:
+        decoded_pairs.append((stripped_zw, "whitespace_injection"))
+        flags.append("whitespace_injection")
 
     return flags, decoded_pairs
 
@@ -1350,7 +1540,7 @@ def _build_encoding_chains(decoded_chain):
     return chains
 
 
-def obfuscation_scan(text, max_decodes=2, max_depth=_DEFAULT_MAX_DEPTH):
+def obfuscation_scan(text, max_decodes=DEFAULT_MAX_DECODES, max_depth=_DEFAULT_MAX_DEPTH):
     """Scan text for obfuscation, recursively unwrapping nested encodings.
 
     BUG-L2-02 FIX (2026-02-20): Previous flat decode budget (max_decodes=2)
@@ -1426,7 +1616,7 @@ def obfuscation_scan(text, max_decodes=2, max_depth=_DEFAULT_MAX_DEPTH):
                 continue
 
             # Skip empty or trivially short decodes
-            if len(decoded_text.strip()) < 2:
+            if len(decoded_text.strip()) < MIN_DECODED_STRIP_LENGTH:
                 continue
 
             # Compute actual depth: max_depth counts down, so actual
@@ -1485,7 +1675,7 @@ if __name__ == "__main__":
     ]
 
     for sample in samples:
-        result = obfuscation_scan(sample, max_decodes=2)
+        result = obfuscation_scan(sample)
         print("Input: {0}".format(sample))
         print("Result: {0}".format(result))
         print("-" * 40)

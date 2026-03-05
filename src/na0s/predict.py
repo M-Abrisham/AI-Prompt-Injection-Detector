@@ -117,6 +117,20 @@ _embedding_env = os.environ.get("NA0S_EMBEDDING_ENABLED", "").strip().lower()
 if _embedding_env in ("0", "false"):
     _HAS_EMBEDDING_CLASSIFIER = False
 
+# Layer 2: ASCII art detector — optional import
+try:
+    from .layer2.ascii_art_detector import detect_ascii_art
+    _HAS_ASCII_ART = True
+except ImportError:
+    _HAS_ASCII_ART = False
+
+# Layer 2: Whitespace steganography detector — optional import
+try:
+    from .layer2.whitespace_stego import detect_whitespace_stego
+    _HAS_WHITESPACE_STEGO = True
+except ImportError:
+    _HAS_WHITESPACE_STEGO = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 DECISION_THRESHOLD = 0.55
@@ -696,6 +710,44 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     obs = obfuscation_scan(clean)
     obs_flags = obs["evasion_flags"] if obs["evasion_flags"] else []
 
+    # Bridge L0 invisible-char detection into L2 evasion flags.
+    # L0 strips invisible chars BEFORE L2 runs, so L2's own invisible_chars
+    # detector won't fire on already-cleaned text.  We bridge the L0 flag
+    # here so that invisible-char evasion contributes to the obfuscation
+    # weight in _weighted_decision (0.15 per flag, capped at 0.3).
+    # Without this bridge, invisible chars only appear in technique_tags
+    # (line ~790) but have zero scoring impact.
+    if "invisible_chars_found" in l0.anomaly_flags and "invisible_chars" not in obs_flags:
+        obs_flags.append("invisible_chars")
+
+    # --- Layer 2: ASCII art detection ---
+    # Detects ArtPrompt-style attacks (ACL 2024) that encode forbidden words
+    # as ASCII art.  Runs on sanitized text (art structure survives L0).
+    _l2_extra_boost = 0.0
+    if _HAS_ASCII_ART:
+        try:
+            _ascii_art_result = detect_ascii_art(clean)
+            if _ascii_art_result.detected:
+                obs_flags.append("ascii_art")
+                # Confidence-scaled boost: 0.05 at low confidence, up to 0.10
+                _l2_extra_boost += 0.05 + 0.05 * min(_ascii_art_result.confidence, 1.0)
+        except Exception:
+            pass  # graceful degradation
+
+    # --- Layer 2: Whitespace steganography detection ---
+    # MUST run on RAW text (before L0 strips trailing whitespace).
+    if _HAS_WHITESPACE_STEGO:
+        try:
+            _stego_result = detect_whitespace_stego(text)
+            if _stego_result.detected:
+                obs_flags.append("whitespace_stego")
+                # If a decoded payload was recovered, classify it through ML
+                # as an additional decoded view.
+                if _stego_result.decoded_payload:
+                    obs["decoded_views"].append(_stego_result.decoded_payload)
+        except Exception:
+            pass  # graceful degradation
+
     # BUG-L2-03 FIX (2026-02-20): Do NOT extend `hits` with obs_flags
     # before calling _weighted_decision.  Previously, obs flags were added
     # to `hits` here AND passed separately as `obs_flags`, causing them to
@@ -758,6 +810,12 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
                                           structural=structural,
                                           embedding_score=embedding_score,
                                           threshold=threshold)
+
+    # --- Layer 2 extra boost (ascii art / whitespace stego) ---
+    # Applied after _weighted_decision so it doesn't interfere with the
+    # ML-uncertain-zone cap or override protection logic inside that function.
+    if _l2_extra_boost > 0:
+        composite = min(composite + _l2_extra_boost, 1.0)
 
     # --- E1 extraction floor ---
     # When a critical-severity E1 rule fires AND the embedding classifier
@@ -1193,6 +1251,8 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
         "high_entropy": "D4",
         "punctuation_flood": "D4",
         "weird_casing": "D4",
+        "ascii_art": "D4.9",
+        "whitespace_stego": "D4.10",
         # language_detector.py flags
         "non_english_input": "D6",
         "mixed_language_input": "D6.3",

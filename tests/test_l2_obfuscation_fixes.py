@@ -669,8 +669,9 @@ class TestCompositeEntropyCheckObfuscated(unittest.TestCase):
 
     def test_base64_random_bytes(self):
         """Base64 of random bytes -- FLAGGED."""
-        import os as _os
-        payload = base64.b64encode(_os.urandom(75)).decode()
+        import random as _rng
+        _rng.seed(42)
+        payload = base64.b64encode(bytes(_rng.getrandbits(8) for _ in range(75))).decode()
         self.assertTrue(
             _composite_entropy_check(payload),
             "Base64 random bytes not caught: len={}".format(len(payload)),
