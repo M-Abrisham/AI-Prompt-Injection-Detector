@@ -77,7 +77,7 @@ jobs:
             echo "Canary evaluation PASSED -- all quality gates met"
           else
             echo "result=FAILED" >> $GITHUB_OUTPUT
-            echo "::warning::Canary evaluation FAILED -- quality gates not met"
+            echo "::error::Canary evaluation FAILED -- quality gates not met"
           fi
           # Extract TPR and TNR lines from output for PR body
           TPR_LINE=$(grep -o 'Injection TPR >= [0-9]*%:.*' canary_output.txt || echo "TPR: unable to parse")
@@ -86,16 +86,8 @@ jobs:
           echo "tnr_line=${TNR_LINE}" >> $GITHUB_OUTPUT
           exit 0
 
-      - name: Check canary results
-        if: steps.canary.outputs.result == 'FAILED'
-        run: |
-          echo "::warning::Canary evaluation quality gates failed."
-          echo "The retrained model did not meet canary thresholds."
-          echo "TPR gate: ${{ steps.canary.outputs.tpr_line }}"
-          echo "TNR gate: ${{ steps.canary.outputs.tnr_line }}"
-          echo "The PR will be created with a warning label."
-
       - name: Deploy model and update hashes
+        if: steps.canary.outputs.result == 'PASSED'
         run: python scripts/deploy_model.py
 
       - name: Check for model changes
@@ -110,7 +102,7 @@ jobs:
           fi
 
       - name: Create PR with retrained model
-        if: steps.diff.outputs.changed == 'true'
+        if: steps.canary.outputs.result == 'PASSED' && steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CANARY_RESULT: ${{ steps.canary.outputs.result }}
@@ -180,3 +172,11 @@ jobs:
           ---
           *Automated by auto-retrain.yml*" \
             --base main ${LABEL_FLAGS}
+
+      - name: Fail workflow if canary did not pass
+        if: steps.canary.outputs.result == 'FAILED'
+        run: |
+          echo "::error::Canary evaluation failed. Deploy and PR were skipped."
+          echo "TPR gate: ${{ steps.canary.outputs.tpr_line }}"
+          echo "TNR gate: ${{ steps.canary.outputs.tnr_line }}"
+          exit 1

@@ -7,6 +7,8 @@ data/*
 data/holdout/*.jsonl
 !data/benchmark/
 data/benchmark/*.jsonl
+!data/canary/
+data/canary/*.json
 !data/aggregated/
 data/aggregated/*.jsonl
 data/aggregated/*.json

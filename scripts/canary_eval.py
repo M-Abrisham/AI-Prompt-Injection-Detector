@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import sys
 import time
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Ensure the project src/ is importable when running as a standalone script.
@@ -38,6 +40,8 @@ from na0s.predict import classify_prompt, DECISION_THRESHOLD
 # Defaults
 # ---------------------------------------------------------------------------
 _DEFAULT_CSV = str(_PROJECT_ROOT / "data" / "canary" / "canary_eval.csv")
+_DEFAULT_JSON = str(_PROJECT_ROOT / "data" / "canary" / "canary_results.json")
+_DEFAULT_JSONL = str(_PROJECT_ROOT / "data" / "canary" / "canary_history.jsonl")
 _INJ_ACCURACY_THRESHOLD = 0.95   # TPR -- injection recall
 _BEN_ACCURACY_THRESHOLD = 0.90   # TNR -- benign recall (1 - FPR)
 
@@ -260,7 +264,83 @@ def evaluate(csv_path: str, verbose: bool = False) -> dict:
         "technique_results": dict(technique_results),
         "passed": passed,
         "elapsed_s": elapsed,
+        "_rows": rows,          # kept for JSON export; not part of public API
     }
+
+
+# ---------------------------------------------------------------------------
+# JSON export
+# ---------------------------------------------------------------------------
+
+def export_json(
+    result: dict,
+    csv_path: str,
+    json_path: str = _DEFAULT_JSON,
+    jsonl_path: str = _DEFAULT_JSONL,
+) -> None:
+    """Write canary_results.json and append a summary line to canary_history.jsonl."""
+
+    rows = result["_rows"]          # injected by evaluate()
+    n_inj = sum(1 for r in rows if r["label"] == 1)
+    n_ben = sum(1 for r in rows if r["label"] == 0)
+    metrics = result["metrics"]
+    elapsed = result["elapsed_s"]
+    passed = result["passed"]
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Build the errors list in the documented format.
+    errors_export = []
+    for idx, row, pred_label, score in result["errors"]:
+        errors_export.append({
+            "index": idx,
+            "true_label": row["label"],
+            "predicted_label": pred_label,
+            "score": score,
+            "technique": row.get("technique", ""),
+            "text_preview": row["text"][:80],
+        })
+
+    payload = {
+        "timestamp": timestamp,
+        "csv_path": csv_path,
+        "sample_count": {
+            "total": len(rows),
+            "injection": n_inj,
+            "benign": n_ben,
+        },
+        "metrics": metrics,
+        "per_technique": result["technique_results"],
+        "passed": passed,
+        "thresholds": {
+            "inj_accuracy": _INJ_ACCURACY_THRESHOLD,
+            "ben_accuracy": _BEN_ACCURACY_THRESHOLD,
+        },
+        "errors": errors_export,
+        "elapsed_s": elapsed,
+    }
+
+    # Write full results file (overwrite).
+    out_path = Path(json_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    print(f"\n  JSON results written to: {out_path}")
+
+    # Append one-line summary to history log.
+    history_path = Path(jsonl_path)
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "timestamp": timestamp,
+        "passed": passed,
+        "accuracy": metrics["accuracy"],
+        "tpr": metrics["tpr"],
+        "tnr": metrics["tnr"],
+        "f1": metrics["f1"],
+        "sample_count": len(rows),
+    }
+    with open(history_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(summary) + "\n")
+    print(f"  History appended to:     {history_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +361,26 @@ def main():
         action="store_true",
         help="Print per-sample results",
     )
+
+    json_group = parser.add_mutually_exclusive_group()
+    json_group.add_argument(
+        "--json",
+        dest="json_path",
+        default=_DEFAULT_JSON,
+        metavar="PATH",
+        help=(
+            f"Path for JSON results output "
+            f"(default: {_DEFAULT_JSON})"
+        ),
+    )
+    json_group.add_argument(
+        "--no-json",
+        dest="json_path",
+        action="store_const",
+        const=None,
+        help="Disable JSON export entirely",
+    )
+
     args = parser.parse_args()
 
     if not os.path.isfile(args.csv):
@@ -288,6 +388,9 @@ def main():
         sys.exit(2)
 
     result = evaluate(args.csv, verbose=args.verbose)
+
+    if args.json_path is not None:
+        export_json(result, csv_path=args.csv, json_path=args.json_path)
 
     sys.exit(0 if result["passed"] else 1)
 
