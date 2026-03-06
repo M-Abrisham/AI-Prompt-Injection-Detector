@@ -50,8 +50,14 @@ jobs:
       - name: Validate quarantined datasets
         run: python -m scripts.quarantine --validate-quarantined
 
-      - name: Promote validated quarantined datasets
+      - name: Promote validated quarantined → staging
         run: python -m scripts.quarantine --promote-validated
+
+      - name: Validate staged datasets (label quality)
+        run: python -m scripts.quarantine --validate-staged
+
+      - name: Promote staged → production
+        run: python -m scripts.quarantine --promote-staged-validated
 
       - name: Generate synthetic training samples (D3/D4/D5/D6/D7/D8/E1/E2/C1/O1/P1)
         run: python scripts/gen_all_datasets.py
@@ -151,13 +157,15 @@ jobs:
           **Pipeline steps completed:**
           1. Synced all datasets from \`data/datasets.yaml\`
           2. Ingested harvest/scrape discoveries via quarantine routing
-          3. Ran quarantine validation (\`--validate-quarantined\`)
-          4. Explicitly promoted validated quarantine entries
-          5. Merged and deduplicated into \`combined_data.csv\`
-          6. Extracted TF-IDF features (10K max)
-          7. Trained calibrated LogisticRegression
-          8. Deployed model + updated \`KNOWN_HASHES\`
-          9. Ran canary evaluation (200 hand-verified samples)
+          3. Validated quarantined datasets (tier-appropriate checks)
+          4. Promoted validated → staging
+          5. Validated staged datasets (label quality)
+          6. Promoted staged → production (\`data/aggregated/\`)
+          7. Merged and deduplicated into \`combined_data.csv\`
+          8. Extracted TF-IDF features (10K max)
+          9. Trained calibrated LogisticRegression
+          10. Deployed model + updated \`KNOWN_HASHES\`
+          11. Ran canary evaluation (200 hand-verified samples)
 
           **Training samples:** ~${SAMPLE_COUNT}
 

@@ -162,3 +162,22 @@ quarantine:
 
   # Require explicit --promote to move data out of quarantine
   require_manual_promotion: true
+
+# ── Staging Settings ─────────────────────────────────────────────────────
+
+staging:
+  # Directory where staged data is held pending label quality validation
+  directory: "data/staging"
+
+  # Maximum days data can sit in staging before auto-expiry warning
+  max_staging_days: 14
+
+  # Minimum rows required per staged dataset for promotion
+  min_rows: 10
+
+  # Label quality thresholds
+  label_quality:
+    # Both classes must be present
+    require_both_classes: true
+    # Maximum suspicious label rate (safe text with injection phrases)
+    max_suspicious_rate: 0.15

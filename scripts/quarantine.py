@@ -3,24 +3,18 @@
 
 Enforces tiered validation and quarantine policies for all data sources.
 Datasets from untrusted sources (tier3/tier4) are held in data/quarantine/
-until they pass validation and are explicitly promoted by a maintainer.
+until they pass validation, move through a staging layer for label quality
+checks, and are explicitly promoted to production by a maintainer.
 
 Workflow:
-    1. Ingest: Data arrives from sync_datasets.py, social_scraper.py,
-       or weekly_harvest.py.  quarantine.py checks the source's trust
-       tier and routes accordingly:
-         - tier1/tier2 -> data/raw/ or data/aggregated/ (direct)
-         - tier3/tier4 -> data/quarantine/<source_name>/ (held)
+    1. Ingest: tier1/tier2 -> data/raw/ (direct), tier3/tier4 -> data/quarantine/
+    2. Validate: --validate-quarantined runs tier-appropriate checks
+    3. Stage: --promote-validated moves passed entries to data/staging/
+    4. Stage Validate: --validate-staged runs label quality checks
+    5. Promote: --promote-staged-validated moves to data/aggregated/ (production)
 
-    2. Review: A maintainer runs ``quarantine.py --review`` to list all
-       quarantined datasets with their validation status.
-
-    3. Promote: After manual inspection, run
-       ``quarantine.py --promote <name>`` to move validated data out of
-       quarantine into data/aggregated/.
-
-    4. Reject: Run ``quarantine.py --reject <name>`` to permanently
-       remove quarantined data that failed review.
+    Reject: Run ``quarantine.py --reject <name>`` to permanently
+    remove quarantined data that failed review.
 
 All actions are logged to data/quarantine/quarantine_log.json.
 
@@ -33,6 +27,9 @@ Usage::
     python scripts/quarantine.py --reject <name>
     python scripts/quarantine.py --status
     python scripts/quarantine.py --validate-quarantined
+    python scripts/quarantine.py --validate-staged
+    python scripts/quarantine.py --promote-to-production <name>
+    python scripts/quarantine.py --promote-staged-validated
 """
 
 from __future__ import annotations
@@ -56,6 +53,7 @@ QUARANTINE_DIR = os.path.join(ROOT, "data", "quarantine")
 QUARANTINE_LOG = os.path.join(ROOT, "data", "quarantine", "quarantine_log.json")
 RAW_DIR = os.path.join(ROOT, "data", "raw")
 AGGREGATED_DIR = os.path.join(ROOT, "data", "aggregated")
+STAGING_DIR = os.path.join(ROOT, "data", "staging")
 
 
 # ── Trust Tier Resolution ─────────────────────────────────────────────────
@@ -161,7 +159,8 @@ def _log_action(action, name, source_id, tier, details=None):
 
     Args:
         action: One of "ingest", "promote", "reject", "validate",
-                "direct_pass", "expire_warning".
+                "direct_pass", "expire_warning", "stage",
+                "validate_staged", "promote_to_production".
         name: Dataset name (directory name under quarantine).
         source_id: Original source identifier.
         tier: Tier key that was resolved.
@@ -560,10 +559,11 @@ def review(config=None):
 
 
 def promote(name, config=None):
-    """Promote a quarantined dataset to data/aggregated/.
+    """Promote a quarantined dataset to data/staging/.
 
-    Moves validated data out of quarantine.  Requires that validation
-    has passed (validation_status == "passed" in metadata).
+    Moves validated data from quarantine to the staging layer for
+    additional label quality checks before production.  Requires that
+    validation has passed (validation_status == "passed" in metadata).
 
     Args:
         name: Directory name under data/quarantine/.
@@ -597,47 +597,60 @@ def promote(name, config=None):
             "message": f"Validation status: {validation_status}",
         }
 
-    # Move data files to aggregated/
-    os.makedirs(AGGREGATED_DIR, exist_ok=True)
+    # Copy data files to staging/
+    staging_entry_dir = os.path.join(STAGING_DIR, name)
+    os.makedirs(staging_entry_dir, exist_ok=True)
     moved_files = []
     for fname in os.listdir(entry_dir):
         if fname.endswith((".csv", ".jsonl")):
             src = os.path.join(entry_dir, fname)
-            dst = os.path.join(AGGREGATED_DIR, fname)
+            dst = os.path.join(staging_entry_dir, fname)
             shutil.copy2(src, dst)
             moved_files.append(fname)
-            print(f"  Promoted: {fname} -> {AGGREGATED_DIR}")
+            print(f"  Staged: {fname} -> {staging_entry_dir}")
 
     if not moved_files:
         print(f"  WARN: No data files found to promote in {name}")
         return {"action": "error", "message": "No data files"}
 
-    # Update metadata
+    # Copy metadata.json to staging directory
+    meta_src = os.path.join(entry_dir, "metadata.json")
+    meta_dst = os.path.join(staging_entry_dir, "metadata.json")
+    if os.path.isfile(meta_src):
+        shutil.copy2(meta_src, meta_dst)
+
+    # Update staging metadata
+    _update_metadata(staging_entry_dir, {
+        "staged_at": datetime.now(timezone.utc).isoformat(),
+        "validation_status": "staged",
+    })
+
+    # Update quarantine metadata
     _update_metadata(entry_dir, {
         "promoted_at": datetime.now(timezone.utc).isoformat(),
-        "validation_status": "promoted",
+        "validation_status": "staged",
     })
 
     # Log
     source_id = meta.get("source_id", "unknown")
     tier_key = meta.get("tier", "tier3")
-    _log_action("promote", name, source_id, tier_key, {
+    _log_action("stage", name, source_id, tier_key, {
         "files": moved_files,
-        "destination": AGGREGATED_DIR,
+        "destination": staging_entry_dir,
     })
 
-    # Clean up quarantine entry (keep metadata as audit trail)
+    # Clean up quarantine entry data files (keep metadata as audit trail)
     for fname in os.listdir(entry_dir):
         fpath = os.path.join(entry_dir, fname)
         if fname.endswith((".csv", ".jsonl")):
             os.remove(fpath)
     print(f"  Cleaned quarantine entry: {entry_dir}")
-    print(f"  Promotion complete for {name}")
+    print(f"  Staging complete for {name}")
 
     return {
         "action": "promoted",
         "source": entry_dir,
-        "destination": AGGREGATED_DIR,
+        "destination": staging_entry_dir,
         "files": moved_files,
     }
 
@@ -766,6 +779,365 @@ def reject(name, reason="manual_rejection", config=None):
     return {"action": "rejected", "name": name, "reason": reason}
 
 
+# ── Staging Operations ────────────────────────────────────────────────────
+
+
+def _load_staged_data(file_path):
+    """Load rows from a CSV or JSONL file for label quality checks.
+
+    Returns:
+        list[dict]: List of row dicts with at least 'text' and 'label' keys.
+    """
+    import csv
+
+    ext = os.path.splitext(file_path)[1].lower()
+    rows = []
+    try:
+        if ext == ".csv":
+            with open(file_path, "r", encoding="utf-8") as fh:
+                reader = csv.DictReader(fh)
+                for row in reader:
+                    rows.append(row)
+        elif ext == ".jsonl":
+            with open(file_path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line:
+                        rows.append(json.loads(line))
+    except (OSError, json.JSONDecodeError, csv.Error) as exc:
+        print(f"    WARN: Could not load {file_path}: {exc}")
+    return rows
+
+
+def _check_label_quality(rows):
+    """Run label quality checks on loaded data rows.
+
+    Checks:
+        a. Label distribution: both classes must be present
+        b. Suspicious label flips: safe text with injection phrases,
+           injection text without any injection signal
+        c. Minimum row count >= 10
+
+    Args:
+        rows: List of row dicts with 'text' and 'label' keys.
+
+    Returns:
+        dict: Result with keys: passed, issues (list of strings).
+    """
+    issues = []
+
+    # c. Minimum row count
+    if len(rows) < 10:
+        issues.append(f"Insufficient rows: {len(rows)} (minimum 10 required)")
+
+    # Extract labels (handle various label column names)
+    labels = []
+    for row in rows:
+        label = row.get("label", row.get("is_injection", row.get("class", None)))
+        if label is not None:
+            labels.append(str(label).strip().lower())
+
+    if not labels:
+        issues.append("No label column found in data")
+        return {"passed": False, "issues": issues}
+
+    # a. Label distribution -- both classes present
+    unique_labels = set(labels)
+    if len(unique_labels) < 2:
+        issues.append(
+            f"Only one label class present: {unique_labels}. "
+            "Both classes (e.g., 0/1 or safe/injection) required."
+        )
+
+    # b. Suspicious label flips
+    injection_phrases = [
+        "ignore previous", "ignore above", "disregard",
+        "new instruction", "override", "system prompt",
+        "forget everything", "you are now", "act as",
+        "jailbreak", "bypass", "reveal your",
+    ]
+    suspicious_safe = 0
+    suspicious_injection = 0
+    for row in rows:
+        text = str(row.get("text", row.get("prompt", ""))).lower()
+        label = str(
+            row.get("label", row.get("is_injection", row.get("class", "")))
+        ).strip().lower()
+
+        is_safe_label = label in ("0", "safe", "benign", "false", "no")
+        is_injection_label = label in ("1", "injection", "malicious", "true", "yes")
+
+        if is_safe_label:
+            if any(phrase in text for phrase in injection_phrases):
+                suspicious_safe += 1
+        elif is_injection_label:
+            has_signal = any(phrase in text for phrase in injection_phrases)
+            # Also check for very short injection-labeled text (likely mislabeled)
+            if not has_signal and len(text) < 20:
+                suspicious_injection += 1
+
+    if suspicious_safe > 0:
+        issues.append(
+            f"Found {suspicious_safe} safe-labeled row(s) containing "
+            "injection phrases (possible label flip)"
+        )
+    if suspicious_injection > 0:
+        issues.append(
+            f"Found {suspicious_injection} injection-labeled row(s) with "
+            "no injection signal and very short text (possible label flip)"
+        )
+
+    passed = len(issues) == 0
+    return {"passed": passed, "issues": issues}
+
+
+def validate_staged(config=None):
+    """Run label quality validation on all datasets in data/staging/.
+
+    For each staged entry directory:
+      - Read metadata.json
+      - Load CSV/JSONL data files
+      - Run label quality checks
+      - Update metadata with staging_validation_status and staging_validated_at
+
+    Returns:
+        list[dict]: Validation results for each staged entry.
+    """
+    if config is None:
+        config = load_trust_config()
+
+    if not os.path.isdir(STAGING_DIR):
+        print("  No staging directory found.")
+        return []
+
+    results = []
+    for name in sorted(os.listdir(STAGING_DIR)):
+        entry_dir = os.path.join(STAGING_DIR, name)
+        if not os.path.isdir(entry_dir):
+            continue
+
+        meta = _read_metadata(entry_dir)
+        if meta is None:
+            print(f"  WARN: {name} -- no metadata.json, skipping")
+            continue
+
+        print(f"\n  Validating staged: {name}")
+
+        # Find data files
+        data_files = [
+            f for f in os.listdir(entry_dir)
+            if f.endswith((".csv", ".jsonl"))
+        ]
+        if not data_files:
+            print(f"    No data files found in {entry_dir}")
+            _update_metadata(entry_dir, {
+                "staging_validation_status": "error",
+                "staging_validated_at": datetime.now(timezone.utc).isoformat(),
+            })
+            results.append({
+                "name": name,
+                "status": "error",
+                "issues": ["No data files found"],
+            })
+            continue
+
+        # Run label quality checks on all data files
+        all_passed = True
+        all_issues = []
+        for data_file in data_files:
+            data_path = os.path.join(entry_dir, data_file)
+            rows = _load_staged_data(data_path)
+            check_result = _check_label_quality(rows)
+            if not check_result["passed"]:
+                all_passed = False
+            if check_result["issues"]:
+                all_issues.extend(
+                    [f"{data_file}: {issue}" for issue in check_result["issues"]]
+                )
+            print(
+                f"    {data_file}: {'PASS' if check_result['passed'] else 'FAIL'}"
+            )
+            for issue in check_result["issues"]:
+                print(f"      - {issue}")
+
+        status_val = "passed" if all_passed else "failed"
+        _update_metadata(entry_dir, {
+            "staging_validation_status": status_val,
+            "staging_validated_at": datetime.now(timezone.utc).isoformat(),
+            "staging_validation_issues": all_issues,
+        })
+
+        source_id = meta.get("source_id", "unknown")
+        tier_key = meta.get("tier", "tier3")
+        _log_action("validate_staged", name, source_id, tier_key, {
+            "status": status_val,
+            "files_checked": len(data_files),
+            "issues": all_issues,
+        })
+
+        results.append({
+            "name": name,
+            "status": status_val,
+            "issues": all_issues,
+        })
+
+    return results
+
+
+def promote_to_production(name, config=None):
+    """Promote a validated staged dataset from data/staging/ to data/aggregated/.
+
+    Requires that staging_validation_status == "passed" in metadata.
+
+    Args:
+        name: Directory name under data/staging/.
+        config: Pre-loaded trust tier config.
+
+    Returns:
+        dict: Result with keys: action, source, destination.
+    """
+    if config is None:
+        config = load_trust_config()
+
+    entry_dir = os.path.join(STAGING_DIR, name)
+    if not os.path.isdir(entry_dir):
+        print(f"  ERROR: Staging entry not found: {name}", file=sys.stderr)
+        return {"action": "error", "message": f"Not found: {name}"}
+
+    meta = _read_metadata(entry_dir)
+    if meta is None:
+        print(f"  ERROR: No metadata for {name}", file=sys.stderr)
+        return {"action": "error", "message": f"No metadata: {name}"}
+
+    staging_status = meta.get("staging_validation_status", "pending")
+    if staging_status != "passed":
+        print(
+            f"  ERROR: Cannot promote {name} to production -- "
+            f"staging validation status is '{staging_status}'. "
+            f"Run --validate-staged first.",
+            file=sys.stderr,
+        )
+        return {
+            "action": "error",
+            "message": f"Staging validation status: {staging_status}",
+        }
+
+    # Copy data files to aggregated/
+    os.makedirs(AGGREGATED_DIR, exist_ok=True)
+    moved_files = []
+    for fname in os.listdir(entry_dir):
+        if fname.endswith((".csv", ".jsonl")):
+            src = os.path.join(entry_dir, fname)
+            dst = os.path.join(AGGREGATED_DIR, fname)
+            shutil.copy2(src, dst)
+            moved_files.append(fname)
+            print(f"  Promoted to production: {fname} -> {AGGREGATED_DIR}")
+
+    if not moved_files:
+        print(f"  WARN: No data files found to promote in {name}")
+        return {"action": "error", "message": "No data files"}
+
+    # Update metadata
+    _update_metadata(entry_dir, {
+        "promoted_to_production_at": datetime.now(timezone.utc).isoformat(),
+        "validation_status": "production",
+    })
+
+    # Log
+    source_id = meta.get("source_id", "unknown")
+    tier_key = meta.get("tier", "tier3")
+    _log_action("promote_to_production", name, source_id, tier_key, {
+        "files": moved_files,
+        "destination": AGGREGATED_DIR,
+    })
+
+    # Clean up staging entry data files (keep metadata as audit trail)
+    for fname in os.listdir(entry_dir):
+        fpath = os.path.join(entry_dir, fname)
+        if fname.endswith((".csv", ".jsonl")):
+            os.remove(fpath)
+    print(f"  Cleaned staging entry: {entry_dir}")
+    print(f"  Production promotion complete for {name}")
+
+    return {
+        "action": "promoted_to_production",
+        "source": entry_dir,
+        "destination": AGGREGATED_DIR,
+        "files": moved_files,
+    }
+
+
+def promote_staged_validated(config=None):
+    """Promote all staged entries that passed staging validation to production.
+
+    Returns:
+        dict: Summary with counts for promoted/pending/failed/errors.
+    """
+    if config is None:
+        config = load_trust_config()
+
+    summary = {
+        "eligible_entries": 0,
+        "promoted": 0,
+        "pending": 0,
+        "failed": 0,
+        "errors": 0,
+    }
+
+    if not os.path.isdir(STAGING_DIR):
+        print("  No staging directory found.")
+        return summary
+
+    for name in sorted(os.listdir(STAGING_DIR)):
+        entry_dir = os.path.join(STAGING_DIR, name)
+        if not os.path.isdir(entry_dir):
+            continue
+
+        data_files = [
+            f for f in os.listdir(entry_dir)
+            if f.endswith((".csv", ".jsonl"))
+        ]
+        if not data_files:
+            continue
+
+        summary["eligible_entries"] += 1
+        meta = _read_metadata(entry_dir) or {}
+        vstatus = meta.get("staging_validation_status", "pending")
+
+        if vstatus == "passed":
+            result = promote_to_production(name, config)
+            if result.get("action") == "promoted_to_production":
+                summary["promoted"] += 1
+            else:
+                summary["errors"] += 1
+        elif vstatus in ("pending", None):
+            summary["pending"] += 1
+            print(
+                f"  SKIP: {name} staging validation pending. "
+                "Run --validate-staged first."
+            )
+        elif vstatus == "failed":
+            summary["failed"] += 1
+            print(
+                f"  SKIP: {name} failed staging validation. "
+                "Review label quality issues."
+            )
+        else:
+            summary["errors"] += 1
+            print(
+                f"  SKIP: {name} has unknown staging validation "
+                f"status '{vstatus}'."
+            )
+
+    print("\n  Staged promotion summary")
+    print(f"    Eligible entries: {summary['eligible_entries']}")
+    print(f"    Promoted:         {summary['promoted']}")
+    print(f"    Pending:          {summary['pending']}")
+    print(f"    Failed:           {summary['failed']}")
+    print(f"    Errors:           {summary['errors']}")
+    return summary
+
+
 def status(config=None):
     """Print a summary of the trust tier system status.
 
@@ -821,6 +1193,32 @@ def status(config=None):
     print(f"    Passed:   {passed_count} (ready for --promote)")
     print(f"    Failed:   {failed_count}")
 
+    # Staging status
+    staging_count = 0
+    staging_pending = 0
+    staging_passed = 0
+    staging_failed = 0
+    if os.path.isdir(STAGING_DIR):
+        for name in os.listdir(STAGING_DIR):
+            entry_dir = os.path.join(STAGING_DIR, name)
+            if not os.path.isdir(entry_dir):
+                continue
+            staging_count += 1
+            meta = _read_metadata(entry_dir)
+            if meta:
+                svs = meta.get("staging_validation_status", "pending")
+                if svs == "pending":
+                    staging_pending += 1
+                elif svs == "passed":
+                    staging_passed += 1
+                elif svs == "failed":
+                    staging_failed += 1
+
+    print(f"\n  Staging: {staging_count} dataset(s)")
+    print(f"    Pending:  {staging_pending}")
+    print(f"    Passed:   {staging_passed} (ready for --promote-to-production)")
+    print(f"    Failed:   {staging_failed}")
+
     # Log stats
     log_entries = _load_log()
     if log_entries:
@@ -861,12 +1259,12 @@ def build_parser():
     group.add_argument(
         "--promote",
         metavar="NAME",
-        help="Promote a validated quarantine entry to aggregated/.",
+        help="Promote a validated quarantine entry to staging/.",
     )
     group.add_argument(
         "--promote-validated",
         action="store_true",
-        help="Promote all entries with validation_status=passed.",
+        help="Promote all quarantine entries with validation_status=passed to staging.",
     )
     group.add_argument(
         "--reject",
@@ -877,6 +1275,21 @@ def build_parser():
         "--validate-quarantined",
         action="store_true",
         help="Run validation on all quarantined datasets.",
+    )
+    group.add_argument(
+        "--validate-staged",
+        action="store_true",
+        help="Run label quality validation on all staged datasets.",
+    )
+    group.add_argument(
+        "--promote-to-production",
+        metavar="NAME",
+        help="Promote a validated staging entry to production (aggregated/).",
+    )
+    group.add_argument(
+        "--promote-staged-validated",
+        action="store_true",
+        help="Promote all staged entries that passed staging validation to production.",
     )
     group.add_argument(
         "--status",
@@ -958,6 +1371,23 @@ def main(argv=None):
             f"{len(results) - failed} passed, {failed} failed"
         )
         return 0
+
+    elif args.validate_staged:
+        results = validate_staged(config)
+        failed = sum(1 for r in results if r["status"] == "failed")
+        print(
+            f"\n  Staged validation: {len(results)} dataset(s): "
+            f"{len(results) - failed} passed, {failed} failed"
+        )
+        return 0
+
+    elif args.promote_to_production:
+        result = promote_to_production(args.promote_to_production, config)
+        return 0 if result.get("action") == "promoted_to_production" else 1
+
+    elif args.promote_staged_validated:
+        result = promote_staged_validated(config)
+        return 0 if result.get("errors", 0) == 0 else 1
 
     elif args.status:
         status(config)

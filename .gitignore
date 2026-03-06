@@ -12,6 +12,9 @@ data/canary/*.json
 !data/aggregated/
 data/aggregated/*.jsonl
 data/aggregated/*.json
+!data/staging/
+data/staging/*.jsonl
+data/staging/*.json
 !data/harvest/
 data/harvest/known_datasets.txt
 !data/scraped/

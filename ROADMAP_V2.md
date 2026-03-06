@@ -25,30 +25,30 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 
 ## Progress Overview
 
-| Layer | Progress | Done/Total | Status |
-| --- | --- | --- | --- |
-| **L0** Input Sanitization | `████████████████████` | **58/58** | COMPLETE |
-| **L1** Rules Engine | `████████████████████` | **53/53** | COMPLETE |
-| **L2** Obfuscation | `███████████████████░` | **39/41** | 95% |
-| **L3** Structural Features | `█████████████████░░░` | **18/21** | 86% |
-| **L4** ML Classifier | `█████████████░░░░░░░` | **26/38** | 68% |
-| **L5** Embedding Classifier | `██████████████░░░░░░` | **26/37** | 70% |
-| **L6** Cascade & Voting | `████████████░░░░░░░░` | **20/31** | 65% |
-| **L7** LLM Judge | `██████████████░░░░░░` | **26/37** | 70% |
-| **L8** Positive Validation | `███████████████░░░░░` | **20/26** | 77% |
-| **L9** Output Scanner | `█████████░░░░░░░░░░░` | **13/28** | 46% |
-| **L10** Canary Tokens | `████████░░░░░░░░░░░░` | **10/25** | 40% |
-| **L11** Supply Chain | `██████████░░░░░░░░░░` | **12/24** | 50% |
-| **L12** Probe Architecture | `████░░░░░░░░░░░░░░░░` | **12/55** | 22% |
-| **L13** Dataset Pipeline | `████████████░░░░░░░░` | **26/42** | 62% |
-| **L14** CI/CD & Harness | `███████░░░░░░░░░░░░░` | **8/21** | 38% |
-| **L15** Threat Intel | `███████░░░░░░░░░░░░░` | **5/15** | 33% |
-| **L16** Multi-Turn | `███░░░░░░░░░░░░░░░░░` | **3/17** | 18% |
-| **L17** Document Scanning | `░░░░░░░░░░░░░░░░░░░░` | **0/20** | NOT STARTED |
-| **L18** RAG Security | `░░░░░░░░░░░░░░░░░░░░` | **0/18** | NOT STARTED |
-| **L19** Agent / MCP | `░░░░░░░░░░░░░░░░░░░░` | **0/11** | NOT STARTED |
-| **L20** Taxonomy Automation | `█████░░░░░░░░░░░░░░░` | **3/12** | 25% |
-| | | **413/744** | **56%** |
+| Layer  | Progress               | Done/Total | Status   |
+| ---    | ---------------------- | --------   | ------   |
+| **L0** | `████████████████████` | **58/58**  | COMPLETE |
+| **L1** | `████████████████████` | **53/53**  | COMPLETE |
+| **L2** | `███████████████████░` | **39/41**  | 95% |
+| **L3** | `█████████████████░░░` | **18/21**  | 86% |
+| **L4** | `█████████████░░░░░░░` | **26/38**  | 68% |
+| **L5** | `██████████████░░░░░░` | **26/37**  | 70% |
+| **L6** | `████████████░░░░░░░░` | **20/31**  | 65% |
+| **L7** | `██████████████░░░░░░` | **26/37**  | 70% |
+| **L8** | `███████████████░░░░░` | **20/26**  | 77% |
+| **L9** | `█████████░░░░░░░░░░░` | **13/28**  | 46% |
+| **L10**| `████████░░░░░░░░░░░░` | **10/25**  | 40% |
+| **L11**| `██████████░░░░░░░░░░` | **12/24**  | 50% |
+| **L12**| `████░░░░░░░░░░░░░░░░` | **12/55**  | 22% |
+| **L13**| `██████████░░░░░░░░░░` | **21/41**  | 51% |
+| **L14**| `███████░░░░░░░░░░░░░` | **8/21**   | 38% |
+| **L15**| `█████░░░░░░░░░░░░░░░` | **4/14**   | 29% |
+| **L16**| `███░░░░░░░░░░░░░░░░░` | **3/17**   | 18% |
+| **L17**| `░░░░░░░░░░░░░░░░░░░░` | **0/20**   | NOT STARTED |
+| **L18**| `░░░░░░░░░░░░░░░░░░░░` | **0/18**   | NOT STARTED |
+| **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
+| **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
+|        |                        | **403/742** | **54%** |
 
 ---
 
@@ -1079,7 +1079,7 @@ Layer 12 is the adversarial testing framework. Base classes (`Probe`, `Classifie
 
 ---
 
-## Layer 13: Dataset Pipeline — Tasks: 26/42 (62%)
+## Layer 13: Dataset Pipeline — Tasks: 24/41 (59%)
 
 **Files**: `scripts/sync_datasets.py` (251 lines), `scripts/process_data.py` (160 lines), `scripts/validate_data.py` (250 lines), `scripts/integrate_harvest.py` (288 lines), `scripts/deploy_model.py` (87 lines), `scripts/features.py` (39 lines), `scripts/model.py` (67 lines), `scripts/merge_taxonomy_data.py` (113 lines), `scripts/generate_taxonomy_samples.py` (175 lines), `scripts/mine_hard_negatives.py` (513 lines), `scripts/optimize_threshold.py` (272 lines)
 **Workflows**: `.github/workflows/auto-retrain.yml`, `.github/workflows/weekly-harvest.yml`, `.github/workflows/social-scraper.yml`
@@ -1088,7 +1088,7 @@ Layer 12 is the adversarial testing framework. Base classes (`Probe`, `Classifie
 **Status**: Functional automated pipeline — 1.9M samples, auto-retrain on schedule, but safety/validation gaps remain
 
 ### Updated Description
-Layer 13 manages the full data lifecycle: discovery → download → integration → validation → training → deployment. `sync_datasets.py` downloads 23 external datasets (GitHub CSVs + HuggingFace) with SHA-256/commit-SHA freshness checking and lock files. `integrate_harvest.py` now routes harvest/scrape discoveries through trust-tier quarantine ingest (per-source JSONL buckets) before training. `process_data.py` merges all raw CSVs + JSONLs with Unicode-normalized SHA-256 deduplication and stable hash ordering. `validate_data.py` checks schema, text quality, class balance, duplicates, and label consistency. `features.py` extracts TF-IDF features (10K max). `model.py` trains a calibrated LogisticRegression. `deploy_model.py` copies models to package dir and updates KNOWN_HASHES programmatically. `auto-retrain.yml` orchestrates the full pipeline on schedule (Tuesday 8 AM UTC), after harvest/scraper workflows, or on manual trigger — creating a PR with the retrained model. Total dataset: **1.92M unique samples** (1.13M safe + 789K malicious, 88% accuracy).
+Layer 13 manages the full data lifecycle: discovery → download → integration → validation → training → deployment. `sync_datasets.py` downloads 23 external datasets (GitHub CSVs + HuggingFace) with SHA-256/commit-SHA freshness checking and lock files. `integrate_harvest.py` bridges harvest/scrape JSONL output into training CSVs. `process_data.py` merges all raw CSVs + JSONLs with Unicode-normalized SHA-256 deduplication and stable hash ordering. `validate_data.py` checks schema, text quality, class balance, duplicates, and label consistency. `features.py` extracts TF-IDF features (10K max). `model.py` trains a calibrated LogisticRegression. `deploy_model.py` copies models to package dir and updates KNOWN_HASHES programmatically. `auto-retrain.yml` orchestrates the full pipeline on schedule (Tuesday 8 AM UTC), after harvest/scraper workflows, or on manual trigger — creating a PR with the retrained model. Total dataset: **1.92M unique samples** (1.13M safe + 789K malicious, 88% accuracy).
 
 ### TODO List
 
@@ -1104,7 +1104,7 @@ Layer 13 manages the full data lifecycle: discovery → download → integration
 - [x] Auto-retrain GitHub Actions workflow — weekly schedule + `workflow_run` triggers + manual dispatch — `auto-retrain.yml`
 - [x] `deploy_model.py` — copies models to `src/na0s/models/` + updates KNOWN_HASHES via regex replacement
 - [x] `validate_data.py` — schema validation, text quality (min/max length, null bytes), class balance, duplicate detection, label consistency warnings
-- [x] `integrate_harvest.py` — quarantine-aware routing: stages per-source JSONL and ingests via `scripts.quarantine` (tier3/tier4 held until validation + promotion)
+- [x] `integrate_harvest.py` — bridges harvest/scrape JSONL → `data/raw/harvested_samples.csv` (text, label) format
 - [x] `process_data.py` rewrite — universal aggregator (globs all CSVs from `data/raw/` + JSONLs from `data/aggregated/` + `data/harvest/`)
 - [x] `sync_datasets.py` crash fix — `except Exception` catch-all prevents single-source failures from blocking remaining downloads
 - [x] Social scraper + weekly harvest workflow fixes (6 bugs: `total_new`→`total_discovered`, `latest_scrape.json`→`scrape_history.json`, CyberSecEval URL, Reddit window, kaggle dep, Twitter warning)
@@ -1119,14 +1119,13 @@ Layer 13 manages the full data lifecycle: discovery → download → integration
 - [x] **BUG-L13-5 (LOW)**: Merge not idempotent — re-running shifts sample ordering. **Fix**: Sort by text hash before writing. ✅ DONE (2026-03-05) — both `process_data.py` and `mine_hard_negatives.py` now sort by stable normalized text hash before writing output.
 - [x] **BUG-L13-6 (HIGH)**: `social_scraper.py` labels content as injection on single weak regex match (`weak_hits >= 1` → `label=1, confidence=0.40`). A Reddit post mentioning "jailbreak" in benign context gets mislabeled. **Fix**: Require `weak_hits >= 2` or 1 strong signal. ✅ DONE (2026-03-05) — `_classify_injection()` now treats `weak_hits == 1` as benign.
 - [x] **BUG-L13-7 (MEDIUM)**: `gen_all_datasets.py` output (`data/holdout/`, `data/benchmark/`) never fed into training pipeline. Synthetic samples for D3/D4/D5/D6/A1 exist but model never sees them. **Fix**: Include in `process_data.py` glob paths or merge into `data/raw/`. ✅ DONE (2026-03-05) — `process_data.py` ingestion is validated to include JSONL files from both `data/holdout/` and `data/benchmark/`.
-- [x] **BUG-L13-8 (HIGH)**: Auto-retrain path bypassed quarantine controls — harvest/scrape samples could be integrated without explicit quarantine validation/promotion gates. **Fix**: Route discovery ingest through `quarantine --ingest` and add `--validate-quarantined` + explicit promotion steps before `process_data`. ✅ DONE (2026-03-05) — `integrate_harvest.py`, `quarantine.py`, and `auto-retrain.yml` are now wired with quarantine validation/promotion flow.
 
 #### NEW (Discovered by research — 2026-03-03)
 
 **Safety & Trust (from security research audit)**:
-- [x] **Trust tier system** — Classify dataset sources into Tier 1 (verified: Microsoft, Lakera, deepset), Tier 2 (established community), Tier 3 (new discoveries — quarantine required), Tier 4 (social scrape — full validation required). ✅ DONE (2026-03-05) — `data/trust_tiers.yaml` + `scripts/quarantine.py` enforce trust-tier routing and validation policy. **Source**: OWASP LLM04:2025, Lakera best practices.
+- [ ] **Trust tier system** — Classify dataset sources into Tier 1 (verified: Microsoft, Lakera, deepset), Tier 2 (established community), Tier 3 (new discoveries — quarantine required), Tier 4 (social scrape — full validation required). Add `compute_trust_score()` to `weekly_harvest.py`. **Priority**: P0. **Effort**: 0.5d. **Source**: OWASP LLM04:2025, Lakera best practices.
 - [ ] **Canary evaluation set** — Curate 100-200 hand-verified samples (100 injection + 100 benign) never trained on. Evaluate after every retrain; block deployment if accuracy drops below threshold. **Priority**: P0. **Effort**: 1d. **Source**: Lakera PINT benchmark pattern, Anthropic/AISI 2025.
-- [ ] **Quarantine/staging pipeline** — Three-stage promotion: Discovery → `data/quarantine/` (trust score + schema check) → `data/staging/` (label quality + canary eval) → `data/raw/` (production). **Status**: Partially wired (2026-03-05) — discovery ingest + `--validate-quarantined` + explicit promotion are now in auto-retrain; dedicated staging layer still pending. **Priority**: P1. **Effort**: 2d.
+- [x] **Quarantine/staging pipeline** — Three-stage promotion: Discovery → `data/quarantine/` (trust score + schema check) → `data/staging/` (label quality + canary eval) → `data/aggregated/` (production). **Priority**: P1. **Effort**: 2d. ✅ DONE (2026-03-06) — Dedicated staging layer implemented in `quarantine.py`: `promote()` now routes quarantine→staging, `validate_staged()` runs label quality checks (class balance, suspicious label flips, min rows), `promote_to_production()` moves staging→aggregated. New CLI: `--validate-staged`, `--promote-to-production`, `--promote-staged-validated`. `auto-retrain.yml` updated with 4-step flow. `trust_tiers.yaml` extended with staging settings. 18 tests in `test_staging_pipeline.py`.
 - [ ] **Cleanlab label quality detection** — Integrate Confident Learning to flag mislabeled samples. Use existing model as base classifier. Route flagged samples to quarantine. **Priority**: P1. **Effort**: 1d. **Source**: Cleanlab v2.9.0 (10K+ GitHub stars).
 - [ ] **Shadow evaluation** — Before promoting new model: train candidate on new data, compare against holdout + canary set, auto-reject if F1 drops >2% or canary accuracy <95%. **Priority**: P1. **Effort**: 1.5d.
 - [ ] **License compliance checking** — Check HF dataset card license field before auto-ingestion. Allowed: MIT, Apache-2.0, CC-BY-4.0, CC0. Blocked: CC-BY-NC, GPL. Unknown: require manual review. **Priority**: P1. **Effort**: 0.5d.
@@ -1151,7 +1150,7 @@ Layer 13 manages the full data lifecycle: discovery → download → integration
 - [ ] **Add `datasets` + `huggingface_hub` to `requirements.txt`** — sync_datasets.py uses HF datasets but dependencies not declared. **Priority**: P1.
 
 ### Test Gaps
-- Expanded pipeline test coverage (2026-03-05): `tests/test_layer13_pipeline_fixes.py` now covers quarantine promotion gating and integrate_harvest quarantine routing; `tests/test_auto_retrain_workflow.py` validates quarantine workflow order.
+- Zero test coverage for pipeline scripts (validate_data.py, deploy_model.py, integrate_harvest.py, features.py, model.py)
 - Need tests for: sync integrity, merge idempotency, dedup correctness, threshold output format, validation accuracy
 - [ ] **Unit tests for `generate_taxonomy_samples.py`** — metadata computation, deduplication, CSV schema validation, edge cases (empty category, 0 samples). **Priority**: P1. **Effort**: 4 hours.
 - [ ] **Unit tests for `merge_taxonomy_data.py`** — enrichment logic, deduplication correctness, non-taxonomy row preservation, idempotency. **Priority**: P1. **Effort**: 3 hours.
@@ -1172,7 +1171,7 @@ Layer 13 manages the full data lifecycle: discovery → download → integration
 
 ### Implementation Plan
 **Phase 1 (P0 — This Week)**: Fix scraper classification threshold (BUG-L13-6), feed gen_all_datasets.py into training (BUG-L13-7), canary evaluation set, model backup, error handling hardening
-**Phase 2 (P1 — Next 2 Weeks)**: Trust tier system, quarantine pipeline, 30+ new datasets, Cleanlab integration, shadow evaluation, license checking, near-duplicate detection, integration tests
+**Phase 2 (P1 — Next 2 Weeks)**: Trust tier system, ~~quarantine pipeline~~ ✅, 30+ new datasets, Cleanlab integration, shadow evaluation, license checking, near-duplicate detection, integration tests
 **Phase 3 (P2 — Next Month)**: DVC versioning, active learning, synthetic LLM augmentation, multilingual back-translation, parallel generation
 
 ---
@@ -1227,7 +1226,7 @@ Layer 14 covers testing infrastructure and automation. Two evaluation scripts ex
 
 ---
 
-## Layer 15: Threat Intelligence Sync — Tasks: 5/15 (33%)
+## Layer 15: Threat Intelligence Sync — Tasks: 4/14 (29%)
 
 **Files**: `scripts/sync_datasets.py` (partial — syncs data but no threat intel feeds), `data/datasets.yaml` (11 sources), `data/taxonomy.yaml`, `data/tags.misp.tsv`
 **Tests**: None
@@ -1243,9 +1242,6 @@ Layer 15 should provide automated synchronization with external threat intellige
 - [x] 11 external dataset sources registered in `data/datasets.yaml`
 - [x] `sync_datasets.py` with SHA-256 freshness checking and lock file — `scripts/`
 - [x] Manual dataset download with `--force` option
-
-#### FIXES
-- [x] **FIX-L15-1 (HIGH)**: Newly discovered/scraped external data lacked enforced trust-tier handoff before retraining. **Fix**: quarantine-gated ingest + validation + explicit promotion in retrain workflow. ✅ DONE (2026-03-05) — harvest/scrape integration now routes through `scripts.quarantine`, and `auto-retrain.yml` runs `--validate-quarantined` + explicit `--promote-validated` before `process_data`.
 
 #### NEW (All items are new — layer not yet implemented)
 - [ ] **MITRE ATLAS YAML sync** — Monitor ATLAS GitHub repo for new techniques, auto-map to local taxonomy. **Priority**: P0.
@@ -1932,7 +1928,7 @@ Compiled from 9 research documents + 3 specialized agent audits (2026-03-03): da
 - [ ] **Hook system** — Pre-scan and post-scan hooks (Python callables or shell commands) for custom logging, alerting, or enrichment. **Effort**: 1d. **Source**: `openclaw-agents-to-na0s.md`
 - [ ] **L27 SignatureDB** — SHA-256 hash database of known attack payloads (from Garak, JailbreakBench, HackaPrompt). O(1) lookup before full pipeline. **Effort**: 2d. **Source**: `sec504-to-na0s-design.md`
 - [ ] **Trust tier system** — Tier 1-4 dataset source classification with `compute_trust_score()` in `weekly_harvest.py`. Auto-reject trust <30. **Effort**: 0.5d. **Source**: OWASP LLM04:2025.
-- [ ] **Quarantine/staging pipeline** — Three-stage: Discovery → `data/quarantine/` → `data/staging/` → `data/raw/`. **Effort**: 2d.
+- [x] **Quarantine/staging pipeline** — Three-stage: Discovery → `data/quarantine/` → `data/staging/` → `data/aggregated/`. **Effort**: 2d. ✅ DONE (2026-03-06).
 - [ ] **Cleanlab label quality** — Confident Learning to flag mislabeled samples. Route to quarantine. **Effort**: 1d. **Source**: [Cleanlab](https://github.com/cleanlab/cleanlab).
 - [ ] **Shadow model evaluation** — Train candidate, compare against holdout + canary. Auto-reject if F1 drops >2%. **Effort**: 1.5d.
 - [ ] **License compliance** — Check HF dataset card license before auto-ingestion. Block CC-BY-NC, GPL. **Effort**: 0.5d.
