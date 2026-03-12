@@ -129,6 +129,7 @@ def evaluate(csv_path: str, verbose: bool = False) -> dict:
     y_true = []
     y_pred = []
     errors = []          # (row_index, row, predicted_label, score)
+    classification_error_count = 0
     technique_results = defaultdict(lambda: {"tp": 0, "tn": 0, "fp": 0, "fn": 0})
 
     t0 = time.perf_counter()
@@ -144,9 +145,11 @@ def evaluate(csv_path: str, verbose: bool = False) -> dict:
             )
         except Exception as exc:
             # If classification fails, treat as prediction = 0 (safe)
+            # for backward compatibility, but track the error.
             pred_label_str = "SAFE"
             score = 0.0
             hits = []
+            classification_error_count += 1
             print(f"  [WARN] Row {i}: classification error: {exc}")
 
         pred_label = 1 if "MALICIOUS" in pred_label_str or "BLOCKED" in pred_label_str else 0
@@ -237,20 +240,35 @@ def evaluate(csv_path: str, verbose: bool = False) -> dict:
                 print(f"    Note: {row['notes']}")
             print()
 
+    # Classification error summary
+    if classification_error_count > 0:
+        print()
+        print("-" * 70)
+        print(f"  CLASSIFICATION ERRORS: {classification_error_count}")
+        print("-" * 70)
+        print(f"  WARNING: {classification_error_count} sample(s) raised exceptions during "
+              f"classify_prompt().")
+        print(f"  These were coerced to SAFE predictions for backward compatibility,")
+        print(f"  but indicate a potentially broken evaluator path.")
+
     # Quality gate
+    print()
     print("-" * 70)
     print("  QUALITY GATE")
     print("-" * 70)
 
     inj_pass = metrics["tpr"] >= _INJ_ACCURACY_THRESHOLD
     ben_pass = metrics["tnr"] >= _BEN_ACCURACY_THRESHOLD
+    no_classification_errors = classification_error_count == 0
 
     print(f"  Injection TPR >= {_INJ_ACCURACY_THRESHOLD:.0%}:  "
           f"{'PASS' if inj_pass else 'FAIL'}  ({metrics['tpr']:.2%})")
     print(f"  Benign TNR    >= {_BEN_ACCURACY_THRESHOLD:.0%}:  "
           f"{'PASS' if ben_pass else 'FAIL'}  ({metrics['tnr']:.2%})")
+    print(f"  Classification errors == 0: "
+          f"{'PASS' if no_classification_errors else 'FAIL'}  ({classification_error_count} errors)")
 
-    passed = inj_pass and ben_pass
+    passed = inj_pass and ben_pass and no_classification_errors
     print()
     if passed:
         print("  OVERALL: PASS")
@@ -261,6 +279,7 @@ def evaluate(csv_path: str, verbose: bool = False) -> dict:
     return {
         "metrics": metrics,
         "errors": errors,
+        "classification_errors": classification_error_count,
         "technique_results": dict(technique_results),
         "passed": passed,
         "elapsed_s": elapsed,
@@ -311,6 +330,7 @@ def export_json(
         "metrics": metrics,
         "per_technique": result["technique_results"],
         "passed": passed,
+        "classification_errors": result.get("classification_errors", 0),
         "thresholds": {
             "inj_accuracy": _INJ_ACCURACY_THRESHOLD,
             "ben_accuracy": _BEN_ACCURACY_THRESHOLD,
@@ -337,6 +357,7 @@ def export_json(
         "tnr": metrics["tnr"],
         "f1": metrics["f1"],
         "sample_count": len(rows),
+        "classification_errors": result.get("classification_errors", 0),
     }
     with open(history_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(summary) + "\n")

@@ -128,7 +128,7 @@ jobs:
           git commit -m "Retrain model on latest data ($(date +%Y-%m-%d))"
           git push -u origin "$BRANCH"
 
-          SAMPLE_COUNT=$(wc -l < data/processed/combined_data.csv || echo "unknown")
+          SAMPLE_COUNT=$(( $(wc -l < data/processed/combined_data.csv) - 1 )) || SAMPLE_COUNT="unknown"
           TODAY=$(date +%Y-%m-%d)
 
           # Build canary evaluation section for PR body
