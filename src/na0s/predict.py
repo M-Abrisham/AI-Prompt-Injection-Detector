@@ -82,17 +82,16 @@ from .safe_pickle import safe_load
 from .models import get_model_path
 from .signal_boost import calculate_boost_from_names
 from .safe_content import calculate_safe_content_score
+from ._voting import (
+    weighted_decision as _voting_weighted_decision,
+    DECISION_THRESHOLD as _VOTING_THRESHOLD,
+    FP_EXEMPT_HITS,
+    RULE_SEVERITY as _VOTING_RULE_SEVERITY,
+    RULE_TECHNIQUE_IDS as _VOTING_RULE_TECHNIQUE_IDS,
+)
 
-# ---------------------------------------------------------------------------
-# FP Reduction: Hit names that are obfuscation flags, not L1 rules.
-# Used by the ML uncertain-zone cap to determine if any real L1 rule
-# fired.  Obfuscation flags alone are not sufficient evidence of attack.
-# ---------------------------------------------------------------------------
-_FP_EXEMPT_HITS = frozenset({
-    "base64", "hex", "rot13", "url_encoded", "leetspeak", "reversed_text",
-    "full_reverse", "word_reverse", "caesar_shift", "pig_latin", "morse",
-    "high_entropy", "punctuation_flood", "weird_casing",
-})
+# FP Reduction: Obfuscation flags that are not L1 rules — now in _voting.py.
+_FP_EXEMPT_HITS = FP_EXEMPT_HITS
 
 # Layer 3: Structural Features — optional import
 try:
@@ -178,14 +177,8 @@ def _get_cached_models():
         _cached_model = safe_load(MODEL_PATH)
     return _cached_vectorizer, _cached_model
 
-# Build a lookup from rule name -> severity for quick access.
-# Include synthetic rules that classify_prompt() may inject into the
-# hits list so the severity lookup never needs runtime mutation.
-# This keeps _RULE_SEVERITY effectively immutable after module load,
-# which is critical for thread-safety in multi-threaded web servers.
-_RULE_SEVERITY = {rule.name: rule.severity for rule in RULES}
-_RULE_SEVERITY["decoded_payload_malicious"] = "critical"
-_RULE_SEVERITY["decoded_escape_malicious"] = "critical"
+# Rule name -> severity lookup — now in _voting.py (single source of truth).
+_RULE_SEVERITY = _VOTING_RULE_SEVERITY
 
 # ---------------------------------------------------------------------------
 # Literal Unicode escape sequence decoding (D5 — \uXXXX evasion)
@@ -233,8 +226,8 @@ def _decode_literal_escapes(text):
 _TAIL_SCAN_CHAR_THRESHOLD = 300
 _TAIL_SCAN_CHARS = 200
 
-# Build a lookup from rule name -> technique_ids for technique-family boost.
-_RULE_TECHNIQUE_IDS = {rule.name: rule.technique_ids for rule in RULES}
+# Rule name -> technique_ids lookup — now in _voting.py.
+_RULE_TECHNIQUE_IDS = _VOTING_RULE_TECHNIQUE_IDS
 
 # ---------------------------------------------------------------------------
 # Chunked analysis for long inputs (D7.1 benign-padding, D8.1 context-flooding)
@@ -336,6 +329,9 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
     """Combine ML confidence, rule severity, obfuscation, structural
     features, and embedding similarity into a composite score.
 
+    Delegates to :func:`na0s._voting.weighted_decision` — the single
+    source of truth for weighted voting (Issue #2 consolidation).
+
     Parameters
     ----------
     ml_prob : float
@@ -348,261 +344,22 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
         Obfuscation evasion flags.
     structural : dict or None
         Structural features dict from extract_structural_features().
-        When provided, injection-signal features contribute additional
-        weight to the composite score.
     embedding_score : float
         Layer 5 centroid-based embedding similarity score in [0.0, 0.20].
-        Represents semantic closeness to known attack pattern centroids.
-        Default 0.0 (no embedding signal / model not available).
+    threshold : float
+        Decision threshold (default 0.55).
 
     Returns (label_str, composite_score).
     """
-    # --- ML signal ---
-    # ml_prob is the model's confidence in its own prediction.
-    # Convert to a malicious-probability axis:
-    if "MALICIOUS" in ml_label:
-        ml_prob_malicious = ml_prob
-    else:
-        ml_prob_malicious = 1.0 - ml_prob  # low value when ML is confident-safe
-
-    ml_weight = 0.6 * ml_prob_malicious
-
-    # --- Rule severity signal ---
-    rule_weight = 0.0
-    severities_seen = set()
-    for hit_name in hits:
-        sev = _RULE_SEVERITY.get(hit_name, "medium")
-        severities_seen.add(sev)
-        rule_weight += SEVERITY_WEIGHTS.get(sev, 0.1)
-
-    # --- Obfuscation signal ---
-    obf_weight = min(0.15 * len(obs_flags), 0.3)
-
-    # --- Layer 3: Structural feature signal ---
-    structural_weight = 0.0
-    if structural is not None:
-        # Injection-signal features from structural analysis each add a
-        # small weight.  These are binary (0 or 1) flags extracted from
-        # the text's structure, not its vocabulary.
-        _STRUCTURAL_SIGNAL_WEIGHTS = {
-            "imperative_start": 0.05,
-            "role_assignment": 0.10,
-            "instruction_boundary": 0.10,
-            "negation_command": 0.08,
-        }
-        for feat_name, feat_w in _STRUCTURAL_SIGNAL_WEIGHTS.items():
-            if structural.get(feat_name, 0):
-                structural_weight += feat_w
-
-        # High quote depth (>= 3) suggests nested injection attempts
-        if structural.get("quote_depth", 0) >= 3:
-            structural_weight += 0.05
-
-        # Very high entropy can indicate obfuscated / encoded payloads
-        if structural.get("text_entropy", 0) > 5.0:
-            structural_weight += 0.03
-
-        # Many-shot detection: >= 5 repeated instruction patterns
-        if structural.get("many_shot_count", 0) >= 5:
-            structural_weight += 0.10
-
-        # Delimiter density: > 2.0 delimiters/line is suspicious
-        if structural.get("delimiter_density", 0) > 2.0:
-            structural_weight += 0.06
-
-        # Prompt template markers: any markers detected
-        if structural.get("template_marker_count", 0) >= 1:
-            structural_weight += 0.05
-
-        # Language mixing: multiple scripts present
-        if structural.get("language_mixing_score", 0) >= 2.0:
-            structural_weight += 0.04
-
-        # Repetition score: high repetition ratio
-        if structural.get("repetition_score", 0) > 0.3:
-            structural_weight += 0.05
-
-    # --- Layer 5: Embedding similarity signal ---
-    embedding_weight = min(embedding_score, 0.20)  # cap at 0.20
-
-    # --- Signal co-occurrence boost ---
-    boost_score, _boost_reasons = calculate_boost_from_names(
-        hits, obs_flags,
+    return _voting_weighted_decision(
+        ml_prob=ml_prob,
+        ml_label=ml_label,
+        hits=hits,
+        obs_flags=obs_flags,
+        structural=structural,
+        embedding_score=embedding_score,
+        threshold=threshold,
     )
-
-    composite = ml_weight + rule_weight + obf_weight + structural_weight + embedding_weight + boost_score
-
-    # --- FP Reduction: ML-only uncertain zone cap ---
-    # When ML flags input as malicious with moderate confidence (0.35-0.80)
-    # but NO unsuppressed rules fire, the ML verdict is uncertain.
-    # Cap composite below threshold to prevent ML-only false positives.
-    # SAFETY: If ANY unsuppressed rule fires, this cap does NOT apply --
-    # real attacks always trigger at least one rule.
-    unsuppressed_rule_count = len([h for h in hits if h not in _FP_EXEMPT_HITS])
-    ml_uncertain_zone = 0.35 <= ml_prob_malicious <= 0.80
-    if ml_uncertain_zone and unsuppressed_rule_count == 0 and obf_weight == 0:
-        composite = min(composite, threshold - 0.01)
-
-    # --- Critical-content rule floor ---
-    # When a critical_content severity rule fires, the rule pattern
-    # itself is extremely specific to harmful content requests (e.g.,
-    # "step-by-step instructions for building a weapon", "create a
-    # phishing email").  These patterns have near-zero FP rates on
-    # benign text.  Even if the ML model disagrees (predicting SAFE),
-    # the rule match is strong enough to override ML.
-    #
-    # For regular "critical" rules (e.g., direct_prompt_request,
-    # override), we do NOT apply a floor because:
-    #   - These rules can fire on advisory/educational text that
-    #     quotes attack payloads (e.g., "do not type 'reveal your
-    #     system prompt'").
-    #   - The new complementary rules (provide_system_prompt,
-    #     database_iteration, etc.) ensure genuine attacks trigger
-    #     2+ critical rules, pushing the composite above threshold
-    #     naturally via the rule_weight sum.
-    if severities_seen & {"critical_content"}:
-        # When ML independently agrees, saturate to 1.0 — the pattern is
-        # extremely specific (near-zero FP) AND ML confirms, so this is an
-        # unambiguous attack that should be caught at any threshold.
-        if "MALICIOUS" in ml_label and ml_prob_malicious >= 0.6:
-            composite = 1.0
-        else:
-            composite = max(composite, 0.60)
-
-    # --- Critical E1 extraction rule floor ---
-    # When a critical-severity E1 rule fires (e.g., repeat_above,
-    # direct_prompt_request) AND a structural imperative signal is
-    # present, this is strong evidence of a system prompt extraction
-    # attempt.  Floor the composite above threshold.
-    #
-    # This solves the cold-start problem: E1 extraction patterns are
-    # very specific ("repeat the text above verbatim") and combined
-    # with imperative_start (the text IS a command), FP risk is near
-    # zero.  Without this floor, repeat_above scores ~0.40-0.50 due
-    # to ML safe-confidence, requiring FingerprintStore confirmation
-    # that isn't available on first encounter.
-    if severities_seen & {"critical"} and structural_weight > 0.0:
-        _has_e1_critical = any(
-            _RULE_SEVERITY.get(h) == "critical" and any(
-                "E1" in tid for tid in _RULE_TECHNIQUE_IDS.get(h, [])
-            )
-            for h in hits
-        )
-        if _has_e1_critical:
-            composite = max(composite, threshold + 0.01)
-
-    # Compute ML safe-confidence once for use by multiple mechanisms below.
-    ml_safe_confidence = ml_prob if "SAFE" in ml_label else (1.0 - ml_prob)
-
-    # --- Override protection ---
-    # If ML is confidently safe (>0.8), only medium rules fired, no
-    # obfuscation, and no structural injection signals, trust the ML
-    # and return SAFE regardless of composite.
-    # GUARD: threshold=0.0 means "flag everything" — never override.
-    if (threshold > 0.0
-            and ml_safe_confidence > 0.8
-            and severities_seen <= {"medium"}
-            and not obs_flags
-            and structural_weight == 0.0):
-        return "SAFE", composite
-
-    # --- Extended override protection ---
-    # If ML is moderately confident safe (>0.65), NO L1 rules fired
-    # at all, and no decoded payload was flagged as malicious, then
-    # obfuscation/structural signals alone are likely false positives
-    # (e.g., "Write a short poem about autumn leaves" triggering
-    # base64 + punctuation_flood + imperative_start).
-    # Cap the composite to just below threshold to prevent FPs from
-    # non-lexical signals when the ML model and L1 rules both agree
-    # the input is safe.
-    has_decoded_payload = "decoded_payload_malicious" in hits
-    if (threshold > 0.0
-            and ml_safe_confidence > 0.65
-            and rule_weight == 0.0
-            and not has_decoded_payload):
-        composite = min(composite, threshold - 0.01)
-
-    # --- Multi-layer agreement boost ---
-    # When multiple independent detection layers agree that the input
-    # is suspicious, the combined evidence deserves a small additive
-    # boost.  This bridges the gap for near-miss scores (0.49-0.55)
-    # where individual signals are each too weak to cross the threshold
-    # alone but collectively indicate a real attack.
-    #
-    # Anchor tiers prevent false-positive inflation on benign inputs
-    # that coincidentally trigger weak signals:
-    #   - 2 signal layers + strong anchor (rule severity >= high):
-    #     apply boost unconditionally.
-    #   - 2 signal layers + weak anchor (any rule hit) + ML agreement
-    #     (ml_prob_malicious > 0.45): apply boost — ML corroboration
-    #     reduces FP risk even with medium-severity rules.
-    #   - 3+ signal layers + weak anchor: apply boost — three or more
-    #     independent layers agreeing is strong evidence.
-    signal_layers = 0
-    if rule_weight > 0:
-        signal_layers += 1               # L1: rule-based detection
-    if obf_weight > 0:
-        signal_layers += 1               # L2: obfuscation detection
-    if structural_weight > 0:
-        signal_layers += 1               # L3: structural features
-    if ml_prob_malicious > 0.5:
-        signal_layers += 1               # L4: ML classifier (TF-IDF)
-    if embedding_weight > 0:
-        signal_layers += 1               # L5: embedding similarity
-
-    has_strong_anchor = bool(
-        severities_seen & {"high", "critical", "critical_content"}
-    )
-    has_weak_anchor = bool(severities_seen)  # any rule hit at all
-
-    apply_boost = False
-    if signal_layers >= 3 and has_weak_anchor:
-        apply_boost = True
-    elif signal_layers >= 2 and has_strong_anchor:
-        apply_boost = True
-    elif signal_layers >= 2 and has_weak_anchor and ml_prob_malicious > 0.45:
-        apply_boost = True
-
-    if apply_boost:
-        _AGREEMENT_BOOST = {2: 0.10, 3: 0.12, 4: 0.15}
-        boost = _AGREEMENT_BOOST.get(signal_layers, 0.15)
-        composite = min(composite + boost, 1.0)
-
-    # --- Technique-family boost ---
-    # When 2+ rules from the same technique family fire (e.g., two E1 rules
-    # or two D6 rules), the concentrated evidence within one family deserves
-    # an extra boost.  This bridges near-miss scores where each individual
-    # rule adds weight but the composite still falls just short.
-    #
-    # Implementation: group rule hits by their technique ID prefix (D1, D6,
-    # E1, etc.) and add a small boost per family with 2+ hits.
-    # Cap at +0.10 total to avoid over-inflation.
-    # Count unique RULES per technique family (not technique IDs).
-    # A single rule with technique_ids=["D2.1", "D2.2"] should count as
-    # 1 rule in the D2 family, not 2.
-    technique_family_rules: dict = {}
-    for hit_name in hits:
-        for tid in _RULE_TECHNIQUE_IDS.get(hit_name, []):
-            family = tid.split(".")[0] if "." in tid else tid
-            technique_family_rules.setdefault(family, set()).add(hit_name)
-
-    family_boost = 0.0
-    for family, rule_set in technique_family_rules.items():
-        if len(rule_set) >= 2:
-            family_boost += 0.05
-    family_boost = min(family_boost, 0.10)  # cap total family boost
-    if family_boost > 0:
-        composite = min(composite + family_boost, 1.0)
-
-    # Clamp composite to [0, 1] — the raw sum of ml_weight + rule_weight +
-    # obf_weight + structural_weight can exceed 1.0 when multiple high/critical
-    # rules fire simultaneously.  Downstream consumers (ScanResult.risk_score,
-    # cascade confidence) expect a normalised probability in [0, 1].
-    composite = min(max(composite, 0.0), 1.0)
-
-    if composite >= threshold:
-        return "MALICIOUS", composite
-    return "SAFE", composite
 
 
 def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
