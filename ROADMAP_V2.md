@@ -40,7 +40,7 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L10**| `████████░░░░░░░░░░░░` | **10/25**  | 40% |
 | **L11**| `██████████░░░░░░░░░░` | **12/24**  | 50% |
 | **L12**| `████░░░░░░░░░░░░░░░░` | **12/55**  | 22% |
-| **L13**| `█████████████░░░░░░░` | **27/41**  | 66% |
+| **L13**| `██████████████░░░░░░` | **28/41**  | 68% |
 | **L14**| `███████░░░░░░░░░░░░░` | **8/21**   | 38% |
 | **L15**| `█████░░░░░░░░░░░░░░░` | **4/14**   | 29% |
 | **L16**| `███░░░░░░░░░░░░░░░░░` | **3/17**   | 18% |
@@ -48,7 +48,7 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L18**| `░░░░░░░░░░░░░░░░░░░░` | **0/18**   | NOT STARTED |
 | **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
 | **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
-|        |                        | **406/742** | **55%** |
+|        |                        | **407/742** | **55%** |
 
 ---
 
@@ -1079,7 +1079,7 @@ Layer 12 is the adversarial testing framework. Base classes (`Probe`, `Classifie
 
 ---
 
-## Layer 13: Dataset Pipeline — Tasks: 27/41 (66%)
+## Layer 13: Dataset Pipeline — Tasks: 28/41 (68%)
 
 **Files**: `scripts/sync_datasets.py` (251 lines), `scripts/process_data.py` (160 lines), `scripts/validate_data.py` (250 lines), `scripts/integrate_harvest.py` (288 lines), `scripts/deploy_model.py` (87 lines), `scripts/features.py` (39 lines), `scripts/model.py` (67 lines), `scripts/merge_taxonomy_data.py` (113 lines), `scripts/generate_taxonomy_samples.py` (175 lines), `scripts/mine_hard_negatives.py` (513 lines), `scripts/optimize_threshold.py` (272 lines)
 **Workflows**: `.github/workflows/auto-retrain.yml`, `.github/workflows/weekly-harvest.yml`, `.github/workflows/social-scraper.yml`
@@ -1123,9 +1123,10 @@ Layer 13 manages the full data lifecycle: discovery → download → integration
 #### NEW (Discovered by research — 2026-03-03)
 
 **Safety & Trust (from security research audit)**:
-- [ ] **Trust tier system** — Classify dataset sources into Tier 1 (verified: Microsoft, Lakera, deepset), Tier 2 (established community), Tier 3 (new discoveries — quarantine required), Tier 4 (social scrape — full validation required). Add `compute_trust_score()` to `weekly_harvest.py`. **Priority**: P0. **Effort**: 0.5d. **Source**: OWASP LLM04:2025, Lakera best practices.
+- [x] **Trust tier system** — Classify dataset sources into Tier 1 (verified: Microsoft, Lakera, deepset), Tier 2 (established community), Tier 3 (new discoveries — quarantine required), Tier 4 (social scrape — full validation required). Add `compute_trust_score()` to `weekly_harvest.py`. **Priority**: P0. **Effort**: 0.5d. **Source**: OWASP LLM04:2025, Lakera best practices. ✅ DONE (2026-03-12) — `scripts/trust_score.py`: 6-dimension scoring (reputation, quality, label consistency, freshness, historical reliability, provenance). Composite score gates promotion: ≥0.80 auto-promote (tier1/2 only), ≥0.55 staging-eligible, ≥0.30 quarantine-hold, <0.30 auto-reject. Hard vetoes for quality=0 or label_consistency<0.20. Wired into `quarantine.py` ingest/promote paths with score in metadata + log. CLI: `--report`, `--gate`, `--score`. 64 tests in `test_trust_score.py`.
 - [x] **Canary evaluation set** — Curate 100-200 hand-verified samples (100 injection + 100 benign) never trained on. Evaluate after every retrain; block deployment if accuracy drops below threshold. **Priority**: P0. **Effort**: 1d. **Source**: Lakera PINT benchmark pattern, Anthropic/AISI 2025. ✅ DONE (2026-03-08) — 230 samples across 13 attack techniques. Three deploy-blocking gates: injection TPR ≥ 95%, benign TNR ≥ 90%, classification errors == 0 (prevents broken models from passing via silent fail-open). JSON export for CI. 33 tests in `test_canary_eval.py`. `auto-retrain.yml` blocks deployment + PR creation on gate failure.
 - [x] **Quarantine/staging pipeline** — Three-stage promotion: Discovery → `data/quarantine/` (trust score + schema check) → `data/staging/` (label quality + canary eval) → `data/aggregated/` (production). **Priority**: P1. **Effort**: 2d. ✅ DONE (2026-03-06) — Dedicated staging layer implemented in `quarantine.py`: `promote()` now routes quarantine→staging, `validate_staged()` runs label quality checks (class balance, suspicious label flips, min rows), `promote_to_production()` moves staging→aggregated. New CLI: `--validate-staged`, `--promote-to-production`, `--promote-staged-validated`. `auto-retrain.yml` updated with 4-step flow. `trust_tiers.yaml` extended with staging settings. 18 tests in `test_staging_pipeline.py`.
+
 - [ ] **Cleanlab label quality detection** — Integrate Confident Learning to flag mislabeled samples. Use existing model as base classifier. Route flagged samples to quarantine. **Priority**: P1. **Effort**: 1d. **Source**: Cleanlab v2.9.0 (10K+ GitHub stars).
 - [ ] **Shadow evaluation** — Before promoting new model: train candidate on new data, compare against holdout + canary set, auto-reject if F1 drops >2% or canary accuracy <95%. **Priority**: P1. **Effort**: 1.5d.
 - [ ] **License compliance checking** — Check HF dataset card license field before auto-ingestion. Allowed: MIT, Apache-2.0, CC-BY-4.0, CC0. Blocked: CC-BY-NC, GPL. Unknown: require manual review. **Priority**: P1. **Effort**: 0.5d.

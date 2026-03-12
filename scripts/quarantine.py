@@ -299,11 +299,23 @@ def ingest(file_path, source_id, config=None):
         source_id.replace("/", "_").replace(" ", "_").replace(".", "_")
     )
 
+    # Compute trust score
+    from scripts.trust_score import compute_trust_score
+
+    log_entries = _load_log()
+    trust_result = compute_trust_score(
+        source_id=source_id,
+        tier=tier_key,
+        log_entries=log_entries,
+    )
+    trust_score_val = trust_result["trust_score"]
+
     print(f"  Ingesting: {basename}")
     print(f"    Source:  {source_id}")
     print(f"    Tier:    {tier_key} ({tier_cfg['label']})")
     print(f"    Rows:    {row_count}")
     print(f"    SHA-256: {file_hash[:16]}...")
+    print(f"    Trust:   {trust_score_val:.3f} ({trust_result['gate_decision']})")
 
     if tier_cfg.get("quarantine", False):
         # Route to quarantine
@@ -312,11 +324,18 @@ def ingest(file_path, source_id, config=None):
         dest_path = os.path.join(dest_dir, basename)
         shutil.copy2(file_path, dest_path)
         _write_metadata(dest_dir, source_id, tier_key, file_hash, row_count)
+        _update_metadata(dest_dir, {
+            "trust_score": trust_score_val,
+            "trust_dimensions": trust_result["dimensions"],
+            "trust_gate": trust_result["gate_decision"],
+        })
         _log_action("ingest", safe_name, source_id, tier_key, {
             "file": basename,
             "rows": row_count,
             "sha256": file_hash,
             "destination": "quarantine",
+            "trust_score": trust_score_val,
+            "trust_gate": trust_result["gate_decision"],
         })
         print(f"    Action:  QUARANTINED -> {dest_dir}")
         return {
@@ -324,6 +343,8 @@ def ingest(file_path, source_id, config=None):
             "tier": tier_key,
             "destination": dest_dir,
             "name": safe_name,
+            "trust_score": trust_score_val,
+            "trust_gate": trust_result["gate_decision"],
         }
     else:
         # Direct pass -- route to raw/ or aggregated/ based on file type
@@ -343,6 +364,8 @@ def ingest(file_path, source_id, config=None):
             "rows": row_count,
             "sha256": file_hash,
             "destination": dest_dir,
+            "trust_score": trust_score_val,
+            "trust_gate": trust_result["gate_decision"],
         })
         print(f"    Action:  DIRECT PASS -> {dest_path}")
         return {
@@ -350,6 +373,8 @@ def ingest(file_path, source_id, config=None):
             "tier": tier_key,
             "destination": dest_path,
             "name": safe_name,
+            "trust_score": trust_score_val,
+            "trust_gate": trust_result["gate_decision"],
         }
 
 
@@ -694,6 +719,16 @@ def promote_validated(config=None):
         vstatus = meta.get("validation_status", "pending")
 
         if vstatus == "passed":
+            # Check trust score gate before promoting
+            trust_s = meta.get("trust_score")
+            trust_gate = meta.get("trust_gate", "")
+            if trust_gate == "auto_reject":
+                summary["failed"] += 1
+                print(
+                    f"  BLOCKED: {name} trust score {trust_s:.3f} "
+                    f"below staging threshold (auto_reject)"
+                )
+                continue
             result = promote(name, config)
             if result.get("action") == "promoted":
                 summary["promoted"] += 1
