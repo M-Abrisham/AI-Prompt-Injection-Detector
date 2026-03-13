@@ -3,6 +3,11 @@
 Replaces TF-IDF with semantic embeddings that understand context.
 Model: all-MiniLM-L6-v2 (22M params, 384-dim, ~20ms/sample on CPU)
 
+When structural feature concatenation is enabled (default), appends
+29 scaled structural features from Layer 3 to the 384-dim embedding,
+producing a 413-dim feature vector.  The fitted StandardScaler is
+saved alongside the features so it can be reused at inference time.
+
 Usage:
     PYTHONPATH=src:. python src/features_embedding.py
 """
@@ -23,13 +28,17 @@ except ImportError:
         "This will also install torch and transformers as dependencies."
     )
 
+from sklearn.preprocessing import StandardScaler
+
 from na0s.safe_pickle import safe_dump
+from na0s.structural_features import extract_structural_features_batch
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 INPUT_PATH = "data/processed/combined_data.csv"
 FEATURES_PATH = "data/processed/features_embedding.pkl"
+STRUCTURAL_SCALER_PATH = "data/processed/embedding_structural_scaler.pkl"
 DEFAULT_MODEL = "all-MiniLM-L6-v2"
 
 
@@ -134,17 +143,39 @@ def build_embedding_features():
     print("Encoding {0} texts...".format(len(texts)))
     X = extract_embeddings(texts, model=model)
 
-    elapsed = time.time() - t0
+    elapsed_embed = time.time() - t0
     print("Embedding shape: {0}".format(X.shape))
-    print("Time: {0:.1f}s  ({1:.1f} ms/sample)".format(
-        elapsed, (elapsed / len(texts)) * 1000
+    print("Embedding time: {0:.1f}s  ({1:.1f} ms/sample)".format(
+        elapsed_embed, (elapsed_embed / len(texts)) * 1000
     ))
+
+    # ------------------------------------------------------------------
+    # Structural features (Layer 3) — concatenate with embeddings
+    # ------------------------------------------------------------------
+    print("Extracting structural features for {0} texts...".format(len(texts)))
+    X_structural_raw = extract_structural_features_batch(texts)
+    print("Structural features shape: {0}".format(X_structural_raw.shape))
+
+    # Fit StandardScaler on structural features (zero mean, unit variance)
+    scaler = StandardScaler()
+    X_structural_scaled = scaler.fit_transform(X_structural_raw)
+
+    # Concatenate: 384-dim embeddings + 29-dim scaled structural = 413-dim
+    X = np.hstack([X, X_structural_scaled])
+
+    elapsed_total = time.time() - t0
+    print("Combined feature shape: {0}".format(X.shape))
+    print("Total time: {0:.1f}s".format(elapsed_total))
 
     # ------------------------------------------------------------------
     # Save
     # ------------------------------------------------------------------
     print("Saving features to {0}".format(FEATURES_PATH))
     safe_dump((X, y), FEATURES_PATH)
+
+    print("Saving structural scaler to {0}".format(STRUCTURAL_SCALER_PATH))
+    safe_dump(scaler, STRUCTURAL_SCALER_PATH)
+
     print("Done.")
 
 

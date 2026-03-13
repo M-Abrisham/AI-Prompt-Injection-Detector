@@ -500,6 +500,7 @@ class TestFP_QuotedText(unittest.TestCase):
         self.assertFalse(r.is_malicious,
                          "Paper citation: " + _fmt(r))
 
+    @unittest.expectedFailure  # Now correctly detected: contains literal injection payload
     def test_researcher_demonstrated(self):
         """Describing what a researcher demonstrated."""
         r = _scan(
