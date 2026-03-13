@@ -95,7 +95,10 @@ _FP_EXEMPT_HITS = FP_EXEMPT_HITS
 
 # Layer 3: Structural Features — optional import
 try:
-    from .structural_features import extract_structural_features
+    from .structural_features import (
+        extract_structural_features,
+        extract_structural_features_batch,
+    )
     _HAS_STRUCTURAL_FEATURES = True
 except ImportError:
     _HAS_STRUCTURAL_FEATURES = False
@@ -132,6 +135,7 @@ except ImportError:
 
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
+SCALER_PATH = get_model_path("structural_scaler.pkl")
 DECISION_THRESHOLD = 0.55
 
 # Canonical SEVERITY_WEIGHTS imported from rules.py (DRY)
@@ -176,6 +180,60 @@ def _get_cached_models():
         _cached_vectorizer = safe_load(VECTORIZER_PATH)
         _cached_model = safe_load(MODEL_PATH)
     return _cached_vectorizer, _cached_model
+
+
+# ---------------------------------------------------------------------------
+# Thread-safe structural scaler cache — loaded once on first use.
+# None = not loaded yet, False = file doesn't exist (backward compat).
+# ---------------------------------------------------------------------------
+_cached_scaler = None
+_scaler_cache_lock = threading.Lock()
+
+
+def _get_cached_scaler():
+    """Return fitted StandardScaler for structural features, or None.
+
+    Returns None when the scaler file doesn't exist (pre-L3 model).
+    Thread-safe via double-checked locking.
+    """
+    global _cached_scaler
+    if _cached_scaler is not None:
+        return _cached_scaler if _cached_scaler is not False else None
+    with _scaler_cache_lock:
+        if _cached_scaler is not None:
+            return _cached_scaler if _cached_scaler is not False else None
+        if not os.path.isfile(SCALER_PATH):
+            _cached_scaler = False
+            return None
+        try:
+            _cached_scaler = safe_load(SCALER_PATH)
+        except Exception:
+            logger.warning("Failed to load structural scaler from %s", SCALER_PATH)
+            _cached_scaler = False
+            return None
+    return _cached_scaler
+
+
+def _transform(text, vectorizer, scaler=None):
+    """Transform text to feature vector, including structural features if available.
+
+    When *scaler* is a fitted StandardScaler (i.e. the model was trained
+    with structural features), the 29 structural features are extracted,
+    scaled, and appended to the sparse TF-IDF vector via scipy.sparse.hstack.
+    When *scaler* is None (pre-L3 model), returns TF-IDF only.
+    """
+    X = vectorizer.transform([text])
+    if scaler is not None and _HAS_STRUCTURAL_FEATURES:
+        try:
+            import scipy.sparse
+            struct_arr = extract_structural_features_batch([text])
+            struct_scaled = scaler.transform(struct_arr)
+            X = scipy.sparse.hstack([X, scipy.sparse.csr_matrix(struct_scaled)],
+                                    format="csr")
+        except Exception:
+            pass  # Fall back to TF-IDF only
+    return X
+
 
 # Rule name -> severity lookup — now in _voting.py (single source of truth).
 _RULE_SEVERITY = _VOTING_RULE_SEVERITY
@@ -312,7 +370,8 @@ def predict(text, vectorizer, model):
 
     clean = l0.sanitized_text
 
-    X = vectorizer.transform([clean])
+    scaler = _get_cached_scaler()
+    X = _transform(clean, vectorizer, scaler)
     prediction = model.predict(X)[0]
     prob = model.predict_proba(X)[0][prediction]
 
@@ -369,6 +428,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
         return label, prob, [], l0, [], {"score": 0.0, "technique_matches": []}
 
     clean = l0.sanitized_text
+    _scaler = _get_cached_scaler()
 
     # FIX-5: Run rules on sanitized text AND raw text (if different) to
     # catch payloads visible only after normalization (e.g., homoglyphs)
@@ -407,7 +467,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
                 detailed_hits.append(rh)
                 hit_names_seen.add(rh.name)
                 hits.append(rh.name)
-        X_assembled = vectorizer.transform([assembled_game])
+        X_assembled = _transform(assembled_game, vectorizer, _scaler)
         if model.predict(X_assembled)[0] == 1:
             if "decoded_payload_malicious" not in hit_names_seen:
                 hits.append("decoded_payload_malicious")
@@ -430,7 +490,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
         # is strong evidence — the escape decoding itself proves
         # deliberate obfuscation.
         _esc_ml_mal = False
-        X_esc = vectorizer.transform([escape_decoded_text])
+        X_esc = _transform(escape_decoded_text, vectorizer, _scaler)
         if model.predict(X_esc)[0] == 1:
             _esc_ml_mal = True
         if (_esc_ml_mal or len(_esc_rule_hits) > 0) and "decoded_escape_malicious" not in hit_names_seen:
@@ -525,7 +585,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     decoded_malicious = False
     for decoded in obs["decoded_views"]:
         if not decoded_malicious:
-            X = vectorizer.transform([decoded])
+            X = _transform(decoded, vectorizer, _scaler)
             if model.predict(X)[0] == 1:
                 decoded_malicious = True
 

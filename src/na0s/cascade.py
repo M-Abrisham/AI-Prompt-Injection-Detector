@@ -15,7 +15,7 @@ genuinely malicious inputs.
 import re
 
 from .safe_pickle import safe_load
-from .predict import _get_cached_models
+from .predict import _get_cached_models, _get_cached_scaler, _transform
 from .rules import rule_score, rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .layer2 import obfuscation_scan
 from .layer0 import layer0_sanitize
@@ -242,7 +242,8 @@ class WeightedClassifier:
             payloads visible only before normalization (FIX-5).
         """
         # --- ML prediction ---
-        X = vectorizer.transform([text])
+        scaler = _get_cached_scaler()
+        X = _transform(text, vectorizer, scaler)
         prediction = model.predict(X)[0]
         proba = model.predict_proba(X)[0]
         # Fix proba[1] fragility: derive ml_prob and ml_label correctly

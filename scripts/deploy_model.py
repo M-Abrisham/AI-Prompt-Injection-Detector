@@ -26,6 +26,7 @@ DEST_DIR = os.path.join(ROOT, "src", "na0s", "models")
 INIT_PATH = os.path.join(DEST_DIR, "__init__.py")
 
 MODEL_FILES = ["model.pkl", "tfidf_vectorizer.pkl"]
+OPTIONAL_MODEL_FILES = ["structural_scaler.pkl"]
 
 
 def _sha256(path):
@@ -93,9 +94,13 @@ def deploy(source_dir=None, dest_dir=None, init_path=None):
     if init_path is None:
         init_path = INIT_PATH
 
-    # 1. Copy model files
+    # 1. Copy model files (required + optional)
     new_hashes = {}
-    for fname in MODEL_FILES:
+    all_files = MODEL_FILES + [
+        f for f in OPTIONAL_MODEL_FILES
+        if os.path.exists(os.path.join(source_dir, f))
+    ]
+    for fname in all_files:
         src = os.path.join(source_dir, fname)
         dst = os.path.join(dest_dir, fname)
 
@@ -179,11 +184,13 @@ def rollback(dest_dir=None):
         dest_dir = DEST_DIR
 
     all_ok = True
-    for fname in MODEL_FILES:
+    for fname in MODEL_FILES + OPTIONAL_MODEL_FILES:
         live = os.path.join(dest_dir, fname)
         bak = live + ".bak"
 
         if not os.path.exists(bak):
+            if fname in OPTIONAL_MODEL_FILES:
+                continue  # Optional files may not have backups
             print(f"ERROR: rollback backup not found: {bak}")
             all_ok = False
             continue

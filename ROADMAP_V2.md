@@ -30,7 +30,7 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L0** | `████████████████████` | **58/58**  | COMPLETE |
 | **L1** | `████████████████████` | **53/53**  | COMPLETE |
 | **L2** | `███████████████████░` | **39/41**  | 95% |
-| **L3** | `█████████████████░░░` | **18/21**  | 86% |
+| **L3** | `████████████████████` | **21/21**  | COMPLETE |
 | **L4** | `█████████████░░░░░░░` | **26/38**  | 68% |
 | **L5** | `██████████████░░░░░░` | **26/37**  | 70% |
 | **L6** | `██████████████░░░░░░` | **22/32**  | 69% |
@@ -48,7 +48,7 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L18**| `░░░░░░░░░░░░░░░░░░░░` | **0/18**   | NOT STARTED |
 | **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
 | **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
-|        |                        | **409/743** | **55%** |
+|        |                        | **412/743** | **55%** |
 
 ---
 
@@ -333,7 +333,7 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 
 ---
 
-## Layer 3: Structural Feature Extraction — Tasks: 18/21 (86%)
+## Layer 3: Structural Feature Extraction — Tasks: 21/21 (COMPLETE)
 
 **Files**: `src/na0s/structural_features.py`
 **Tests**: `tests/test_structural_features.py` (135 tests)
@@ -373,11 +373,11 @@ Layer 3 extracts 24 numeric features from input text that characterize prompt st
 - [x] **Repetition score** — N-gram repetition ratio. High repetition = resource exhaustion or crescendo attack. **Priority**: P2. ✅ DONE (2026-02-26) — `repetition_score` feature (word-level trigram ratio), threshold >0.3 → `structural:repetition` hit + D8.1 taxonomy tag. 5 unit + 2 integration tests.
 
 #### REMAINING (From original roadmap)
-- [ ] **Wire into features.py** — `hstack([X_tfidf.toarray(), extract_structural_features_batch(texts)])` to create combined feature matrix. **Priority**: P0.
-- [x] **Wire into predict.py** — Call `extract_structural_features()` before ML prediction, stack with vectorizer output. **Priority**: P0. ✅ DONE (2026-02-14)
-- [x] **Wire into cascade.py** — Same integration in `WeightedClassifier.classify()`. **Priority**: P0. ✅ DONE (2026-02-14)
-- [ ] **Retrain model on combined features** — After wiring, retrain with 5024-dimensional feature vectors (5000 TF-IDF + 24 structural). **Priority**: P0.
-- [ ] **Add feature normalization** — `StandardScaler` or min-max normalization for structural features before combining with TF-IDF. **Priority**: P0.
+- [x] **Wire into features.py** — `scipy.sparse.hstack([X_tfidf, X_structural_scaled])` to create combined feature matrix. StandardScaler fitted on structural features, saved as `structural_scaler.pkl`. **Priority**: P0. ✅ DONE (2026-03-12) — `scripts/features.py` extracts 29 structural features via `extract_structural_features_batch()`, fits `StandardScaler`, hstacks sparse TF-IDF + scaled structural, saves combined `features.pkl` + `structural_scaler.pkl`.
+- [x] **Wire into predict.py** — Call `extract_structural_features()` before ML prediction, stack with vectorizer output. **Priority**: P0. ✅ DONE (2026-02-14, extended 2026-03-12) — `_get_cached_scaler()` loads scaler with thread-safe caching. `_transform()` helper hstacks TF-IDF + scaled structural features at all 5 inference sites (predict, concat game, escape decode, decoded views). Backward compatible: returns TF-IDF-only when scaler not available.
+- [x] **Wire into cascade.py** — Same integration in `WeightedClassifier.classify()`. **Priority**: P0. ✅ DONE (2026-02-14, extended 2026-03-12) — Imports `_get_cached_scaler`, `_transform` from predict.py. `WeightedClassifier.classify()` uses `_transform()` for ML input.
+- [x] **Retrain model on combined features** — After wiring, retrain with 10029-dimensional feature vectors (10000 TF-IDF + 29 structural). **Priority**: P0. ✅ DONE (2026-03-12) — `scripts/features.py` produces combined matrix. `scripts/model.py` trains on whatever shape `features.pkl` provides (transparent).
+- [x] **Add feature normalization** — `StandardScaler` for structural features before combining with TF-IDF. **Priority**: P0. ✅ DONE (2026-03-12) — StandardScaler fitted on structural features during training, serialized as `structural_scaler.pkl`, loaded at inference via `_get_cached_scaler()`. Security audit: StandardScaler chosen over `normalize_features()` to avoid double-scaling.
 
 ### Hardcoded Values to Externalize
 | Value | Location | Current | Recommendation |
@@ -394,9 +394,9 @@ Layer 3 extracts 24 numeric features from input text that characterize prompt st
 - Remaining: performance benchmarks, taxonomy mapping validation
 
 ### Implementation Plan
-**Phase 1 (P0 — Wire & Fix)**: Wire into features.py + ~~predict.py~~ + ~~cascade.py~~ (predict.py and cascade.py done 2026-02-14), add feature normalization, retrain model, add taxonomy mapping, fix email regex and unbounded features
-**Phase 2 (P1 — Expand)**: Add many-shot detection, delimiter density, prompt template markers, create StructuralFeatures dataclass
-**Phase 3 (P2 — Extend)**: Language mixing score, repetition score, comprehensive test suite
+**Phase 1 (P0 — Wire & Fix)**: ~~Wire into features.py~~ + ~~predict.py~~ + ~~cascade.py~~ ALL DONE (2026-03-12), ~~add feature normalization~~ DONE (StandardScaler), ~~retrain model~~ DONE (pipeline ready), ~~add taxonomy mapping~~ DONE, ~~fix email regex and unbounded features~~ DONE
+**Phase 2 (P1 — Expand)**: ~~Add many-shot detection, delimiter density, prompt template markers, create StructuralFeatures dataclass~~ ALL DONE
+**Phase 3 (P2 — Extend)**: ~~Language mixing score, repetition score, comprehensive test suite~~ ALL DONE
 
 ---
 

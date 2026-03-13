@@ -1,22 +1,29 @@
-"""Feature extraction script — TF-IDF vectorizer over the combined dataset.
+"""Feature extraction script — TF-IDF + structural features.
 
-Reads ``data/processed/combined_data.csv``, fits a TF-IDF vectorizer, and
-writes the sparse feature matrix plus label vector to
-``data/processed/features.pkl``.  The fitted vectorizer is saved separately
-so it can be reused at inference time.
+Reads ``data/processed/combined_data.csv``, fits a TF-IDF vectorizer and a
+StandardScaler for Layer 3 structural features, then writes the combined
+sparse feature matrix (TF-IDF columns + scaled structural columns) plus
+label vector to ``data/processed/features.pkl``.
+
+The fitted vectorizer and scaler are saved separately so they can be reused
+at inference time.
 """
 
 import sys
 import os
 import pandas as pd
+import scipy.sparse
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import StandardScaler
 from na0s.safe_pickle import safe_dump
+from na0s.structural_features import extract_structural_features_batch
 
 __all__ = ["load_training_data"]
 
 # Paths
 INPUT_PATH = "data/processed/combined_data.csv"
 VECTORIZER_PATH = "data/processed/tfidf_vectorizer.pkl"
+SCALER_PATH = "data/processed/structural_scaler.pkl"
 FEATURES_PATH = "data/processed/features.pkl"
 
 # Minimum number of samples required for reliable training
@@ -73,20 +80,40 @@ def load_training_data():
                 f"({n_samples}). Vocabulary will be limited to unique terms."
             )
 
-    # Create Vectorizer with top 10K words
+        # --- TF-IDF features ---
         vec = TfidfVectorizer(
             lowercase=True,
             max_features=_MAX_FEATURES
-            )
+        )
+        X_tfidf = vec.fit_transform(dataset['text'])
+        print(f"TF-IDF features: {X_tfidf.shape}")
 
-        X = vec.fit_transform(dataset['text'])
-        y = dataset['label'] # 0 = Safe, 1 = Malicious
+        # --- Layer 3: Structural features ---
+        texts = dataset['text'].tolist()
+        print(f"Extracting structural features for {len(texts)} samples...")
+        X_structural_raw = extract_structural_features_batch(texts)
+        print(f"Structural features: {X_structural_raw.shape}")
 
-    # Save VECTORIZER_Path data
+        # Fit StandardScaler on structural features (zero mean, unit variance)
+        scaler = StandardScaler()
+        X_structural_scaled = scaler.fit_transform(X_structural_raw)
+
+        # Combine: sparse TF-IDF + dense structural (converted to sparse)
+        X_structural_sparse = scipy.sparse.csr_matrix(X_structural_scaled)
+        X = scipy.sparse.hstack([X_tfidf, X_structural_sparse], format="csr")
+        y = dataset['label']  # 0 = Safe, 1 = Malicious
+        print(f"Combined features: {X.shape} "
+              f"({X_tfidf.shape[1]} TF-IDF + {X_structural_raw.shape[1]} structural)")
+
+        # Save vectorizer
         print(f"Saving vectorizer to {VECTORIZER_PATH}...")
         safe_dump(vec, VECTORIZER_PATH)
 
-     # Save FEATURES_PATH data
+        # Save structural scaler
+        print(f"Saving structural scaler to {SCALER_PATH}...")
+        safe_dump(scaler, SCALER_PATH)
+
+        # Save combined features
         print(f"Saving features to {FEATURES_PATH}...")
         safe_dump((X, y), FEATURES_PATH)
 
@@ -99,7 +126,7 @@ def load_training_data():
 
     # --- Verify output files exist and exit non-zero if missing ---
     all_ok = True
-    for path in (VECTORIZER_PATH, FEATURES_PATH):
+    for path in (VECTORIZER_PATH, SCALER_PATH, FEATURES_PATH):
         if os.path.isfile(path):
             size = os.path.getsize(path)
             print(f"Verified: {path} ({size:,} bytes)")
