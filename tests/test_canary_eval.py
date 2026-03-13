@@ -515,7 +515,7 @@ class TestEvaluateIntegration(unittest.TestCase):
     so the tests do not depend on model files or inference latency.
 
     Mock return signature (from canary_eval.py line 140):
-        pred_label_str, score, hits, l0, _detailed, _emb = classify_prompt(...)
+        pred_label_str, score, hits, l0, _detailed, _emb, _perp = classify_prompt(...)
 
     We control pred_label_str to either "MALICIOUS" or "SAFE".
     """
@@ -570,7 +570,7 @@ class TestEvaluateIntegration(unittest.TestCase):
         l0_mock = MagicMock()
         l0_mock.rejected = False
         l0_mock.sanitized_text = "mock sanitized"
-        return ("MALICIOUS", 0.92, ["rule_hit"], l0_mock, {}, {"score": 0.9, "technique_matches": []})
+        return ("MALICIOUS", 0.92, ["rule_hit"], l0_mock, {}, {"score": 0.9, "technique_matches": []}, 0.0)
 
     @staticmethod
     def _mock_safe():
@@ -578,7 +578,7 @@ class TestEvaluateIntegration(unittest.TestCase):
         l0_mock = MagicMock()
         l0_mock.rejected = False
         l0_mock.sanitized_text = "mock sanitized"
-        return ("SAFE", 0.12, [], l0_mock, {}, {"score": 0.1, "technique_matches": []})
+        return ("SAFE", 0.12, [], l0_mock, {}, {"score": 0.1, "technique_matches": []}, 0.0)
 
     # ------------------------------------------------------------------
     # Test 1: All predictions correct → PASS
@@ -781,14 +781,14 @@ class TestClassificationErrorTracking(unittest.TestCase):
         l0_mock = MagicMock()
         l0_mock.rejected = False
         l0_mock.sanitized_text = "mock sanitized"
-        return ("MALICIOUS", 0.92, ["rule_hit"], l0_mock, {}, {"score": 0.9, "technique_matches": []})
+        return ("MALICIOUS", 0.92, ["rule_hit"], l0_mock, {}, {"score": 0.9, "technique_matches": []}, 0.0)
 
     @staticmethod
     def _mock_safe():
         l0_mock = MagicMock()
         l0_mock.rejected = False
         l0_mock.sanitized_text = "mock sanitized"
-        return ("SAFE", 0.12, [], l0_mock, {}, {"score": 0.1, "technique_matches": []})
+        return ("SAFE", 0.12, [], l0_mock, {}, {"score": 0.1, "technique_matches": []}, 0.0)
 
     # ------------------------------------------------------------------
     # Test: single classification error causes gate failure
@@ -989,8 +989,8 @@ class TestMain(unittest.TestCase):
             l0_mock.rejected = False
             l0_mock.sanitized_text = text
             if text in injection_texts:
-                return ("MALICIOUS", 0.95, [], l0_mock, {}, {"score": 0.95, "technique_matches": []})
-            return ("SAFE", 0.05, [], l0_mock, {}, {"score": 0.05, "technique_matches": []})
+                return ("MALICIOUS", 0.95, [], l0_mock, {}, {"score": 0.95, "technique_matches": []}, 0.0)
+            return ("SAFE", 0.05, [], l0_mock, {}, {"score": 0.05, "technique_matches": []}, 0.0)
 
         mock_vectorizer = MagicMock()
         mock_model = MagicMock()
@@ -1031,7 +1031,7 @@ class TestMain(unittest.TestCase):
             l0_mock = MagicMock()
             l0_mock.rejected = False
             l0_mock.sanitized_text = text
-            return ("SAFE", 0.10, [], l0_mock, {}, {"score": 0.1, "technique_matches": []})
+            return ("SAFE", 0.10, [], l0_mock, {}, {"score": 0.1, "technique_matches": []}, 0.0)
 
         mock_vectorizer = MagicMock()
         mock_model = MagicMock()

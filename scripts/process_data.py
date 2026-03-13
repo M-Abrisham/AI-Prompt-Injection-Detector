@@ -145,6 +145,15 @@ def merge_datasets():
                 frames.append(df)
                 print(f"  [jsonl] {name}: {len(df)} rows")
 
+    # ── 2b. Merge hard negatives if available ────────────────────
+    hard_neg_path = os.path.join(RAW_DIR, "hard_negatives.csv")
+    if os.path.isfile(hard_neg_path):
+        hn_df = _load_csv(hard_neg_path)
+        if hn_df is not None and len(hn_df) > 0:
+            source_counts["hard_negatives.csv"] = len(hn_df)
+            frames.append(hn_df)
+            print(f"  [hard-neg] hard_negatives.csv: {len(hn_df)} hard negatives added")
+
     if not frames:
         print("ERROR: No usable datasets found.")
         return None

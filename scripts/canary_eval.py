@@ -140,7 +140,7 @@ def evaluate(csv_path: str, verbose: bool = False) -> dict:
         technique = row.get("technique", "")
 
         try:
-            pred_label_str, score, hits, l0, _detailed, _emb = classify_prompt(
+            pred_label_str, score, hits, l0, _detailed, _emb, _perp = classify_prompt(
                 text, vectorizer, model
             )
         except Exception as exc:

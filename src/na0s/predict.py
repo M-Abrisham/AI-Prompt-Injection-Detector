@@ -79,12 +79,13 @@ from .layer2 import obfuscation_scan
 from .rules import rule_score_detailed, RULES, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
 from .safe_pickle import safe_load
-from .models import get_model_path
+from .models import get_model_path, KNOWN_HASHES
 from .signal_boost import calculate_boost_from_names
 from .safe_content import calculate_safe_content_score
 from ._voting import (
     weighted_decision as _voting_weighted_decision,
     DECISION_THRESHOLD as _VOTING_THRESHOLD,
+    get_decision_threshold as _get_decision_threshold,
     FP_EXEMPT_HITS,
     RULE_SEVERITY as _VOTING_RULE_SEVERITY,
     RULE_TECHNIQUE_IDS as _VOTING_RULE_TECHNIQUE_IDS,
@@ -133,10 +134,18 @@ try:
 except ImportError:
     _HAS_WHITESPACE_STEGO = False
 
+# Layer 4: Perplexity-based adversarial signal — optional import
+try:
+    from .perplexity import compute_perplexity, PERPLEXITY_THRESHOLD
+    _HAS_PERPLEXITY = True
+except ImportError:
+    _HAS_PERPLEXITY = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
+CHAR_VECTORIZER_PATH = get_model_path("char_tfidf_vectorizer.pkl")
 SCALER_PATH = get_model_path("structural_scaler.pkl")
-DECISION_THRESHOLD = 0.55
+DECISION_THRESHOLD = _get_decision_threshold()
 
 # Canonical SEVERITY_WEIGHTS imported from rules.py (DRY)
 _SEVERITY_WEIGHTS = SEVERITY_WEIGHTS
@@ -182,6 +191,16 @@ def _get_cached_models():
     return _cached_vectorizer, _cached_model
 
 
+def _get_model_version():
+    """Return a short version string derived from the model.pkl SHA-256 hash.
+
+    Uses the first 8 hex characters of the hardcoded hash in KNOWN_HASHES.
+    Returns an empty string if model.pkl is not in KNOWN_HASHES.
+    """
+    digest = KNOWN_HASHES.get("model.pkl", "")
+    return digest[:8] if digest else ""
+
+
 # ---------------------------------------------------------------------------
 # Thread-safe structural scaler cache — loaded once on first use.
 # None = not loaded yet, False = file doesn't exist (backward compat).
@@ -214,24 +233,70 @@ def _get_cached_scaler():
     return _cached_scaler
 
 
-def _transform(text, vectorizer, scaler=None):
-    """Transform text to feature vector, including structural features if available.
+# ---------------------------------------------------------------------------
+# Thread-safe char TF-IDF vectorizer cache — loaded once on first use.
+# None = not loaded yet, False = file doesn't exist (backward compat).
+# ---------------------------------------------------------------------------
+_cached_char_vectorizer = None
+_char_vec_cache_lock = threading.Lock()
 
+
+def _get_cached_char_vectorizer():
+    """Return fitted char-level TfidfVectorizer, or None.
+
+    Returns None when the char vectorizer file doesn't exist (pre-L4 model).
+    Thread-safe via double-checked locking.
+    """
+    global _cached_char_vectorizer
+    if _cached_char_vectorizer is not None:
+        return _cached_char_vectorizer if _cached_char_vectorizer is not False else None
+    with _char_vec_cache_lock:
+        if _cached_char_vectorizer is not None:
+            return _cached_char_vectorizer if _cached_char_vectorizer is not False else None
+        if not os.path.isfile(CHAR_VECTORIZER_PATH):
+            _cached_char_vectorizer = False
+            return None
+        try:
+            _cached_char_vectorizer = safe_load(CHAR_VECTORIZER_PATH)
+        except Exception:
+            logger.warning("Failed to load char TF-IDF vectorizer from %s", CHAR_VECTORIZER_PATH)
+            _cached_char_vectorizer = False
+            return None
+    return _cached_char_vectorizer
+
+
+def _transform(text, vectorizer, scaler=None, char_vectorizer=None):
+    """Transform text to feature vector, including char TF-IDF and structural features.
+
+    The feature vector is built as: [word_tfidf, char_tfidf, structural].
+
+    When *char_vectorizer* is a fitted TfidfVectorizer (char-level, Layer 4),
+    its features are appended after word TF-IDF and before structural features.
     When *scaler* is a fitted StandardScaler (i.e. the model was trained
     with structural features), the 29 structural features are extracted,
-    scaled, and appended to the sparse TF-IDF vector via scipy.sparse.hstack.
-    When *scaler* is None (pre-L3 model), returns TF-IDF only.
+    scaled, and appended last via scipy.sparse.hstack.
+    When either is None, that component is skipped (backward compat).
     """
+    import scipy.sparse
     X = vectorizer.transform([text])
+
+    # Layer 4: char-level TF-IDF (optional)
+    if char_vectorizer is not None:
+        try:
+            X_char = char_vectorizer.transform([text])
+            X = scipy.sparse.hstack([X, X_char], format="csr")
+        except Exception:
+            pass  # Fall back without char features
+
+    # Layer 3: structural features (optional)
     if scaler is not None and _HAS_STRUCTURAL_FEATURES:
         try:
-            import scipy.sparse
             struct_arr = extract_structural_features_batch([text])
             struct_scaled = scaler.transform(struct_arr)
             X = scipy.sparse.hstack([X, scipy.sparse.csr_matrix(struct_scaled)],
                                     format="csr")
         except Exception:
-            pass  # Fall back to TF-IDF only
+            pass  # Fall back without structural features
     return X
 
 
@@ -371,7 +436,8 @@ def predict(text, vectorizer, model):
     clean = l0.sanitized_text
 
     scaler = _get_cached_scaler()
-    X = _transform(clean, vectorizer, scaler)
+    char_vec = _get_cached_char_vectorizer()
+    X = _transform(clean, vectorizer, scaler, char_vectorizer=char_vec)
     prediction = model.predict(X)[0]
     prob = model.predict_proba(X)[0][prediction]
 
@@ -425,10 +491,11 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     label, prob, l0 = predict(text, vectorizer, model)
 
     if l0.rejected:
-        return label, prob, [], l0, [], {"score": 0.0, "technique_matches": []}
+        return label, prob, [], l0, [], {"score": 0.0, "technique_matches": []}, 0.0
 
     clean = l0.sanitized_text
     _scaler = _get_cached_scaler()
+    _char_vec = _get_cached_char_vectorizer()
 
     # FIX-5: Run rules on sanitized text AND raw text (if different) to
     # catch payloads visible only after normalization (e.g., homoglyphs)
@@ -467,7 +534,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
                 detailed_hits.append(rh)
                 hit_names_seen.add(rh.name)
                 hits.append(rh.name)
-        X_assembled = _transform(assembled_game, vectorizer, _scaler)
+        X_assembled = _transform(assembled_game, vectorizer, _scaler, char_vectorizer=_char_vec)
         if model.predict(X_assembled)[0] == 1:
             if "decoded_payload_malicious" not in hit_names_seen:
                 hits.append("decoded_payload_malicious")
@@ -490,7 +557,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
         # is strong evidence — the escape decoding itself proves
         # deliberate obfuscation.
         _esc_ml_mal = False
-        X_esc = _transform(escape_decoded_text, vectorizer, _scaler)
+        X_esc = _transform(escape_decoded_text, vectorizer, _scaler, char_vectorizer=_char_vec)
         if model.predict(X_esc)[0] == 1:
             _esc_ml_mal = True
         if (_esc_ml_mal or len(_esc_rule_hits) > 0) and "decoded_escape_malicious" not in hit_names_seen:
@@ -585,7 +652,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     decoded_malicious = False
     for decoded in obs["decoded_views"]:
         if not decoded_malicious:
-            X = _transform(decoded, vectorizer, _scaler)
+            X = _transform(decoded, vectorizer, _scaler, char_vectorizer=_char_vec)
             if model.predict(X)[0] == 1:
                 decoded_malicious = True
 
@@ -633,6 +700,20 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     # ML-uncertain-zone cap or override protection logic inside that function.
     if _l2_extra_boost > 0:
         composite = min(composite + _l2_extra_boost, 1.0)
+
+    # --- Layer 4: Perplexity-based adversarial signal ---
+    # Compute pseudo-perplexity on sanitized text.  If the text looks
+    # unnatural AND the ML model is uncertain, add a small boost.
+    perplexity_score = 0.0
+    if _HAS_PERPLEXITY:
+        try:
+            perplexity_score = compute_perplexity(clean)
+            ml_prob_mal = prob if 'MALICIOUS' in label else (1.0 - prob)
+            if (perplexity_score > PERPLEXITY_THRESHOLD
+                    and 0.35 <= ml_prob_mal <= 0.80):
+                composite = min(composite + 0.05, 1.0)
+        except Exception:
+            perplexity_score = 0.0
 
     # --- E1 extraction floor ---
     # When a critical-severity E1 rule fires AND the embedding classifier
@@ -781,7 +862,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
         "technique_matches": embedding_technique_matches,
     }
 
-    return label, composite, hits, l0, detailed_hits, embedding_info
+    return label, composite, hits, l0, detailed_hits, embedding_info, perplexity_score
 
 
 def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
@@ -809,7 +890,7 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
         vectorizer, model = predict_prompt()
 
     try:
-        label, prob, hits, l0, detailed_hits, embedding_info = with_timeout(
+        label, prob, hits, l0, detailed_hits, embedding_info, perplexity_score = with_timeout(
             classify_prompt,
             SCAN_TIMEOUT,
             text, vectorizer, model, threshold,
@@ -1179,6 +1260,8 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
         ml_label="malicious" if "MALICIOUS" in label else "safe",
         anomaly_flags=l0.anomaly_flags,
         embedding_score=round(embedding_info.get("score", 0.0), 4),
+        model_version=_get_model_version(),
+        perplexity_score=round(perplexity_score, 4),
     )
     result.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
     return result
@@ -1196,7 +1279,7 @@ if __name__ == "__main__":
 
     print("\n--- Prompt Injection Detector ---\n")
     for prompt in test_prompts:
-        label, confidence, hits, l0, _detailed, _emb_info = classify_prompt(prompt, vectorizer, model)
+        label, confidence, hits, l0, _detailed, _emb_info, _perp = classify_prompt(prompt, vectorizer, model)
 
         if l0.rejected:
             print("BLOCKED: {0} | reason: {1}".format(prompt[:50], l0.rejection_reason))

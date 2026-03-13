@@ -15,7 +15,7 @@ genuinely malicious inputs.
 import re
 
 from .safe_pickle import safe_load
-from .predict import _get_cached_models, _get_cached_scaler, _transform
+from .predict import _get_cached_models, _get_cached_scaler, _transform, _get_model_version
 from .rules import rule_score, rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .layer2 import obfuscation_scan
 from .layer0 import layer0_sanitize
@@ -738,6 +738,7 @@ class CascadeClassifier:
                 ml_confidence=confidence,
                 ml_label="blocked",
                 cascade_stage=stage,
+                model_version=_get_model_version(),
             )
 
         # Derive technique_tags from the detailed rule hits available
@@ -770,6 +771,7 @@ class CascadeClassifier:
             ml_label="malicious" if is_mal else "safe",
             anomaly_flags=l0.anomaly_flags if l0 else [],
             cascade_stage=stage,
+            model_version=_get_model_version(),
         )
 
     # ------------------------------------------------------------------

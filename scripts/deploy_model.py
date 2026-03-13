@@ -26,7 +26,7 @@ DEST_DIR = os.path.join(ROOT, "src", "na0s", "models")
 INIT_PATH = os.path.join(DEST_DIR, "__init__.py")
 
 MODEL_FILES = ["model.pkl", "tfidf_vectorizer.pkl"]
-OPTIONAL_MODEL_FILES = ["structural_scaler.pkl"]
+OPTIONAL_MODEL_FILES = ["structural_scaler.pkl", "char_tfidf_vectorizer.pkl"]
 
 
 def _sha256(path):

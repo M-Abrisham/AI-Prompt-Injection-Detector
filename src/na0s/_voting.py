@@ -17,13 +17,90 @@ History:
 
 from __future__ import annotations
 
+import json
+import logging
+import os
+
 from .rules import RULES, SEVERITY_WEIGHTS
 from .signal_boost import calculate_boost_from_names
 
+_logger = logging.getLogger(__name__)
+
 # ── Constants (exported for tests and downstream consumers) ──────────────
 
-#: Default decision threshold.
-DECISION_THRESHOLD = 0.55
+#: Hardcoded fallback when optimal_threshold.json is absent.
+_FALLBACK_THRESHOLD = 0.55
+
+#: Path to the threshold JSON produced by scripts/optimize_threshold.py.
+_THRESHOLD_JSON_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    os.pardir, os.pardir,
+    "data", "processed", "optimal_threshold.json",
+)
+
+#: Cached value — computed once by :func:`get_decision_threshold`.
+_cached_threshold = None
+
+
+def get_decision_threshold():
+    """Return the active decision threshold (cached after first call).
+
+    Resolution order:
+        1. ``DECISION_THRESHOLD`` environment variable  (float)
+        2. ``recall95_threshold`` from ``data/processed/optimal_threshold.json``
+        3. Hardcoded fallback ``0.55``
+    """
+    global _cached_threshold
+    if _cached_threshold is not None:
+        return _cached_threshold
+
+    # 1. Env-var override
+    env_val = os.environ.get("DECISION_THRESHOLD")
+    if env_val is not None:
+        try:
+            _cached_threshold = float(env_val)
+            _logger.info(
+                "Decision threshold set from DECISION_THRESHOLD env var: %.4f",
+                _cached_threshold,
+            )
+            return _cached_threshold
+        except (ValueError, TypeError):
+            _logger.warning(
+                "Invalid DECISION_THRESHOLD env var %r; ignoring.", env_val,
+            )
+
+    # 2. Load from optimal_threshold.json
+    json_path = os.path.normpath(_THRESHOLD_JSON_PATH)
+    if os.path.isfile(json_path):
+        try:
+            with open(json_path, "r") as fh:
+                data = json.load(fh)
+            _cached_threshold = float(data["recall95_threshold"])
+            _logger.info(
+                "Decision threshold loaded from %s: %.4f",
+                json_path, _cached_threshold,
+            )
+            return _cached_threshold
+        except Exception as exc:
+            _logger.warning(
+                "Failed to load threshold from %s: %s; using fallback.",
+                json_path, exc,
+            )
+
+    # 3. Fallback
+    _cached_threshold = _FALLBACK_THRESHOLD
+    _logger.debug("Decision threshold using fallback: %.4f", _cached_threshold)
+    return _cached_threshold
+
+
+def _reset_threshold_cache():
+    """Reset the cached threshold (for testing only)."""
+    global _cached_threshold
+    _cached_threshold = None
+
+
+#: Default decision threshold (resolved lazily).
+DECISION_THRESHOLD = get_decision_threshold()
 
 #: ML model weight in the composite formula.
 ML_WEIGHT = 0.6

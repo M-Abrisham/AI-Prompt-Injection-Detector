@@ -25,6 +25,8 @@ class ScanResult:
     embedding_score: float = 0.0   # Layer 5: centroid-based semantic similarity
                                    # score in [0.0, 0.20].  0.0 when the
                                    # embedding classifier is not available.
+    model_version: str = ""        # Layer 4: first 8 chars of model.pkl SHA-256
+    perplexity_score: float = 0.0  # Layer 4: pseudo-perplexity score [0.0, 1.0]
     elapsed_ms: float = 0.0
 
     def to_dict(self) -> dict:

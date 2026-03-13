@@ -23,6 +23,7 @@ __all__ = ["load_training_data"]
 # Paths
 INPUT_PATH = "data/processed/combined_data.csv"
 VECTORIZER_PATH = "data/processed/tfidf_vectorizer.pkl"
+CHAR_VECTORIZER_PATH = "data/processed/char_tfidf_vectorizer.pkl"
 SCALER_PATH = "data/processed/structural_scaler.pkl"
 FEATURES_PATH = "data/processed/features.pkl"
 
@@ -30,6 +31,8 @@ FEATURES_PATH = "data/processed/features.pkl"
 _MIN_SAMPLES = 10
 # TF-IDF vocabulary ceiling
 _MAX_FEATURES = 10000
+# Character-level TF-IDF vocabulary ceiling (supplementary, smaller)
+_CHAR_MAX_FEATURES = 5000
 
 
 def load_training_data():
@@ -54,6 +57,44 @@ def load_training_data():
             sys.exit(1)
 
         dataset['text'] = dataset['text'].fillna('').astype(str)
+
+        # --- Dataset rebalancing (max 3:1 majority:minority ratio) ---
+        # Activated when minority class is < 20% of total.
+        # Set SKIP_REBALANCE=1 to disable.
+        if not os.environ.get("SKIP_REBALANCE", "") == "1":
+            label_counts = dataset['label'].value_counts()
+            total = len(dataset)
+            minority_count = label_counts.min()
+            majority_label = label_counts.idxmax()
+            minority_label = label_counts.idxmin()
+
+            print(f"Class distribution before rebalancing:")
+            for lbl in sorted(label_counts.index):
+                cnt = label_counts[lbl]
+                pct = cnt / total * 100
+                print(f"  Label {lbl}: {cnt} ({pct:.1f}%)")
+
+            if minority_count < 0.20 * total:
+                max_majority = minority_count * 3
+                majority_df = dataset[dataset['label'] == majority_label]
+                minority_df = dataset[dataset['label'] == minority_label]
+
+                if len(majority_df) > max_majority:
+                    majority_df = majority_df.sample(
+                        n=max_majority, random_state=42
+                    )
+                    dataset = pd.concat(
+                        [majority_df, minority_df], ignore_index=True
+                    )
+                    print(f"Rebalanced: undersampled label {majority_label} "
+                          f"from {label_counts[majority_label]} to {max_majority} "
+                          f"(3:1 ratio). Total samples: {len(dataset)}")
+                else:
+                    print("No rebalancing needed (majority already within 3:1).")
+            else:
+                print("No rebalancing needed (minority class >= 20% of total).")
+        else:
+            print("Rebalancing skipped (SKIP_REBALANCE=1).")
 
         # --- Guard: both class labels must be present ---
         unique_labels = set(dataset['label'].dropna().unique())
@@ -83,10 +124,22 @@ def load_training_data():
         # --- TF-IDF features ---
         vec = TfidfVectorizer(
             lowercase=True,
-            max_features=_MAX_FEATURES
+            max_features=_MAX_FEATURES,
+            ngram_range=(1, 3),
+            sublinear_tf=True,
         )
         X_tfidf = vec.fit_transform(dataset['text'])
         print(f"TF-IDF features: {X_tfidf.shape}")
+
+        # --- Layer 4: Character-level TF-IDF features ---
+        char_vec = TfidfVectorizer(
+            analyzer='char_wb',
+            ngram_range=(3, 5),
+            max_features=_CHAR_MAX_FEATURES,
+            sublinear_tf=True,
+        )
+        X_char_tfidf = char_vec.fit_transform(dataset['text'])
+        print(f"Char TF-IDF features: {X_char_tfidf.shape}")
 
         # --- Layer 3: Structural features ---
         texts = dataset['text'].tolist()
@@ -98,16 +151,21 @@ def load_training_data():
         scaler = StandardScaler()
         X_structural_scaled = scaler.fit_transform(X_structural_raw)
 
-        # Combine: sparse TF-IDF + dense structural (converted to sparse)
+        # Combine: sparse word TF-IDF + char TF-IDF + dense structural (converted to sparse)
         X_structural_sparse = scipy.sparse.csr_matrix(X_structural_scaled)
-        X = scipy.sparse.hstack([X_tfidf, X_structural_sparse], format="csr")
+        X = scipy.sparse.hstack([X_tfidf, X_char_tfidf, X_structural_sparse], format="csr")
         y = dataset['label']  # 0 = Safe, 1 = Malicious
         print(f"Combined features: {X.shape} "
-              f"({X_tfidf.shape[1]} TF-IDF + {X_structural_raw.shape[1]} structural)")
+              f"({X_tfidf.shape[1]} word TF-IDF + {X_char_tfidf.shape[1]} char TF-IDF"
+              f" + {X_structural_raw.shape[1]} structural)")
 
-        # Save vectorizer
+        # Save word vectorizer
         print(f"Saving vectorizer to {VECTORIZER_PATH}...")
         safe_dump(vec, VECTORIZER_PATH)
+
+        # Save char vectorizer
+        print(f"Saving char vectorizer to {CHAR_VECTORIZER_PATH}...")
+        safe_dump(char_vec, CHAR_VECTORIZER_PATH)
 
         # Save structural scaler
         print(f"Saving structural scaler to {SCALER_PATH}...")
@@ -126,7 +184,7 @@ def load_training_data():
 
     # --- Verify output files exist and exit non-zero if missing ---
     all_ok = True
-    for path in (VECTORIZER_PATH, SCALER_PATH, FEATURES_PATH):
+    for path in (VECTORIZER_PATH, CHAR_VECTORIZER_PATH, SCALER_PATH, FEATURES_PATH):
         if os.path.isfile(path):
             size = os.path.getsize(path)
             print(f"Verified: {path} ({size:,} bytes)")

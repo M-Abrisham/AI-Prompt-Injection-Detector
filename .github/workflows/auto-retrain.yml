@@ -68,6 +68,12 @@ jobs:
       - name: Validate data quality
         run: python -m scripts.validate_data --fix
 
+      # Hard-negative mining: generate benign samples that resemble attacks
+      # (security discussions, benign roleplay, override-like language) and
+      # merge them into combined_data.csv to reduce false-positive rate.
+      - name: Mine hard negatives into training data
+        run: python -m scripts.mine_hard_negatives
+
       - name: Extract TF-IDF features
         run: python -m scripts.features
 

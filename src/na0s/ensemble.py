@@ -17,6 +17,7 @@ import os
 
 from .scan_result import ScanResult
 from .predict import scan as tfidf_scan
+from ._voting import get_decision_threshold as _get_decision_threshold
 
 # Layer 5: Embedding-based classifier -- optional import
 try:
@@ -47,8 +48,8 @@ if _ENV_TFIDF_WEIGHT is not None:
     except (ValueError, TypeError):
         pass  # Keep defaults if env var is invalid
 
-# Decision threshold -- same as predict.py for consistency
-_DECISION_THRESHOLD = 0.55
+# Decision threshold -- loaded dynamically from _voting.py (single source of truth)
+_DECISION_THRESHOLD = _get_decision_threshold()
 
 
 def ensemble_scan(
