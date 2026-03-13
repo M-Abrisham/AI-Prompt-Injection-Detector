@@ -442,6 +442,7 @@ class TestNoDoubleWeighting(unittest.TestCase):
         when passed to _weighted_decision.
         """
         # Import _weighted_decision to test it directly
+        # predict._weighted_decision delegates to _voting.weighted_decision (Issue #2)
         try:
             from na0s.predict import _weighted_decision, SEVERITY_WEIGHTS
         except ImportError:
@@ -475,6 +476,7 @@ class TestNoDoubleWeighting(unittest.TestCase):
     @patch.dict(os.environ, {"SCAN_TIMEOUT_SEC": "0"})
     def test_obs_flags_only_in_obf_weight(self):
         """With obs_flags=['base64'], rule_weight should NOT include base64."""
+        # predict._weighted_decision delegates to _voting.weighted_decision (Issue #2)
         try:
             from na0s.predict import _weighted_decision
         except ImportError:

@@ -188,6 +188,22 @@ class TestFixL4_9_SeverityWeightsShared(unittest.TestCase):
             f"should contain {expected_keys}",
         )
 
+    def test_voting_rule_severity_uses_rules_severity_weights(self):
+        """_voting.RULE_SEVERITY maps to severity strings in rules.SEVERITY_WEIGHTS."""
+        from na0s._voting import RULE_SEVERITY
+        from na0s.rules import SEVERITY_WEIGHTS
+        for rule_name, severity in RULE_SEVERITY.items():
+            self.assertIn(
+                severity, SEVERITY_WEIGHTS,
+                f"_voting.RULE_SEVERITY['{rule_name}'] = '{severity}' "
+                f"not found in rules.SEVERITY_WEIGHTS keys {set(SEVERITY_WEIGHTS.keys())}",
+            )
+
+    def test_voting_decision_threshold_is_055(self):
+        """_voting.DECISION_THRESHOLD must equal 0.55."""
+        from na0s._voting import DECISION_THRESHOLD as voting_threshold
+        self.assertEqual(voting_threshold, 0.55)
+
 
 if __name__ == "__main__":
     unittest.main()

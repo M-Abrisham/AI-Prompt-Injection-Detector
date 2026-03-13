@@ -181,11 +181,15 @@ def weighted_decision(
     ml_safe_confidence = ml_prob if "SAFE" in ml_label else (1.0 - ml_prob)
 
     # --- Override protection ---
+    # BUG-L6-2 fix: Only trust ML's safe verdict when composite agrees
+    # (below threshold).  If composite >= threshold, the rule signals are
+    # strong enough to override ML — don't suppress a valid MALICIOUS decision.
     if (threshold > 0.0
             and ml_safe_confidence > 0.8
             and severities_seen <= {"medium"}
             and not obs_flags
-            and structural_weight == 0.0):
+            and structural_weight == 0.0
+            and composite < threshold):
         return "SAFE", composite
 
     # --- Extended override protection ---

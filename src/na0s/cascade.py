@@ -23,6 +23,14 @@ from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult
 from .models import get_model_path
 from .signal_boost import calculate_boost
+from ._voting import weighted_decision as _voting_weighted_decision
+
+# Layer 3: Structural features — optional import
+try:
+    from .structural_features import extract_structural_features
+    _HAS_STRUCTURAL = True
+except ImportError:
+    _HAS_STRUCTURAL = False
 
 # Layer 5: Embedding-based classifier — optional import
 # DEPRECATED PATH: This import supports the legacy ``enable_embedding=True``
@@ -210,9 +218,6 @@ class WeightedClassifier:
     contributes a weighted score that must exceed a configurable threshold.
     """
 
-    ML_WEIGHT = 0.6
-    OBFUSCATION_WEIGHT_PER_FLAG = 0.15
-    OBFUSCATION_WEIGHT_CAP = 0.3
     DEFAULT_THRESHOLD = 0.55
 
     def __init__(self, threshold=None):
@@ -240,11 +245,15 @@ class WeightedClassifier:
         X = vectorizer.transform([text])
         prediction = model.predict(X)[0]
         proba = model.predict_proba(X)[0]
-        # Probability of the malicious class (class index 1)
-        if len(proba) > 1:
-            ml_prob = proba[1]
+        # Fix proba[1] fragility: derive ml_prob and ml_label correctly
+        # from the model's own prediction rather than assuming class index 1.
+        import numpy as np
+        if isinstance(prediction, (int, np.integer)):
+            prediction = int(prediction)
+            ml_label = "MALICIOUS" if prediction == 1 else "SAFE"
         else:
-            ml_prob = proba[0] if prediction == 1 else 1.0 - proba[0]
+            ml_label = str(prediction)
+        ml_prob = float(max(proba))  # confidence in predicted class
 
         # --- Rule hits ---
         # FIX-5: Run rules on sanitized text AND raw text (if different).
@@ -257,63 +266,53 @@ class WeightedClassifier:
                     hit_names_seen.add(rh.name)
         hit_names = [h.name for h in detailed_hits]
 
-        rule_weight = 0.0
-        max_severity = "medium"
-        for hit in detailed_hits:
-            w = SEVERITY_WEIGHTS.get(hit.severity, 0.1)
-            rule_weight += w
-            # Track the highest severity for override protection.
-            # critical_content is even more specific than critical (near-zero
-            # FP rate) so it must also prevent ML-trust overrides.
-            if hit.severity in ("critical", "critical_content"):
-                max_severity = "critical"
-            elif hit.severity == "high" and max_severity != "critical":
-                max_severity = "high"
-
         # --- Obfuscation flags ---
         obs = obfuscation_scan(text)
         obfuscation_flags = obs.get("evasion_flags", [])
-        hit_names.extend(obfuscation_flags)
+        # BUG-L2-03 FIX: Do NOT extend hit_names with obs_flags before
+        # calling _voting.  obs_flags are scored separately as obf_weight;
+        # adding them to hits would double-count them as medium-severity rules.
+        # They are added to hit_names AFTER the _voting call for reporting.
 
-        obf_weight = min(
-            len(obfuscation_flags) * self.OBFUSCATION_WEIGHT_PER_FLAG,
-            self.OBFUSCATION_WEIGHT_CAP,
+        # --- Layer 3: Structural features (Phase 3a) ---
+        structural = None
+        if _HAS_STRUCTURAL:
+            try:
+                structural = extract_structural_features(text)
+            except Exception:
+                structural = None
+
+        # --- Delegate to canonical weighted voting logic ---
+        # _voting.weighted_decision handles ALL scoring: ML signal, rule
+        # severity, obfuscation weight, structural features, signal boost,
+        # override protection, agreement boost, technique-family boost.
+        label, composite = _voting_weighted_decision(
+            ml_prob=ml_prob,
+            ml_label=ml_label,
+            hits=hit_names,
+            obs_flags=obfuscation_flags,
+            structural=structural,
+            threshold=self.threshold,
         )
 
-        # --- Signal co-occurrence boost ---
-        boost_score, boost_reasons = calculate_boost(
+        # Add obs flags and boost reasons to returned hits for reporting.
+        # These are AFTER the _voting call to avoid double-counting.
+        hit_names.extend(obfuscation_flags)
+        _boost_score, boost_reasons = calculate_boost(
             detailed_hits, obfuscation_flags,
         )
         hit_names.extend(boost_reasons)
 
-        # --- Composite score ---
-        final_score = (self.ML_WEIGHT * ml_prob) + rule_weight + obf_weight + boost_score
-
-        # Clamp to [0, 1]
-        final_score = max(0.0, min(1.0, final_score))
-
-        # --- Override protection ---
-        # If ML is highly confident it is safe AND only medium-severity
-        # rules triggered AND the composite score is below the threshold,
-        # trust the ML model.  BUG-L6-2 fix: only override when composite
-        # < threshold; otherwise a valid MALICIOUS decision is suppressed.
-        ml_safe_confidence = 1.0 - ml_prob
-        if (ml_safe_confidence > 0.8
-                and max_severity == "medium"
-                and obf_weight == 0.0
-                and final_score < self.threshold):
-            return "SAFE", round(1.0 - final_score, 4), hit_names
-
-        # --- Threshold decision ---
+        # --- Convert composite to P(label correct) for cascade API ---
         # BUG-L6-4 note: confidence semantics are P(label correct):
-        #   MALICIOUS -> confidence = final_score (composite malicious probability)
-        #   SAFE      -> confidence = 1.0 - final_score (probability it's truly safe)
-        # This is intentional: callers always get "how confident are we in
-        # this label?" regardless of which label was chosen.
-        if final_score >= self.threshold:
-            return "MALICIOUS", round(final_score, 4), hit_names
+        #   MALICIOUS -> confidence = composite (composite malicious probability)
+        #   SAFE      -> confidence = 1.0 - composite (probability it's truly safe)
+        if label == "MALICIOUS":
+            confidence = round(composite, 4)
         else:
-            return "SAFE", round(1.0 - final_score, 4), hit_names
+            confidence = round(1.0 - composite, 4)
+
+        return label, confidence, hit_names
 
 
 # ---------------------------------------------------------------------------

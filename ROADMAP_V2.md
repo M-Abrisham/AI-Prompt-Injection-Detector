@@ -33,7 +33,7 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L3** | `█████████████████░░░` | **18/21**  | 86% |
 | **L4** | `█████████████░░░░░░░` | **26/38**  | 68% |
 | **L5** | `██████████████░░░░░░` | **26/37**  | 70% |
-| **L6** | `█████████████░░░░░░░` | **21/32**  | 66% |
+| **L6** | `██████████████░░░░░░` | **22/32**  | 69% |
 | **L7** | `██████████████░░░░░░` | **26/37**  | 70% |
 | **L8** | `███████████████░░░░░` | **20/26**  | 77% |
 | **L9** | `█████████░░░░░░░░░░░` | **13/28**  | 46% |
@@ -48,7 +48,7 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L18**| `░░░░░░░░░░░░░░░░░░░░` | **0/18**   | NOT STARTED |
 | **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
 | **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
-|        |                        | **408/743** | **55%** |
+|        |                        | **409/743** | **55%** |
 
 ---
 
@@ -628,7 +628,7 @@ CascadeClassifier.classify(text)
 - [x] **Wire L3 structural features into Stage 2** — Use injection signals (imperative_start, role_assignment, instruction_boundary) as additional voting signal. **Priority**: P0. **Effort**: Easy. ✅ DONE (2026-02-14)
 - [x] **Wire L5 embedding classifier into Stage 2** — Add embedding prediction as parallel signal to TF-IDF. Ensemble via averaging or stacking. **Priority**: P0. **Effort**: Medium. ✅ DONE (2026-02-14) — 60/40 blending
 - [x] **Wire L8 positive validation as Stage 2.5** — After ML but before judge, validate that input looks like a legitimate prompt. Could reduce judge invocations. **Priority**: P1. ✅ DONE (2026-02-14) — post-classification FP reduction
-- [ ] **`_voting.py` consolidation (Issue #2, Phase 3)** — Wire cascade.py `WeightedClassifier` to delegate to `_voting.py:weighted_decision()`. Eliminates frozen subset (missing structural features, decoded-view classification, multi-layer boost, technique-family boost, extended override protection). Fix `proba[1]` fragility (sklearn alphabetizes class labels — need explicit `model.classes_` lookup). **Priority**: P0. **Effort**: Medium.
+- [x] **`_voting.py` consolidation (Issue #2, Phase 3+4)** — Wired cascade.py `WeightedClassifier` to delegate to `_voting.py:weighted_decision()`. Eliminated frozen subset — cascade now has ALL voting features: structural features (L3), multi-layer agreement boost, technique-family boost, extended override protection, ML uncertain-zone cap, critical-content floor, E1 extraction floor. Fixed `proba[1]` fragility (now uses `max(proba)` + label mapping). Fixed BUG-L6-2 in `_voting.py` (override must not suppress above threshold). 14 new tests verifying single source of truth. 5321 tests pass, 0 regressions. ✅ DONE (2026-03-12)
 - [ ] **Reciprocal Rank Fusion (RRF)** — Replace hand-tuned `_weighted_decision()` linear sum with scale-invariant RRF: `score = sum(1/(k+rank_i))`. Proven technique for combining heterogeneous scoring systems. Current linear sum suffers from signals on different scales (ML 0-1, rule_weight >1.0, obf capped 0.3). RRF is rank-based and scale-invariant. Research: `fusion_rag.py` from ml-rag-strategies. Zero new dependencies. **Priority**: P1. **Effort**: Medium.
 - [ ] **Self-RAG groundedness check** — After cascade produces MALICIOUS, verify verdict is grounded in 2+ independent evidence sources (ML agrees + rule hit + obfuscation flag). Reduces FPs where a single high-severity rule pushes score above threshold. Research: `self_rag.py` from ml-rag-strategies. Maps to: WhitelistFilter = should_retrieve, WeightedClassifier = generate, NEW _verify_verdict_grounded = is_response_grounded. **Priority**: P1. **Effort**: Easy.
 - [ ] **Adaptive complexity routing** — Explicit simple/moderate/complex input routing based on word count, obfuscation flags, structural boundaries, multilingual signals. Simple inputs → fast path (WhitelistFilter + basic ML). Complex inputs → full cascade + chunked + embedding + LLM judge. Currently implicit via length thresholds. Research: `adaptive_rag.py` from ml-rag-strategies. **Priority**: P1. **Effort**: Medium.
@@ -662,10 +662,9 @@ CascadeClassifier.classify(text)
 - Need tests for: WhitelistFilter edge cases, WeightedClassifier voting, override protection, judge routing, judge blending, `classify_for_evaluate()`, stats tracking, empty/whitespace input
 
 ### Implementation Plan
-**Phase 1 (P0 — Critical fixes)**: ~~Wire L0 into cascade~~ done, fix override/threshold conflict (BUG-L6-2), extract shared severity weights, ~~wire L3 and L5~~ done (2026-02-14). Also wired L7, L8, L9, L10. ~~Extract `_voting.py` + wire predict.py~~ done (2026-03-12).
-**Phase 2 (P0 — Consolidation)**: Wire cascade.py `WeightedClassifier` to `_voting.py`, fix `proba[1]` class-ordering fragility, add structural features + decoded-view classification to cascade path.
-**Phase 3 (P1 — Improvements)**: Raise MAX_LENGTH, ~~add L8 validation stage~~ done (2026-02-14), configurable pipeline, batch classification, performance SLO
-**Phase 4 (P2 — Advanced)**: Bayesian fusion, stacking meta-learner
+**Phase 1 (P0 — Critical fixes)**: ~~Wire L0 into cascade~~ done, fix override/threshold conflict (BUG-L6-2), extract shared severity weights, ~~wire L3 and L5~~ done (2026-02-14). Also wired L7, L8, L9, L10. ~~Extract `_voting.py` + wire predict.py~~ done (2026-03-12). ~~Wire cascade.py to `_voting.py` + fix `proba[1]` fragility + add structural features~~ done (2026-03-12).
+**Phase 2 (P1 — Improvements)**: Raise MAX_LENGTH, ~~add L8 validation stage~~ done (2026-02-14), configurable pipeline, batch classification, performance SLO
+**Phase 3 (P2 — Advanced)**: Bayesian fusion, stacking meta-learner
 
 ---
 
