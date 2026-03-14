@@ -286,7 +286,10 @@ categories:
       O1.5: { name: "CSAM/illegal-content", severity: critical }
       O2.1: { name: "Markdown-injection", severity: medium }
       O2.2: { name: "Link-injection", severity: medium }
-      O2.3: { name: "Code-injection-output", severity: high }
+      O2.3: { name: "JSON output injection", severity: high }
+      O2.4: { name: "SQL-in-output injection", severity: critical }
+      O2.5: { name: "API call manipulation", severity: high }
+      O2.6: { name: "Code-injection-output", severity: high }
 
   # ════════════════════════════════════════════════════════════════
   # Category T — Agent/Tool Abuse
@@ -359,6 +362,34 @@ categories:
       P1.4: { name: "Cross-session-leakage", severity: high }
       P1.5: { name: "API-key-extraction", severity: critical }
 
+  P2:
+    name: "Privacy Extraction Attacks"
+    description: "Attacks that extract private training data, perform membership inference, or elicit PII through privacy-framed requests."
+    type: privacy
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm06"
+    expected_layers: ["L1", "L9"]
+    techniques:
+      P2.1: { name: "Training data extraction", severity: critical }
+      P2.2: { name: "Membership inference", severity: high }
+      P2.3: { name: "PII elicitation", severity: high }
+      P2.4: { name: "System prompt extraction via privacy framing", severity: high }
+
+  P3:
+    name: "Malicious Code Generation"
+    description: "Attempts to get the model to generate malware, exploit code, or obfuscated malicious programs."
+    type: compliance
+    severity: critical
+    tags:
+      - "owasp-llm:2025:llm02"
+    expected_layers: ["L1", "L9"]
+    techniques:
+      P3.1: { name: "Malware generation", severity: critical }
+      P3.2: { name: "Exploit code request", severity: critical }
+      P3.3: { name: "Obfuscated malware", severity: critical }
+      P3.4: { name: "Vulnerability exploitation guidance", severity: high }
+
   # ════════════════════════════════════════════════════════════════
   # Category M — Multi-Modal Injection
   # ════════════════════════════════════════════════════════════════
@@ -373,11 +404,24 @@ categories:
       - "avid-effect:security:S0403"
     expected_layers: ["layer0", "layer1_ml"]
     techniques:
-      M1.1: { name: "Image-text-injection (OCR)", severity: high }
-      M1.2: { name: "Image-steganography", severity: high }
-      M1.3: { name: "Audio-injection", severity: medium }
-      M1.4: { name: "PDF-hidden-text", severity: high }
-      M1.5: { name: "SVG-script-injection", severity: high }
+      # M1 — Image Injection
+      M1.1: { name: "Hidden text in images", severity: high }
+      M1.2: { name: "Adversarial image perturbation", severity: high }
+      M1.3: { name: "Steganographic payload", severity: high }
+      # M2 — Audio Injection
+      M2.1: { name: "Hidden voice commands", severity: medium }
+      M2.2: { name: "Adversarial audio", severity: high }
+      M2.3: { name: "Ultrasonic injection", severity: high }
+      # M3 — Document Injection
+      M3.1: { name: "PDF/DOCX hidden content", severity: high }
+      M3.2: { name: "Metadata injection", severity: medium }
+      M3.3: { name: "Font-based steganography", severity: high }
+      M3.4: { name: "Embedded macro injection", severity: high }
+      # M4 — Code Injection
+      M4.1: { name: "Code comment injection", severity: high }
+      M4.2: { name: "Variable naming attacks", severity: medium }
+      M4.3: { name: "Docstring injection", severity: high }
+      M4.4: { name: "Import chain poisoning", severity: critical }
 
   # ════════════════════════════════════════════════════════════════
   # Category S — Supply Chain / Model Integrity
@@ -426,3 +470,70 @@ categories:
       C1.3: { name: "Academic-framing", severity: medium }
       C1.4: { name: "Emotional-manipulation", severity: medium }
       C1.5: { name: "Authority-impersonation", severity: high }
+      C1.6: { name: "Sycophancy-exploitation", severity: high }
+      C1.7: { name: "Conflicting-instruction-injection", severity: high }
+      C1.8: { name: "Negation-confusion", severity: medium }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category IM — Inter-Model Propagation
+  # ════════════════════════════════════════════════════════════════
+
+  IM:
+    name: "Inter-Model Propagation"
+    description: "Attacks that propagate between AI models in multi-agent systems, pipelines, or cascading architectures."
+    type: indirect
+    severity: critical
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "owasp-llm:2025:llm15"
+    expected_layers: ["L1", "L9"]
+    techniques:
+      IM1.1: { name: "Recursive prompt injection", severity: critical }
+      IM1.2: { name: "Output-to-input chaining", severity: critical }
+      IM1.3: { name: "Instruction amplification", severity: high }
+      IM1.4: { name: "Cross-model context smuggling", severity: high }
+      IM1.5: { name: "Cascading jailbreak", severity: critical }
+      IM2.1: { name: "Judge model manipulation", severity: critical }
+      IM2.2: { name: "Supervisor prompt override", severity: critical }
+      IM2.3: { name: "Evaluation metric gaming", severity: high }
+      IM3.1: { name: "Agent-to-agent injection", severity: critical }
+      IM3.2: { name: "Shared memory poisoning", severity: high }
+      IM3.3: { name: "Tool output injection", severity: high }
+      IM3.4: { name: "Delegation chain exploit", severity: high }
+      IM3.5: { name: "Multi-agent consensus manipulation", severity: medium }
+      IM4.1: { name: "Transparent proxy injection", severity: high }
+      IM4.2: { name: "API response tampering", severity: high }
+      IM4.3: { name: "Middleware payload injection", severity: high }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category AD — Altered Delivery
+  # ════════════════════════════════════════════════════════════════
+
+  AD:
+    name: "Altered Delivery"
+    description: "Attacks delivered through compromised infrastructure, supply chain, or deployment mechanisms rather than direct prompt input."
+    type: supply
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm05"
+    expected_layers: ["L11"]
+    techniques:
+      AD1.1: { name: "Browser extension hijacking", severity: critical }
+      AD1.2: { name: "API gateway tampering", severity: critical }
+      AD1.3: { name: "MCP tool poisoning", severity: critical }
+      AD1.4: { name: "Rug-pull attack", severity: critical }
+      AD1.5: { name: "Proxy MITM injection", severity: high }
+      AD1.6: { name: "SDK patch injection", severity: high }
+      AD2.1: { name: "Framework CVE exploitation", severity: critical }
+      AD2.2: { name: "Framework deserialization attack", severity: critical }
+      AD2.3: { name: "Plugin supply chain compromise", severity: high }
+      AD2.4: { name: "Webhook callback injection", severity: high }
+      AD2.5: { name: "OAuth scope escalation", severity: high }
+      AD2.6: { name: "Custom tool trojan", severity: high }
+      AD2.7: { name: "Config override injection", severity: medium }
+      AD3.1: { name: "Transport signing bypass", severity: high }
+      AD3.2: { name: "Prompt attestation forgery", severity: high }
+      AD3.3: { name: "Tool validation bypass", severity: medium }
+      AD3.4: { name: "MCP integrity check evasion", severity: medium }
+      AD3.5: { name: "Extension allowlist bypass", severity: medium }
+      AD3.6: { name: "API request signing bypass", severity: medium }
