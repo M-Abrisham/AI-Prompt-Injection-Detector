@@ -362,7 +362,6 @@ class TestP1_2_PIIExtraction(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure  # Borderline: risk=0.425, needs privacy-specific training data
     def test_p1_2_summarize_personal_info(self):
         """Subtle PII extraction via summarization request.
 
@@ -403,7 +402,6 @@ class TestP1_3_TrainingDataExtraction(unittest.TestCase):
     - arxiv 2511.05518: Retracing the Past (LLMs Emit Data When Lost)
     """
 
-    @unittest.expectedFailure  # Borderline: risk=0.460, needs training data extraction rules
     def test_p1_3_prefix_completion(self):
         """Prefix-based training data extraction.
 

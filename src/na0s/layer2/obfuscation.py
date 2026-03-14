@@ -268,6 +268,40 @@ def _extract_embedded_hex(text):
     return results
 
 
+# Pattern to detect \xNN hex escape sequences (e.g. \x49\x67\x6e\x6f\x72\x65).
+# Requires at least 4 consecutive \xNN tokens to avoid false positives on
+# single escape sequences in code snippets.
+_HEX_ESCAPE_RE = re.compile(r"(?:\\x[0-9a-fA-F]{2}){4,}")
+
+
+def _decode_hex_escapes(text):
+    r"""Decode \\xNN hex escape sequences into plaintext.
+
+    Catches attacks like:
+        \\x49\\x67\\x6e\\x6f\\x72\\x65 -> "Ignore"
+
+    Returns a list of (decoded_text, "hex") tuples for each valid
+    sequence found, or an empty list if no sequences are detected.
+    """
+    results = []
+    for match in _HEX_ESCAPE_RE.finditer(text):
+        seq = match.group(0)
+        # Extract the hex bytes: strip \x prefixes and concatenate
+        hex_str = seq.replace("\\x", "").replace("\\X", "")
+        try:
+            decoded_bytes = bytes.fromhex(hex_str)
+            decoded_str = decoded_bytes.decode("utf-8", errors="strict")
+            printable_count = sum(1 for c in decoded_str
+                                  if c.isprintable() or c.isspace())
+            if (printable_count >= MIN_PRINTABLE_CHARS
+                    and printable_count / max(len(decoded_str), 1)
+                    > MIN_PRINTABLE_RATIO):
+                results.append((decoded_str, "hex"))
+        except (ValueError, UnicodeDecodeError):
+            continue
+    return results
+
+
 # Detect URL Encoding
 def _is_urlencoded(text):
     return bool(URLENCODED_PATTERN.search(text))
@@ -1364,6 +1398,17 @@ def _scan_single_layer(text):
         if embedded_hex:
             for decoded_text, enc_type in embedded_hex:
                 decoded_pairs.append((decoded_text, enc_type))
+            flags.append("hex")
+
+    # --- \xNN hex escape sequence decoding (D4.3) ---
+    # Decode C/Python-style hex escape sequences like \x49\x67\x6e\x6f\x72\x65.
+    # These are NOT caught by _hex() (which expects pure hex digits) or
+    # _extract_embedded_hex (which looks for contiguous hex without \x prefixes).
+    hex_escapes = _decode_hex_escapes(text)
+    if hex_escapes:
+        for decoded_text, enc_type in hex_escapes:
+            decoded_pairs.append((decoded_text, enc_type))
+        if "hex" not in flags:
             flags.append("hex")
 
     if _is_urlencoded(text):

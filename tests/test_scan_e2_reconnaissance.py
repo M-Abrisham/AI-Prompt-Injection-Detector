@@ -153,7 +153,6 @@ class TestE2_1_RAGKnowledgeExtraction(unittest.TestCase):
         if result.is_malicious:
             self.assertEqual(result.label, "malicious")
 
-    @unittest.expectedFailure  # Borderline: risk=0.541, threshold=0.55
     def test_e2_1_show_document_contents(self):
         """Request to show document contents.
 

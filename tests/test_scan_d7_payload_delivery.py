@@ -451,7 +451,6 @@ class TestD7_3_CodeBlockHiding(unittest.TestCase):
             "risk={}, hits={}".format(r.risk_score, r.rule_hits),
         )
 
-    @unittest.expectedFailure
     def test_yaml_config_injection(self):
         """Injection hidden inside YAML configuration.
 

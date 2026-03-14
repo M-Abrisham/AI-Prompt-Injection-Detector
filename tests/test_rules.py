@@ -107,7 +107,7 @@ class TestRulesListIntegrity(unittest.TestCase):
 
     def test_total_rule_count(self):
         """There should be exactly 110 rules in the RULES list."""
-        self.assertEqual(len(RULES), 111)
+        self.assertEqual(len(RULES), 116)
 
     def test_all_rule_names_are_unique(self):
         """No two rules should have the same name (except known variants).
@@ -260,6 +260,10 @@ class TestRulesListIntegrity(unittest.TestCase):
             "word_concatenation_game",
             # D2.1 Named jailbreak persona
             "named_jailbreak_persona",
+            # Gap-closure rules (#6 borderline detection failures)
+            "override_and_replace", "forget_then_query",
+            "document_access_request", "pii_summarization",
+            "verbatim_completion_extraction",
         }
         actual = {r.name for r in RULES}
         self.assertEqual(expected, actual)

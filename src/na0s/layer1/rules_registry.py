@@ -1919,6 +1919,107 @@ RULES = [
          severity="high",
          paranoia_level=1,
          description="Numbered word game pattern — potential token smuggling vector"),
+
+    # ------------------------------------------------------------------
+    # Gap-closure rules — borderline detection failures (#6)
+    # ------------------------------------------------------------------
+    # These 5 targeted rules close scoring gaps where existing rules
+    # fire but the composite score falls just below the 0.55 threshold.
+    # Each pattern is narrow enough to avoid false positives on
+    # legitimate text.
+
+    # GC-1: D1.1 override-and-replace — catches "ignore/forget rules and
+    # respond/say/output" as a single combined pattern.  The conjunction
+    # of override + replacement instruction is a stronger signal than
+    # either alone.  Fires alongside the existing "override" rule to
+    # push the composite above threshold via technique-family boost.
+    Rule("override_and_replace",
+         r"(?:ignore|disregard|forget|bypass|skip|drop|dismiss)\s+"
+         r"(?:(?:all|any|every|the|your|prior|previous|earlier|above)\s+){0,3}"
+         r"(?:instructions?|rules?|directives?|guidelines?|prompts?"
+         r"|constraints?|restrictions?)\s+"
+         r"(?:and|then|,)\s+"
+         r"(?:(?:simply|just|only|instead|now)\s+)?"
+         r"(?:respond|reply|answer|say|output|print|write|generate"
+         r"|tell\s+me|give\s+me|show\s+me)",
+         technique_ids=["D1.1"],
+         severity="high",
+         paranoia_level=1,
+         description="Override-and-replace: dismiss rules then inject replacement task"),
+
+    # GC-2: E1 forget-then-query — "forget your instructions" followed
+    # by an extraction question like "what were they?"
+    # Two-sentence pattern: override + follow-up query is a documented
+    # real-world extraction technique (Snyk Learn).
+    Rule("forget_then_query",
+         r"(?:forget|ignore|disregard)\s+"
+         r"(?:(?:all|any|every|the|your|prior|previous)\s+){0,3}"
+         r"(?:instructions?|rules?|guidelines?|prompts?)"
+         r".{0,30}"
+         r"(?:what\s+(?:were|are)\s+they"
+         r"|(?:tell|show|give)\s+(?:me\s+)?(?:what\s+)?they\s+(?:were|are|said)"
+         r"|(?:can|could)\s+you\s+(?:tell|show|share)\s+(?:me\s+)?(?:them|what))",
+         technique_ids=["D1.1", "E1.2"],
+         severity="high",
+         paranoia_level=1,
+         description="Forget-then-query extraction: dismiss instructions then ask what they were"),
+
+    # GC-3: E2.1 document/data access — "show/display/give me the
+    # contents/data of documents/files you have access to".
+    # More specific than generic capability_probing; requires explicit
+    # data access request targeting documents/files/data.
+    Rule("document_access_request",
+         r"(?:show|display|give|provide|send|share|reveal)\s+"
+         r"(?:me\s+)?"
+         r"(?:the\s+)?"
+         r"(?:contents?|data|text|information|details)\s+"
+         r"(?:of\s+)?"
+         r"(?:the\s+|all\s+|any\s+|every\s+)?"
+         r"(?:documents?|files?|attachments?|uploads?|sources?|resources?)"
+         r"(?:\s+(?:you\s+have\s+access\s+to|(?:in|within)\s+your\s+(?:context|memory|knowledge)))?",
+         technique_ids=["E2.1"],
+         severity="high",
+         paranoia_level=1,
+         description="Document/file content access request — data reconnaissance"),
+
+    # GC-4: P1.2 PII summarization — "summarize/extract/list personal
+    # information/data of individuals/people/users".
+    # Catches indirect PII extraction via summarization or listing
+    # requests targeting personal data.
+    Rule("pii_summarization",
+         r"(?:summarize|extract|compile|gather|collect|aggregate|list"
+         r"|enumerate|catalog)\s+"
+         r"(?:(?:the|all|any|every)\s+)?"
+         r"(?:personal\s+(?:info(?:rmation)?|data|details)"
+         r"|(?:private|sensitive|confidential)\s+"
+         r"(?:info(?:rmation)?|data|details))"
+         r"(?:\s+(?:of|about|for|regarding|on|concerning))?"
+         r"(?:\s+(?:all|any|every|each|the))?"
+         r"(?:\s+(?:individuals?|persons?|people|users?|customers?"
+         r"|patients?|employees?|clients?|members?|residents?))?",
+         technique_ids=["P1.2"],
+         severity="critical",
+         paranoia_level=1,
+         description="PII summarization/extraction from documents or context"),
+
+    # GC-5: P1.3 verbatim completion extraction — "complete exactly
+    # as you remember / word for word / without changes".
+    # Catches training data extraction via memorized content completion.
+    # The "exactly as you remember" + "word for word" pattern is
+    # canonical (Carlini et al. 2021).
+    Rule("verbatim_completion_extraction",
+         r"(?:complete|continue|finish|reproduce|output|write)\s+"
+         r"(?:the\s+)?(?:following\s+)?(?:text|passage|paragraph|content|sentence)?\s*"
+         r"(?:exactly|precisely|faithfully)?\s*"
+         r"(?:as\s+you\s+(?:remember|recall|know|learned|memorized)"
+         r"|word\s+for\s+word"
+         r"|verbatim"
+         r"|without\s+(?:any\s+)?(?:changes?|modifications?|alterations?"
+         r"|edits?|omissions?|additions?))",
+         technique_ids=["P1.3"],
+         severity="critical",
+         paranoia_level=1,
+         description="Verbatim completion extraction — training data memorization attack"),
 ]
 
 # ---------------------------------------------------------------------------
