@@ -628,7 +628,6 @@ class TestC1_4_EmotionalManipulation(unittest.TestCase):
     messages (see TestC1_SafePrompts), creating false positives.
     """
 
-    @unittest.expectedFailure
     def test_urgency_appeal(self):
         """Urgency-based emotional manipulation, detected via heuristics.
 

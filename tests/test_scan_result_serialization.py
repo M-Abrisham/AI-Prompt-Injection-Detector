@@ -36,6 +36,7 @@ class TestScanResultToDict:
             "embedding_score",
             "model_version",
             "perplexity_score",
+            "judge_reasoning",
             "elapsed_ms",
         }
         assert set(d.keys()) == expected_keys

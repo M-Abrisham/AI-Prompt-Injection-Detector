@@ -650,7 +650,6 @@ class TestO2_1_MarkdownInjection(unittest.TestCase):
             "O2.1 tracking pixel injection. " + _fmt(result),
         )
 
-    @unittest.expectedFailure
     def test_javascript_link_injection(self):
         """Markdown link with javascript: protocol for XSS.
 

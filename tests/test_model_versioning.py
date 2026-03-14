@@ -50,9 +50,9 @@ class TestGetModelVersion:
             assert version == ""
 
     def test_returns_known_prefix(self):
-        # The current model.pkl hash starts with "db28b5c8"
+        # The current model.pkl hash starts with "057280f9"
         version = _get_model_version()
-        assert version == "db28b5c8"
+        assert version == "057280f9"
 
     def test_fallback_empty_when_no_hash(self):
         with patch("na0s.predict.KNOWN_HASHES", {}):
