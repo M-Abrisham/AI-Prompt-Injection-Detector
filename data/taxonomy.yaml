@@ -46,6 +46,8 @@ categories:
       D1.18: { name: "Semantic-paraphrase", severity: high }
       D1.19: { name: "Recursive-self-jailbreak", severity: high }
       D1.20: { name: "Context-memory-poisoning", severity: high }
+      D1.21: { name: "Sleeper trigger planting", severity: critical }
+      D1.22: { name: "False prior context injection", severity: high }
 
   D2:
     name: "Persona/Roleplay Hijack"
@@ -151,6 +153,7 @@ categories:
       D7.3: { name: "Code-block-hiding", severity: high }
       D7.4: { name: "Nested-encoding", severity: high }
       D7.5: { name: "Token-smuggling (GCG-style)", severity: critical }
+      D7.6: { name: "Multi-turn escalation", severity: high }
 
   D8:
     name: "Context Window Manipulation"
@@ -191,6 +194,10 @@ categories:
       I1.2: { name: "Document-injection", severity: critical }
       I1.3: { name: "Email-injection", severity: high }
       I1.4: { name: "Database-poisoning", severity: critical }
+      I1.5: { name: "Vector DB poisoning", severity: critical }
+      I1.6: { name: "Agent memory poisoning", severity: high }
+      I1.7: { name: "Email signature/footer injection", severity: high }
+      I1.8: { name: "Broad-distribution injection", severity: high }
 
   I2:
     name: "HTML/Markup Injection"
@@ -361,6 +368,7 @@ categories:
       P1.3: { name: "Training-data-extraction", severity: high }
       P1.4: { name: "Cross-session-leakage", severity: high }
       P1.5: { name: "API-key-extraction", severity: critical }
+      P1.6: { name: "Memory exfiltration via persistence", severity: high }
 
   P2:
     name: "Privacy Extraction Attacks"
@@ -504,6 +512,32 @@ categories:
       IM4.1: { name: "Transparent proxy injection", severity: high }
       IM4.2: { name: "API response tampering", severity: high }
       IM4.3: { name: "Middleware payload injection", severity: high }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category IG — Ingestion Manipulation
+  # ════════════════════════════════════════════════════════════════
+
+  IG:
+    name: "Ingestion Manipulation"
+    description: "Attacks targeting the data ingestion pipeline: RAG poisoning, vector DB injection, embedding collision, and retrieval manipulation."
+    type: indirect
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+    expected_layers: ["L1", "L9"]
+    techniques:
+      IG1.1: { name: "RAG context poisoning", severity: critical }
+      IG1.2: { name: "Vector DB injection", severity: critical }
+      IG1.3: { name: "Adversarial retrieval manipulation", severity: high }
+      IG1.4: { name: "Cross-chunk boundary injection", severity: high }
+      IG1.5: { name: "Embedding collision attack", severity: high }
+      IG1.6: { name: "Backdoor model insertion", severity: critical }
+      IG1.7: { name: "ETL pipeline compromise", severity: high }
+      IG1.8: { name: "Agent memory poisoning", severity: high }
+      IG2.1: { name: "Retrieval result reranking attack", severity: medium }
+      IG2.2: { name: "Document metadata injection", severity: medium }
+      IG2.3: { name: "Embedding space manipulation", severity: high }
+      IG2.4: { name: "Index poisoning", severity: high }
 
   # ════════════════════════════════════════════════════════════════
   # Category AD — Altered Delivery
