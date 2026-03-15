@@ -73,6 +73,13 @@ llm = [
 all = [
     "na0s[embedding,ocr,docs,llm]",
 ]
+data = [
+    "datasets>=2.14.0",
+    "huggingface_hub>=0.17.0",
+]
+audit = [
+    "cleanlab>=2.6.0",
+]
 dev = [
     "coverage>=7.0",
     "flake8>=6.0",

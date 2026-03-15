@@ -265,3 +265,15 @@ sources:
       true: 1
       false: 0
     output: "hf_jailbreakhub.csv"
+
+  qualifire_benchmark:
+    type: huggingface
+    repo: "qualifire/prompt-injection-jailbreak-dataset"
+    split: "train"
+    text_column: "text"
+    label_column: "label"
+    label_map:
+      0: 0
+      1: 1
+    trust_tier: 2
+    output: "hf_qualifire_benchmark.csv"
