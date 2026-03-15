@@ -41,7 +41,7 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L11**| `████████████████████` | **24/24**  | COMPLETE |
 | **L12**| `████████████████████` | **55/55**  | COMPLETE |
 | **L13**| `████████████████████` | **41/41**  | COMPLETE |
-| **L14**| `███████░░░░░░░░░░░░░` | **8/21**   | 38% |
+| **L14**| `████████████░░░░░░░░` | **12/21**  | 57% |
 | **L15**| `█████░░░░░░░░░░░░░░░` | **4/14**   | 29% |
 | **L16**| `███░░░░░░░░░░░░░░░░░` | **3/17**   | 18% |
 | **L17**| `░░░░░░░░░░░░░░░░░░░░` | **0/20**   | NOT STARTED |
@@ -1215,13 +1215,13 @@ Layer 14 covers testing infrastructure and automation. Two evaluation scripts ex
 - [x] Manual test runner: `python -m unittest discover tests/`
 
 #### FIXES
-- [ ] **FIX-L14-1 (LOW)**: `evaluate_probes.py --buffs` may not be fully functional. **Fix**: Verify and complete.
+- [x] **FIX-L14-1 (LOW)**: `evaluate_probes.py --buffs` — DONE (completed in L12 wave 4).
 
 #### NEW (Discovered by research)
 - [x] **GitHub Actions CI pipeline** — DONE (2026-02-14): `ci.yml` (Python 3.9-3.12 matrix, flake8, coverage, test discovery) + `pr-check.yml` (syntax check, lint, full test suite, coverage summary). **Priority**: P0. **Effort**: 4-6 hours.
-- [ ] **Pre-commit hooks** — black/ruff formatting, bandit security, trailing whitespace. **Priority**: P0. **Effort**: 2 hours.
-- [ ] **pyproject.toml** — Package as installable library with declared dependencies. **Priority**: P1. **Effort**: 3-4 hours.
-- [ ] **Makefile** — Targets: test, lint, train, evaluate, sync. **Priority**: P1. **Effort**: 1-2 hours.
+- [x] **Pre-commit hooks** — DONE (2026-03-15): `.pre-commit-config.yaml` with ruff, black, bandit, trailing-whitespace, end-of-file-fixer, check-yaml, check-json, check-added-large-files. **Priority**: P0.
+- [x] **pyproject.toml** — DONE (pre-existing): Full package config with deps, optional extras, tool config.
+- [x] **Makefile** — DONE (2026-03-15): 13 targets — help, install, test, test-fast, lint, format, evaluate-buffs, bench, bench-fast, build, clean, publish. **Priority**: P1.
 - [x] **Integration tests** — DONE (2026-02-17): 7 test files, 288 tests (244 pass + 44 expected failures). Covers D1 instruction override (41), D3 structural boundary (44), D5 unicode evasion (30), E1 prompt extraction (46), E2 reconnaissance (37), O1/O2 harmful content (44), plus general integration (46). End-to-end: input → L0 → L1 → L2 → L4 → L6 → verdict. **Updated (2026-02-28)**: Full regression suite: **4901 passed, 0 failed, 128 xfailed** (down from 152 xfailed — 24 xfails flipped to passing via 6-track gap closure sprint). **Priority**: P1.
 - [ ] **Regression dashboard** — Track detection rates, FPR, latency over time. **Priority**: P1.
 - [ ] **Per-technique attribution metrics** — Track `attribution_correct` flag and confusion pairs per technique_id. Enables identifying which techniques generate FPs (e.g., D3.4 markdown vs benign markdown) and which get misclassified as other techniques. **Priority**: P1. **Effort**: Medium.
@@ -1235,8 +1235,8 @@ Layer 14 covers testing infrastructure and automation. Two evaluation scripts ex
 - [ ] **Rainbow Teaming** — Automated adversarial generation. **Priority**: P2.
 
 #### HOUSEKEEPING (Cross-cutting quality items — no single layer owner)
-- [ ] **Central config file** — Extract all hardcoded magic numbers (thresholds, weights, limits, TF-IDF params) into a single `config.py` or `config.yaml`. Currently scattered across predict.py (0.55, 0.6, 0.15, 0.3, 0.8), features.py (5000), model.py (10000), cascade.py, llm_judge.py. **Priority**: P1. **Effort**: 4-6 hours.
-- [ ] **Structured logging framework** — Replace all debug `print()` statements across the codebase with Python `logging` module. Configure per-module log levels, structured JSON output for production, human-readable for dev. Cover: predict.py, cascade.py, llm_judge.py, obfuscation.py, layer0/, output_scanner.py. **Priority**: P1. **Effort**: 4-6 hours.
+- [x] **Central config file** — DONE (2026-03-15): `src/na0s/config.py` with ~15 constants extracted from `_voting.py`, `cascade.py`, `output_scanner.py`. Zero-behavior-change refactor. **Priority**: P1.
+- [x] **Structured logging framework** — DONE (2026-03-15): Replaced 20 `print()` calls with `logging` in demo blocks of `predict.py` (3), `cascade.py` (10), `output_scanner.py` (7). Library code already uses logging. **Priority**: P1.
 - [ ] **Update README.md** — Document the actual 20-layer architecture, Layer 0 pipeline, taxonomy system (19 categories, 103+ techniques), probe framework (Probe base class, expand(), buffs), evaluation harness, and setup instructions. **Priority**: P1. **Effort**: 4-6 hours.
 
 ### Implementation Plan
