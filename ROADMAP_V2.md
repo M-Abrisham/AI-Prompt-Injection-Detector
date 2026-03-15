@@ -39,7 +39,7 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L9** | `████████████████████` | **28/28**  | COMPLETE |
 | **L10**| `████████████████████` | **25/25**  | COMPLETE |
 | **L11**| `████████████████████` | **24/24**  | COMPLETE |
-| **L12**| `███████████████████░` | **53/55**  | 96% |
+| **L12**| `████████████████████` | **55/55**  | COMPLETE |
 | **L13**| `██████████████░░░░░░` | **28/41**  | 68% |
 | **L14**| `███████░░░░░░░░░░░░░` | **8/21**   | 38% |
 | **L15**| `█████░░░░░░░░░░░░░░░` | **4/14**   | 29% |
@@ -48,7 +48,7 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L18**| `░░░░░░░░░░░░░░░░░░░░` | **0/18**   | NOT STARTED |
 | **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
 | **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
-|        |                        | **548/743** | **74%** |
+|        |                        | **550/743** | **74%** |
 
 ---
 
@@ -1072,8 +1072,8 @@ Layer 12 is the adversarial testing framework. Base classes (`Probe`, `Classifie
 - [x] **Generate probes for memory/persistence techniques** — D1.21/D1.22/I1.5/I1.6/D7.6/P1.6 with 278 samples + 60 benign. ✅ DONE (2026-03-14)
 - [x] **Generate benign counterparts for ALL new techniques** — Benign samples included in all wave 1-3 probes. ✅ DONE (2026-03-14)
 - [x] **Build C1 Probe** — New `compliance_evasion_c1.py` with `category_id = "C1"`, 247 malicious + 86 benign = 333 samples. ✅ DONE (2026-03-14)
-- [ ] **Replace manual cache with `functools.lru_cache`** in `_base.py` — Double-checked locking is complex; `lru_cache(maxsize=1)` is simpler. Source: #56. **Priority**: P1.
-- [ ] **Add `importlib.resources`** for package-compatible path handling in `_base.py` — `Path(__file__)` breaks in zipped packages. Source: #57. **Priority**: P1.
+- [x] **Replace manual cache with `functools.lru_cache`** — Replaced threading.Lock + manual cache with `@lru_cache(maxsize=1)` in `_base.py` and `_tags.py`. ✅ DONE (2026-03-15)
+- [x] **Add `importlib.resources`** — `_find_project_root()` with importlib.resources + Path fallback in `_base.py` and `_tags.py`. ✅ DONE (2026-03-15)
 - [x] **Add per-probe counts and top-N missed technique IDs** — `count_by_probe()`, `top_missed_techniques()`, `aggregation_summary()` in `_tags.py` + 19 tests. ✅ DONE (2026-03-14)
 - [x] **Combo technique probes** — New `combo_techniques.py` (CT): 183 attack + 24 benign = 207 samples, 15 two-technique + 5 three-technique combos. ✅ DONE (2026-03-14)
 - [x] **Per-probe validation tests** — `test_l12_probe_validation.py`: 14 test methods × 24 probes = 247 subtests. ✅ DONE (2026-03-14)
@@ -1094,7 +1094,7 @@ Layer 12 is the adversarial testing framework. Base classes (`Probe`, `Classifie
 **Phase 1 (P0)**: ALL COMPLETE (2026-03-14). Wave 1: M restructure, IM/AD YAML, C1.6-1.8, O2.3-2.5, P2/P3. Wave 2: I1.7-1.8, D7.5/A1.1, E2.1-5, IM probe, IG category+probe, memory/persistence. 23 probes, 5,060 samples.
 **Phase 1.5 (P1 Wave 3)**: COMPLETE (2026-03-14). IM0007 sub-techniques (IM5-IM6, 290 samples), D8.5/D8.6/S1.6-S1.8 (186 samples), M1-M4 full coverage (567 samples), C1 dedicated probe (333 samples), buffs tests (53), per-probe validation (247 subtests). 24 probes, ~7,000+ samples.
 **Phase 2 (P1 Wave 4)**: COMPLETE (2026-03-14). FIX-L12-1 buff evaluation, FIX-L12-4 benign expansion (9 probes), per-probe counts in _tags.py (19 tests), combo probes CT (207 samples), multi-buff MB (91 samples), C1 multi-turn C1MT (68 samples), adversarial benchmarks AB (148 samples). 28 probes, ~8,000+ samples.
-**Remaining**: lru_cache refactor in _base.py, importlib.resources in _base.py (2 minor items)
+**Phase 2.5 (Final)**: COMPLETE (2026-03-15). lru_cache refactor + importlib.resources in _base.py and _tags.py. **LAYER 12 COMPLETE — 55/55.**
 
 ---
 

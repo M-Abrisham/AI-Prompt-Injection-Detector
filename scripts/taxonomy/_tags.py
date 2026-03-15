@@ -1,63 +1,69 @@
 """MISP tag loading and aggregation helpers."""
 
+import functools
+import importlib.resources
 import logging
 import os
-import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+def _find_project_root():
+    """Locate the project root using importlib.resources with Path fallback.
+
+    Tries importlib.resources first (works in zipped/installed packages),
+    then falls back to __file__-based resolution for script-mode execution.
+    """
+    try:
+        pkg_dir = importlib.resources.files("scripts.taxonomy")
+        root = Path(str(pkg_dir)).resolve().parent.parent
+        if (root / "data").is_dir():
+            return root
+    except (TypeError, FileNotFoundError, ModuleNotFoundError, Exception):
+        pass
+    return Path(__file__).resolve().parent.parent.parent
+
+
+_PROJECT_ROOT = _find_project_root()
 _DEFAULT_TAGS = str(_PROJECT_ROOT / "data" / "tags.misp.tsv")
 _TAGS_PATH = Path(os.environ.get("TAGS_MISP_PATH", _DEFAULT_TAGS))
 
-_tag_cache = None
-_tag_lock = threading.Lock()
-
-
+@functools.lru_cache(maxsize=1)
 def load_tags():
-    """Load data/tags.misp.tsv into a dict {tag: description} (thread-safe)."""
-    global _tag_cache
-    if _tag_cache is not None:
-        return _tag_cache
-    with _tag_lock:
-        if _tag_cache is not None:
-            return _tag_cache
-        if not _TAGS_PATH.exists():
-            raise FileNotFoundError(
-                f"MISP tags file not found: {_TAGS_PATH}. "
-                "Set TAGS_MISP_PATH env var or ensure data/tags.misp.tsv exists."
-            )
-        result = {}
-        with _TAGS_PATH.open("r", encoding="utf-8") as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                parts = line.split("\t", 1)
-                if len(parts) == 2:
-                    tag_key = parts[0]
-                    if tag_key in result:
-                        logger.warning(
-                            "tags.misp.tsv line %d: duplicate tag '%s', "
-                            "keeping first occurrence", line_num, tag_key
-                        )
-                        continue
-                    result[tag_key] = parts[1]
-                else:
+    """Load data/tags.misp.tsv into a dict {tag: description} (thread-safe via lru_cache)."""
+    if not _TAGS_PATH.exists():
+        raise FileNotFoundError(
+            f"MISP tags file not found: {_TAGS_PATH}. "
+            "Set TAGS_MISP_PATH env var or ensure data/tags.misp.tsv exists."
+        )
+    result = {}
+    with _TAGS_PATH.open("r", encoding="utf-8") as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t", 1)
+            if len(parts) == 2:
+                tag_key = parts[0]
+                if tag_key in result:
                     logger.warning(
-                        "tags.misp.tsv line %d: expected tab-separated "
-                        "'tag\\tdescription', got: %s", line_num, line[:80]
+                        "tags.misp.tsv line %d: duplicate tag '%s', "
+                        "keeping first occurrence", line_num, tag_key
                     )
-        _tag_cache = result
-    return _tag_cache
+                    continue
+                result[tag_key] = parts[1]
+            else:
+                logger.warning(
+                    "tags.misp.tsv line %d: expected tab-separated "
+                    "'tag\\tdescription', got: %s", line_num, line[:80]
+                )
+    return result
 
 
 def clear_tag_cache():
     """Reset cached tag data (for tests and live-reload)."""
-    global _tag_cache
-    with _tag_lock:
-        _tag_cache = None
+    load_tags.cache_clear()
 
 
 def aggregate_by_taxonomy(probe_results, namespace):

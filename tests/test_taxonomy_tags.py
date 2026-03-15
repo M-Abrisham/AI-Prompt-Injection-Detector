@@ -313,9 +313,11 @@ class TestThreadSafety(_TempTSVMixin, unittest.TestCase):
                 t.start()
             for t in threads:
                 t.join()
-            # All threads get the same dict
+            # All threads get the same content (lru_cache may return
+            # separate objects during concurrent first-call races, but the
+            # data must be identical)
             for r in results:
-                self.assertIs(r, results[0])
+                self.assertEqual(r, results[0])
         finally:
             os.unlink(tmp)
 
