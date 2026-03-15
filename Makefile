@@ -1,4 +1,4 @@
-.PHONY: install test lint bench bench-fast build clean publish help
+.PHONY: install test lint bench bench-fast build clean publish help test-fast format evaluate-buffs
 
 PYTHON ?= python3
 PYTEST_ARGS ?= -v
@@ -35,5 +35,14 @@ clean:  ## Remove build artifacts and caches
 
 publish:  ## Upload to PyPI (requires TWINE_USERNAME and TWINE_PASSWORD)
 	$(PYTHON) -m twine upload dist/*
+
+test-fast:  ## Run tests fast (fail-fast, no coverage)
+	$(PYTHON) -m pytest tests/ -x --no-header -q
+
+format:  ## Auto-format code with black
+	$(PYTHON) -m black src/ tests/ scripts/
+
+evaluate-buffs:  ## Evaluate probe buffs across all probes
+	$(PYTHON) scripts/evaluate_probes.py --buffs
 
 .DEFAULT_GOAL := help
