@@ -26,11 +26,11 @@
 
 ## Phase 1 — CRITICAL (No credibility without these)
 
-- [ ] **BM-1**: Download and run on real datasets
-  - `deepset/prompt-injections` (662 samples) from HuggingFace
-  - `tatsu-lab/alpaca` (52K benign) for negative samples
-  - `databricks/dolly-15k` (15K human-written benign) for negative samples
-  - Run `scripts/benchmark.py` against each
+- [x] **BM-1**: Download and run on real datasets (2026-03-15)
+  - `deepset/prompt-injections` (546 samples) — F1=0.4762, Precision=0.9286, Recall=0.3202
+  - `tatsu-lab/alpaca` (2,000 benign) — FPR=2.15%
+  - `databricks/dolly-15k` (2,000 benign) — FPR=10.45%
+  - Results: `benchmarks/results/bm1/`, full writeup in `BENCHMARK_RESULTS.md`
 
 - [ ] **BM-2**: Run benchmark on our own holdout datasets
   - `data/holdout/safe_holdout.jsonl` (502 samples) — exists, never benchmarked
