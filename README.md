@@ -1,20 +1,9 @@
-<!--
-REPO SETTINGS REMINDER (delete after applying):
-1. Go to repo Settings → General → "About" section
-2. Description: "15-layer AI prompt injection detector — 103+ attack techniques, ML ensemble, recursive obfuscation decoding, fully offline"
-3. Website: leave blank or add PyPI link when published
-4. Topics: prompt-injection, ai-security, llm-security, prompt-injection-detector,
-   cybersecurity, machine-learning, python, owasp, nlp, ai-safety
--->
-
 <div align="center">
 
 <br/>
 
-[![CI](https://github.com/M-Abrisham/Na0S/actions/workflows/ci.yml/badge.svg)](https://github.com/M-Abrisham/Na0S/actions/workflows/ci.yml)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-4%2C369%20passed-brightgreen)]()
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 
@@ -335,15 +324,7 @@ See the [roadmap](ROADMAP_V2.md) for open tasks.
 
 MIT
 
-<br/>
-
-If Na0S helps protect your AI applications, consider giving it a star.
-
-[Report Bug](https://github.com/M-Abrisham/Na0S/issues) &middot;
-[Request Feature](https://github.com/M-Abrisham/Na0S/issues) &middot;
-[Contributing](CONTRIBUTING.md)
-
-<br/>
+[Report Bug](https://github.com/M-Abrisham/Na0S/issues) · [Request Feature](https://github.com/M-Abrisham/Na0S/issues)
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:1D3557,50:E63946,100:0d1117&height=120&section=footer" width="100%" alt="Footer" />
 
