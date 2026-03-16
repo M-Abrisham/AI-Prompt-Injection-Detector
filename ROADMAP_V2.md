@@ -41,7 +41,7 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L11**| `████████████████████` | **24/24**  | COMPLETE |
 | **L12**| `████████████████████` | **55/55**  | COMPLETE |
 | **L13**| `████████████████████` | **41/41**  | COMPLETE |
-| **L14**| `████████████░░░░░░░░` | **12/21**  | 57% |
+| **L14**| `███████████████░░░░░` | **15/21**  | 71% |
 | **L15**| `█████░░░░░░░░░░░░░░░` | **4/14**   | 29% |
 | **L16**| `███░░░░░░░░░░░░░░░░░` | **3/17**   | 18% |
 | **L17**| `░░░░░░░░░░░░░░░░░░░░` | **0/20**   | NOT STARTED |
@@ -1223,8 +1223,8 @@ Layer 14 covers testing infrastructure and automation. Two evaluation scripts ex
 - [x] **pyproject.toml** — DONE (pre-existing): Full package config with deps, optional extras, tool config.
 - [x] **Makefile** — DONE (2026-03-15): 13 targets — help, install, test, test-fast, lint, format, evaluate-buffs, bench, bench-fast, build, clean, publish. **Priority**: P1.
 - [x] **Integration tests** — DONE (2026-02-17): 7 test files, 288 tests (244 pass + 44 expected failures). Covers D1 instruction override (41), D3 structural boundary (44), D5 unicode evasion (30), E1 prompt extraction (46), E2 reconnaissance (37), O1/O2 harmful content (44), plus general integration (46). End-to-end: input → L0 → L1 → L2 → L4 → L6 → verdict. **Updated (2026-02-28)**: Full regression suite: **4901 passed, 0 failed, 128 xfailed** (down from 152 xfailed — 24 xfails flipped to passing via 6-track gap closure sprint). **Priority**: P1.
-- [ ] **Regression dashboard** — Track detection rates, FPR, latency over time. **Priority**: P1.
-- [ ] **Per-technique attribution metrics** — Track `attribution_correct` flag and confusion pairs per technique_id. Enables identifying which techniques generate FPs (e.g., D3.4 markdown vs benign markdown) and which get misclassified as other techniques. **Priority**: P1. **Effort**: Medium.
+- [x] **Regression dashboard** — DONE (2026-03-15): `scripts/regression_dashboard.py` with --run, --compare, --baseline, --output flags. Appends to `data/evaluation/regression_history.jsonl`. Flags >2% recall drops as REGRESSION. Added `make dashboard` target. 5 tests. **Priority**: P1.
+- [x] **Per-technique attribution metrics** — DONE (2026-03-15): Added --attribution and --attribution-export flags to `evaluate_probes.py`. Aggregates by_technique + confusion across probes, ranks worst-10 techniques. Exports to `data/evaluation/attribution_metrics.json`. 5 tests. **Priority**: P1.
 - [x] **Property-based testing (Hypothesis)** — DONE (2026-02-14): `test_layer0_hypothesis.py` with 40 property-based tests. Full Unicode/bytes fuzzing of L0. Found surrogate crash bug. **Priority**: P1.
 - [ ] **Garak integration** — Run adversarial probes against detector. **Priority**: P2.
 - [ ] **PyRIT integration** — Microsoft red-teaming framework. **Priority**: P2.
@@ -1237,7 +1237,7 @@ Layer 14 covers testing infrastructure and automation. Two evaluation scripts ex
 #### HOUSEKEEPING (Cross-cutting quality items — no single layer owner)
 - [x] **Central config file** — DONE (2026-03-15): `src/na0s/config.py` with ~15 constants extracted from `_voting.py`, `cascade.py`, `output_scanner.py`. Zero-behavior-change refactor. **Priority**: P1.
 - [x] **Structured logging framework** — DONE (2026-03-15): Replaced 20 `print()` calls with `logging` in demo blocks of `predict.py` (3), `cascade.py` (10), `output_scanner.py` (7). Library code already uses logging. **Priority**: P1.
-- [ ] **Update README.md** — Document the actual 20-layer architecture, Layer 0 pipeline, taxonomy system (19 categories, 103+ techniques), probe framework (Probe base class, expand(), buffs), evaluation harness, and setup instructions. **Priority**: P1. **Effort**: 4-6 hours.
+- [x] **Update README.md** — DONE (2026-03-15): Full rewrite — 252 lines. Correct 10-layer architecture (L0-L10), 29 categories / 276 techniques, installation, quick start, dev workflow, probe guide, evaluation docs. Removed outdated 15/17-layer claims. **Priority**: P1.
 
 ### Implementation Plan
 **Phase 1 (P0)**: GitHub Actions CI (tests + lint + security), pre-commit hooks

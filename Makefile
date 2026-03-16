@@ -1,4 +1,4 @@
-.PHONY: install test lint bench bench-fast build clean publish help test-fast format evaluate-buffs
+.PHONY: install test lint bench bench-fast build clean publish help test-fast format evaluate-buffs dashboard
 
 PYTHON ?= python3
 PYTEST_ARGS ?= -v
@@ -44,5 +44,8 @@ format:  ## Auto-format code with black
 
 evaluate-buffs:  ## Evaluate probe buffs across all probes
 	$(PYTHON) scripts/evaluate_probes.py --buffs
+
+dashboard:  ## Run regression dashboard
+	$(PYTHON) scripts/regression_dashboard.py --run
 
 .DEFAULT_GOAL := help
