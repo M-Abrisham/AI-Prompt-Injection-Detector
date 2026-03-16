@@ -1,0 +1,19 @@
+version: "3.9"
+services:
+  test:
+    build: .
+    command: make test
+    volumes:
+      - ./data:/app/data
+
+  evaluate:
+    build: .
+    command: make evaluate
+    volumes:
+      - ./data:/app/data
+
+  rainbow:
+    build: .
+    command: make rainbow
+    volumes:
+      - ./data:/app/data

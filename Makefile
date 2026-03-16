@@ -1,4 +1,4 @@
-.PHONY: install test lint bench bench-fast build clean publish help test-fast format evaluate-buffs dashboard
+.PHONY: install test lint bench bench-fast build clean publish help test-fast format evaluate-buffs dashboard docker-build docker-test docker-eval garak pyrit rainbow
 
 PYTHON ?= python3
 PYTEST_ARGS ?= -v
@@ -47,5 +47,23 @@ evaluate-buffs:  ## Evaluate probe buffs across all probes
 
 dashboard:  ## Run regression dashboard
 	$(PYTHON) scripts/regression_dashboard.py --run
+
+docker-build:  ## Build Docker image
+	docker build -t na0s .
+
+docker-test:  ## Run tests in Docker
+	docker run --rm na0s make test
+
+docker-eval:  ## Run evaluation in Docker
+	docker run --rm -v $(PWD)/data:/app/data na0s make evaluate
+
+garak:  ## Run Garak vulnerability probes against Na0S
+	$(PYTHON) scripts/integrations/garak_runner.py --probes all
+
+pyrit:  ## Run PyRIT red-teaming against Na0S
+	$(PYTHON) scripts/integrations/pyrit_runner.py --strategy crescendo
+
+rainbow:  ## Run rainbow teaming adversarial generation
+	$(PYTHON) scripts/rainbow_team.py --generations 5 --population 50
 
 .DEFAULT_GOAL := help
