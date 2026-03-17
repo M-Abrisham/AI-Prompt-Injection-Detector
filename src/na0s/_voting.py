@@ -22,6 +22,7 @@ import logging
 import os
 
 from .rules import RULES, SEVERITY_WEIGHTS
+from .multilingual_intent import HEURISTIC_HITS as _HEURISTIC_HITS
 from .signal_boost import calculate_boost_from_names
 
 _logger = logging.getLogger(__name__)
@@ -122,9 +123,15 @@ FP_EXEMPT_HITS = frozenset({
 RULE_SEVERITY = {rule.name: rule.severity for rule in RULES}
 RULE_SEVERITY["decoded_payload_malicious"] = "critical"
 RULE_SEVERITY["decoded_escape_malicious"] = "critical"
+RULE_SEVERITY.update({
+    name: meta["severity"] for name, meta in _HEURISTIC_HITS.items()
+})
 
 #: Rule name -> technique_ids lookup for technique-family boost.
 RULE_TECHNIQUE_IDS = {rule.name: rule.technique_ids for rule in RULES}
+RULE_TECHNIQUE_IDS.update({
+    name: list(meta["technique_ids"]) for name, meta in _HEURISTIC_HITS.items()
+})
 
 #: Structural feature weights (Layer 3 binary signals).
 STRUCTURAL_SIGNAL_WEIGHTS = {

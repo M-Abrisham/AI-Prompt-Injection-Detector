@@ -82,6 +82,7 @@ from .safe_pickle import safe_load
 from .models import get_model_path, KNOWN_HASHES
 from .signal_boost import calculate_boost_from_names
 from .safe_content import calculate_safe_content_score
+from .multilingual_intent import detect_multilingual_intents, HEURISTIC_HITS
 from ._voting import (
     weighted_decision as _voting_weighted_decision,
     DECISION_THRESHOLD as _VOTING_THRESHOLD,
@@ -352,6 +353,16 @@ _TAIL_SCAN_CHARS = 200
 # Rule name -> technique_ids lookup — now in _voting.py.
 _RULE_TECHNIQUE_IDS = _VOTING_RULE_TECHNIQUE_IDS
 
+# High-confidence multilingual anchors. These hits are specific enough that
+# a safe verdict from the English-only ML model should not override them.
+_MULTILINGUAL_FORCE_HITS = frozenset({
+    "multilingual_override_latin",
+    "multilingual_override_cjk",
+    "multilingual_extraction_latin",
+    "multilingual_extraction_cjk",
+    *HEURISTIC_HITS.keys(),
+})
+
 # ---------------------------------------------------------------------------
 # Chunked analysis for long inputs (D7.1 benign-padding, D8.1 context-flooding)
 # ---------------------------------------------------------------------------
@@ -525,6 +536,14 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     _concat_only_hits = len(detailed_hits) - _pre_concat_hit_count
 
     hits = [h.name for h in detailed_hits]
+
+    # Multilingual semantic detection — catches non-English and
+    # transliterated attacks that miss the regex rules entirely.
+    for rh in detect_multilingual_intents(clean, l0.anomaly_flags):
+        if rh.name not in hit_names_seen:
+            detailed_hits.append(rh)
+            hit_names_seen.add(rh.name)
+            hits.append(rh.name)
 
     # --- D7.8 Token concatenation game extraction ---
     assembled_game = _extract_concatenation_game(clean)
@@ -815,6 +834,15 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
         if composite >= threshold and "SAFE" in label:
             label = "MALICIOUS"
 
+    # Multilingual floor: when a high-confidence D6 anchor fires and Layer 0
+    # independently confirmed multilingual input, the English-only model
+    # should not be allowed to suppress the verdict below threshold.
+    if ("SAFE" in label and composite < threshold
+            and {"non_english_input", "mixed_language_input"} & set(l0.anomaly_flags)
+            and ({h.name for h in detailed_hits} & _MULTILINGUAL_FORCE_HITS)):
+        composite = max(composite, threshold + 0.01)
+        label = "MALICIOUS"
+
     # --- Narrative / legitimate-role dampening ---
     # When no L1 rules fired, no obfuscation, and the text has clear benign
     # context (narrative frame or legitimate roleplay), ML-only signals are
@@ -943,7 +971,6 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
     # Collect technique_tags from rule hits and L0 anomaly flags.
     # Derive technique_ids from the hits list returned by classify_prompt()
     # instead of re-running rule_score_detailed() (FIX-2: single-pass).
-    _RULE_TECHNIQUE_IDS = {rule.name: rule.technique_ids for rule in RULES}
     technique_tags = []
     for hit_name in hits:
         for tid in _RULE_TECHNIQUE_IDS.get(hit_name, []):
