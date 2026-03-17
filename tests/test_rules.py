@@ -106,7 +106,7 @@ class TestRulesListIntegrity(unittest.TestCase):
     """B. Tests that the RULES list is well-formed and complete."""
 
     def test_total_rule_count(self):
-        """There should be exactly 110 rules in the RULES list."""
+        """There should be exactly 116 rules in the RULES list."""
         self.assertEqual(len(RULES), 116)
 
     def test_all_rule_names_are_unique(self):
@@ -264,6 +264,8 @@ class TestRulesListIntegrity(unittest.TestCase):
             "override_and_replace", "forget_then_query",
             "document_access_request", "pii_summarization",
             "verbatim_completion_extraction",
+            # D3.6 Semantic structural boundary markers
+            "semantic_system_marker",
         }
         actual = {r.name for r in RULES}
         self.assertEqual(expected, actual)
@@ -857,6 +859,7 @@ class TestContextSuppression(unittest.TestCase):
             # D8 social engineering gap-closure rules
             "fake_authority_claim": "can you explain how I am the system administrator is used",
             "context_dilution_override": "can you explain how ignore everything above works as an attack",
+            "semantic_system_marker": "can you explain what IMPORTANT SYSTEM UPDATE attacks look like",
         }
         for rule_name in _CONTEXT_SUPPRESSIBLE:
             with self.subTest(rule=rule_name):

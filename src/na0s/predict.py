@@ -65,6 +65,7 @@ import re
 import sqlite3
 import threading
 import time
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ from .safe_content import calculate_safe_content_score
 from .multilingual_intent import detect_multilingual_intents, HEURISTIC_HITS
 from ._voting import (
     weighted_decision as _voting_weighted_decision,
+    _weighted_composite,
     DECISION_THRESHOLD as _VOTING_THRESHOLD,
     get_decision_threshold as _get_decision_threshold,
     FP_EXEMPT_HITS,
@@ -142,6 +144,41 @@ try:
 except ImportError:
     _HAS_PERPLEXITY = False
 
+# Multilingual injection handler (D6) — optional import
+try:
+    from .multilingual_handler import scan_multilingual, get_multilingual_rule_weight
+    _HAS_MULTILINGUAL = True
+except ImportError:
+    _HAS_MULTILINGUAL = False
+
+# Fictional frame detector (C1) — optional import
+try:
+    from .fictional_frame_detector import detect_fictional_frame, get_fictional_frame_weight
+    _HAS_FICTIONAL_FRAME = True
+except ImportError:
+    _HAS_FICTIONAL_FRAME = False
+
+# Indirect extraction detector (E1) — optional import
+try:
+    from .extraction_detector import scan_extraction, get_extraction_rule_weight
+    _HAS_EXTRACTION = True
+except ImportError:
+    _HAS_EXTRACTION = False
+
+# Payload assembly detector (D7) — optional import
+try:
+    from .payload_assembly_detector import detect_fragmented_payload, get_fragment_weight
+    _HAS_PAYLOAD_ASSEMBLY = True
+except ImportError:
+    _HAS_PAYLOAD_ASSEMBLY = False
+
+# Harmful intent detector (O1) — optional import
+try:
+    from .harmful_intent_detector import detect_harmful_intent, get_harmful_intent_weight
+    _HAS_HARMFUL_INTENT = True
+except ImportError:
+    _HAS_HARMFUL_INTENT = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 CHAR_VECTORIZER_PATH = get_model_path("char_tfidf_vectorizer.pkl")
@@ -162,7 +199,7 @@ _cached_model = None
 _model_cache_lock = threading.Lock()
 
 
-def _get_cached_models():
+def _get_cached_models() -> Tuple:
     """Return (vectorizer, model), loading from disk only on first call.
 
     Thread-safe via double-checked locking (check-lock-check pattern).
@@ -427,7 +464,7 @@ def _extract_concatenation_game(text):
     return assembled
 
 
-def predict_prompt():
+def predict_prompt() -> Tuple:
     """Return (vectorizer, model) — cached after first load.
 
     Previous behaviour loaded both .pkl files from disk (with SHA-256
@@ -438,7 +475,7 @@ def predict_prompt():
     return _get_cached_models()
 
 
-def predict(text, vectorizer, model):
+def predict(text, vectorizer, model) -> Tuple:
     # Layer 0 gate — sanitize before anything else touches the input
     l0 = layer0_sanitize(text)
     if l0.rejected:
@@ -498,7 +535,7 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
     )
 
 
-def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
+def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tuple:
     label, prob, l0 = predict(text, vectorizer, model)
 
     if l0.rejected:
@@ -708,6 +745,106 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
             embedding_score = 0.0
             embedding_technique_matches = []
 
+    # --- Multilingual injection detection (D6) ---
+    # Run when language_detector flags non-English content.
+    # Adds multilingual pattern hits to the composite score.
+    multilingual_weight = 0.0
+    if _HAS_MULTILINGUAL:
+        try:
+            ml_hits = scan_multilingual(clean)
+            # Also scan raw text if different (pre-normalization form)
+            if text != clean:
+                ml_hits.extend(scan_multilingual(text))
+            if ml_hits:
+                multilingual_weight = get_multilingual_rule_weight(ml_hits)
+                for mh in ml_hits:
+                    hit_name = "multilingual:" + mh.pattern_name
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        # Register severity for weighted decision
+                        _RULE_SEVERITY[hit_name] = mh.severity
+        except Exception:
+            pass  # Multilingual detection failure is non-fatal
+
+    # --- Fictional frame detection (C1) ---
+    # Detect attacks wrapped in fictional/hypothetical/academic framing.
+    fictional_weight = 0.0
+    if _HAS_FICTIONAL_FRAME:
+        try:
+            ff_result = detect_fictional_frame(clean)
+            if ff_result.has_fictional_frame:
+                fictional_weight = get_fictional_frame_weight(ff_result)
+                hit_name = "fictional_frame:" + ff_result.frame_type
+                if hit_name not in hit_names_seen:
+                    hits.append(hit_name)
+                    hit_names_seen.add(hit_name)
+                    _RULE_SEVERITY[hit_name] = "high" if ff_result.has_inner_attack else "medium"
+                if ff_result.has_inner_attack:
+                    inner_name = "fictional_inner:" + ff_result.inner_attack_type
+                    if inner_name not in hit_names_seen:
+                        hits.append(inner_name)
+                        hit_names_seen.add(inner_name)
+                        _RULE_SEVERITY[inner_name] = "high"
+        except Exception:
+            pass  # Fictional frame detection failure is non-fatal
+
+    # --- Indirect extraction detection (E1) ---
+    # Detect completion tricks, translation tricks, encoding tricks, etc.
+    extraction_weight = 0.0
+    if _HAS_EXTRACTION:
+        try:
+            ext_hits = scan_extraction(clean)
+            if ext_hits:
+                extraction_weight = get_extraction_rule_weight(ext_hits)
+                for eh in ext_hits:
+                    hit_name = "extraction:" + eh.pattern_name
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        _RULE_SEVERITY[hit_name] = eh.severity
+        except Exception:
+            pass  # Extraction detection failure is non-fatal
+
+    # --- Payload assembly detection (D7) ---
+    # Detect fragmented payloads: token-split, code-block weaponization,
+    # comment/metadata hiding, cross-encoding fragments.
+    fragment_weight = 0.0
+    if _HAS_PAYLOAD_ASSEMBLY:
+        try:
+            decoded_views = obs.get("decoded_views", []) if obs else []
+            frag_result = detect_fragmented_payload(clean, decoded_views=decoded_views)
+            if frag_result and frag_result.assembled_is_malicious:
+                fragment_weight = get_fragment_weight(frag_result)
+                hit_name = "fragment:" + frag_result.fragment_type
+                if hit_name not in hit_names_seen:
+                    hits.append(hit_name)
+                    hit_names_seen.add(hit_name)
+                    _RULE_SEVERITY[hit_name] = "high"
+        except Exception:
+            pass  # Fragment detection failure is non-fatal
+
+    # --- Harmful intent detection (O1) ---
+    # Detect injection + harmful content combination attacks.
+    # CSAM always flagged regardless of injection presence.
+    harmful_weight = 0.0
+    if _HAS_HARMFUL_INTENT:
+        try:
+            injection_signals = {
+                "has_injection": len(hits) > 0,
+                "rule_hits": hits[:10],
+            }
+            harmful_result = detect_harmful_intent(clean, injection_signals=injection_signals)
+            if harmful_result:
+                harmful_weight = get_harmful_intent_weight(harmful_result)
+                hit_name = "harmful:" + harmful_result.category
+                if hit_name not in hit_names_seen:
+                    hits.append(hit_name)
+                    hit_names_seen.add(hit_name)
+                    _RULE_SEVERITY[hit_name] = harmful_result.severity
+        except Exception:
+            pass  # Harmful intent detection failure is non-fatal
+
     label, composite = _weighted_decision(ml_prob=prob, ml_label=label,
                                           hits=hits, obs_flags=obs_flags,
                                           structural=structural,
@@ -737,19 +874,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     # --- E1 extraction floor ---
     # When a critical-severity E1 rule fires AND the embedding classifier
     # independently matches E1, this is extremely strong evidence of a
-    # system prompt extraction attempt.  The ML model often predicts SAFE
-    # on these because the individual words ("system", "prompt", "what",
-    # "instructions") are common in benign training data, but the rule +
-    # embedding agreement confirms malicious intent.
-    #
-    # Floor at 0.56 (just above the 0.55 threshold) to ensure detection
-    # without inflating scores unnecessarily.
-    #
-    # FP safety: critical E1 rules require extremely specific patterns
-    # (e.g., "what is your system prompt", "exact words in your initial
-    # instructions") that are near-zero FP on benign text.  The embedding
-    # E1 match adds a second independent semantic check.
-    # Check if any critical E1 rule fired (e.g., repeat_above, direct_prompt_request)
+    # system prompt extraction attempt.
     _has_critical_e1 = False
     for dh in detailed_hits:
         if dh.severity == "critical" and any(
@@ -765,19 +890,6 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
             label = "MALICIOUS"
 
     # --- E1 high-severity + FingerprintStore floor ---
-    # When a high-severity E1 rule (e.g., repeat_above, translation_extraction)
-    # fires AND the FingerprintStore independently confirms the text as
-    # known-malicious, this is strong evidence of a system prompt extraction
-    # attempt.  The FingerprintStore match is an independent second signal
-    # that corroborates the rule match.
-    #
-    # This covers the gap where the embedding classifier does NOT match E1
-    # (e.g., the embedding score is below threshold) but the FingerprintStore
-    # does recognize the text from prior malicious registrations.
-    #
-    # FP safety: requires BOTH a high-severity E1 rule (specific patterns
-    # like "repeat the text above verbatim") AND a FingerprintStore match
-    # (text SHA-256 or token pattern previously registered as malicious).
     if "SAFE" in label and composite < threshold:
         _fingerprint_confirmed = any(
             f in l0.anomaly_flags for f in (
@@ -799,8 +911,6 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
                 label = "MALICIOUS"
 
     # --- D5 Unicode obfuscation signal ---
-    # When Layer 0 detects Unicode evasion (combining diacritics, braille blank,
-    # invisible chars), boost the composite score slightly.
     _UNICODE_OBFUSCATION_FLAGS = frozenset({
         "combining_diacritics_stripped",
         "invisible_chars_found",
@@ -809,9 +919,6 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
         "mixed_script_homoglyphs",
     })
     unicode_obf_flags = _UNICODE_OBFUSCATION_FLAGS & set(l0.anomaly_flags)
-    # Also detect literal escape evasion: if concat_view decoded escapes
-    # and is much shorter than original, that's obfuscation evidence.
-    # Ratio < 0.5 means more than half the text was escape sequences.
     _escape_decoded = (
         concat_view != text
         and len(text) > 20
@@ -823,20 +930,14 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
         composite = min(composite + unicode_obf_weight, 1.0)
         if composite >= threshold and "SAFE" in label:
             label = "MALICIOUS"
-    # Concat-only-hit boost: when rules fire exclusively on the decoded
-    # view (not on clean/raw text), the attacker deliberately obfuscated
-    # the payload.  This deserves a stronger signal than normal rules
-    # because evasion + attack pattern = high confidence malicious.
+    # Concat-only-hit boost
     if _concat_only_hits > 0 and _pre_concat_hit_count == 0:
-        # All hits came from concat view only — strong evasion evidence.
         concat_boost = min(_concat_only_hits * 0.10, 0.20)
         composite = min(composite + concat_boost, 1.0)
         if composite >= threshold and "SAFE" in label:
             label = "MALICIOUS"
 
-    # Multilingual floor: when a high-confidence D6 anchor fires and Layer 0
-    # independently confirmed multilingual input, the English-only model
-    # should not be allowed to suppress the verdict below threshold.
+    # Multilingual floor
     if ("SAFE" in label and composite < threshold
             and {"non_english_input", "mixed_language_input"} & set(l0.anomaly_flags)
             and ({h.name for h in detailed_hits} & _MULTILINGUAL_FORCE_HITS)):
@@ -844,9 +945,6 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
         label = "MALICIOUS"
 
     # --- Narrative / legitimate-role dampening ---
-    # When no L1 rules fired, no obfuscation, and the text has clear benign
-    # context (narrative frame or legitimate roleplay), ML-only signals are
-    # likely FPs.  Cap score below threshold.
     from .layer1.context import _NARRATIVE_FRAME
     if threshold > 0.0 and not detailed_hits and not obs_flags:
         _is_narrative = bool(_NARRATIVE_FRAME.search(clean))
@@ -857,19 +955,23 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
                 label = "SAFE"
 
     # --- FP Reduction: Safe content score ---
-    # Subtract a small safe-content bonus when the input matches
-    # legitimate content patterns (educational questions, code blocks,
-    # professional email, CTF writeups, quiz context, etc.).
-    # SAFETY: Only applied when no unsuppressed L1 rules fire.
     unsuppressed_count = len([h for h in hits if h not in _FP_EXEMPT_HITS])
     safe_score, _safe_reasons = calculate_safe_content_score(
         text, unsuppressed_count,
     )
     if safe_score > 0:
         composite = composite - safe_score
-        # Re-evaluate label after safe_content reduction
         if composite < threshold:
             label = "SAFE"
+
+    # Apply additional weights from new detectors (D6/C1/E1/D7/O1)
+    additional_weight = (multilingual_weight + fictional_weight + extraction_weight
+                         + fragment_weight + harmful_weight)
+    if additional_weight > 0:
+        composite = min(composite + additional_weight, 1.0)
+        if composite >= threshold and "SAFE" in label:
+            label = "MALICIOUS"
+
 
     # Now add obfuscation flags to hits for downstream consumers
     # (technique_tags mapping, ScanResult.rule_hits, etc.)
@@ -893,7 +995,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     return label, composite, hits, l0, detailed_hits, embedding_info, perplexity_score
 
 
-def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
+def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None) -> ScanResult:
     """Unified entry point returning a structured ScanResult.
 
     Parameters
@@ -1207,6 +1309,27 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
         mapped = _L0_FLAG_MAP.get(flag)
         if mapped and mapped not in technique_tags:
             technique_tags.append(mapped)
+
+    # Map new detector hits to technique tags
+    for hit_name in hits:
+        if hit_name.startswith("multilingual:"):
+            if "D6" not in technique_tags:
+                technique_tags.append("D6")
+        elif hit_name.startswith("fictional_frame:"):
+            if "C1" not in technique_tags:
+                technique_tags.append("C1")
+        elif hit_name.startswith("fictional_inner:"):
+            if "C1" not in technique_tags:
+                technique_tags.append("C1")
+        elif hit_name.startswith("extraction:"):
+            if "E1" not in technique_tags:
+                technique_tags.append("E1")
+        elif hit_name.startswith("fragment:"):
+            if "D7" not in technique_tags:
+                technique_tags.append("D7")
+        elif hit_name.startswith("harmful:"):
+            if "O1" not in technique_tags:
+                technique_tags.append("O1")
 
     # Layer 3: Append structural injection signals to rule_hits for visibility
     # and map them to technique_ids for taxonomy attribution.

@@ -1447,6 +1447,44 @@ RULES = [
     # Uses \b for Arabic, Cyrillic, Hebrew, Korean where word boundaries work
     # Context-suppressible: NO (non-Latin override compounds almost never
     #   appear in benign text)
+    # ------------------------------------------------------------------
+    # D3.6 Semantic Structural Boundary — natural-language boundary markers
+    # ------------------------------------------------------------------
+    # Detects when attackers use authority language + boundary framing
+    # to create fake system-level boundaries without special tokens.
+    # Context-suppressible: YES (security education discusses these)
+
+    Rule("semantic_system_marker",
+         r"(?:"
+         # Group A: Authority + boundary framing (CAPS emphasis common)
+         r"(?:IMPORTANT|PRIORITY|URGENT|CRITICAL)\s+"
+         r"(?:SYSTEM|ADMIN|INTERNAL)\s+"
+         r"(?:UPDATE|MESSAGE|NOTICE|MEMO|OVERRIDE|ALERT|DIRECTIVE)"
+         r"|"
+         r"(?:BEGIN|START)\s+(?:AUTHORIZED|OFFICIAL|CLASSIFIED|INTERNAL)"
+         r"(?:\s+\w+)?\s+(?:MESSAGE|INSTRUCTIONS?|DIRECTIVE|COMMUNICATION)"
+         r"|"
+         # Group B: Pseudo-official headers (require supersession language nearby)
+         r"(?:CLEARANCE|ACCESS)\s+(?:LEVEL|REQUIRED)\s*:\s*"
+         r"(?:ADMIN|ROOT|SYSTEM|DEVELOPER|LEVEL\s+\d)"
+         r"|"
+         r"FOR\s+(?:AI|SYSTEM|MODEL)\s+(?:PROCESSING|CONSUMPTION|EXECUTION)\s+ONLY"
+         r"|"
+         # Group C: Supersession language (combined with boundary context)
+         r"(?:THE\s+FOLLOWING|THIS)\s+"
+         r"(?:SUPERSEDES|OVERRIDES|REPLACES|INVALIDATES)\s+"
+         r"(?:ALL\s+|ANY\s+)?(?:PRIOR|PREVIOUS|EXISTING)\s+"
+         r"(?:INSTRUCTIONS?|GUIDELINES?|RULES?|DIRECTIVES?)"
+         r"|"
+         r"(?:DISREGARD|CANCEL|VOID|NULLIFY)\s+"
+         r"(?:ALL\s+|ANY\s+)?(?:PRIOR|PREVIOUS|PRECEDING)\s+"
+         r"(?:INSTRUCTIONS?|GUIDELINES?|RULES?|DIRECTIVES?)"
+         r")",
+         technique_ids=["D3", "D3.6"],
+         severity="high",
+         paranoia_level=2,
+         description="Semantic structural boundary marker — natural-language fake system message"),
+
     Rule("multilingual_override_cjk",
          # Chinese (simplified + traditional, no \b needed)
          r"(?:忽略|忽视|忽視|无视|無視|忘记|忘記).{0,20}(?:指示|指令|规则|規則|命令|准则|準則|限制)"

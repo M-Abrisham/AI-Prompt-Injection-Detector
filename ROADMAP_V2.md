@@ -113,6 +113,12 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 - [x] **Language detection for multilingual routing** — Uses `langdetect` with deterministic seed + Unicode script heuristic fallback for short text. Flags `non_english_input` (D6) and `mixed_language_input` (D6.3). Graceful degradation when langdetect not installed. File: `language_detector.py`. DONE (2026-02-15)
 - [x] **PII/secrets pre-screening** — Pure-regex PII/secrets scanner with Luhn-validated credit cards (Visa/MC/Amex/Discover), SSN with invalid range exclusion, emails, US phones, AWS keys, GitHub tokens, generic hex/base64 with entropy filter, IPv4. All values redacted. File: `pii_detector.py`. DONE (2026-02-15)
 - [x] **Chunked ML analysis for long inputs** — HEAD+TAIL and CHUNKS strategies for inputs >512 words. `_chunk_text()` with overlap + `_head_tail_extract()`. Runs `rule_score` on each chunk, merges hits, boosts score for buried payloads. File: `predict.py`. DONE (2026-02-15)
+- [x] **D6 Multilingual injection handler** — Standalone regex-based detector for injection patterns in 20+ languages (FR/ES/DE/ZH/JA/AR/KO/HI/RU/PT/IT/TR/NL/PL/VI/TH/ID/SV/CS/HE + romanized transliterations). SOV word-order aware patterns for CJK/Korean/Turkish/Hindi. 6 pattern categories per language (instruction_override, reveal_prompt, roleplay_hijack, disable_protections, authority_claim, new_role). Integrated into predict.py with additive weights. 47 tests. File: `multilingual_handler.py`. ✅ DONE (2026-02-28)
+- [x] **C1 Fictional frame detector** — 3-layer analysis for compliance evasion: frame detection (fictional/hypothetical/academic/emotional/authority) → inner attack extraction (extraction/override/harmful/disable/generic_attack) → combined verdict with confidence scoring and C1.x technique ID mapping. Meta-educational language suppression prevents FPs on academic discussions. Integrated into predict.py. 34 tests. File: `fictional_frame_detector.py`. ✅ DONE (2026-02-28)
+- [x] **E1 Indirect extraction detector** — 6-category detector for indirect system prompt extraction: completion tricks (E1.3), translation tricks (E1.4), encoding tricks (E1.5), summarization tricks (E1.6), reference manipulation (E1.2), constraint probing. Targets "YOUR instructions/config/rules" to avoid FPs. Integrated into predict.py. 42 tests. File: `extraction_detector.py`. ✅ DONE (2026-02-28)
+- [x] **D7 Payload assembly detector** — Fragmented payload detection: token-split assembly (D7.1) with assembly keyword heuristic, code-block weaponization (D7.3) distinguishing educational vs weaponized code, comment/metadata payload hiding (D7.4) for HTML/JSON/YAML/XML/CSS/SQL, cross-encoding fragment assembly (D7.5), multi-turn stub (D7.2). Integrated into predict.py. 30 tests. File: `payload_assembly_detector.py`. ✅ DONE (2026-02-28)
+- [x] **O1 Harmful intent detector** — Injection+harmful combination detection: CSAM always-flag (O1.2), violence (O1.1), social engineering (O1.3), disinformation (O1.4), malware — only when combined with injection techniques (Na0S-scoped, not general content moderation). Tightened educational context suppression. Integrated into predict.py. 25 tests. File: `harmful_intent_detector.py`. ✅ DONE (2026-02-28)
+- [x] **D3.6 Semantic structural markers** — `semantic_system_marker` rule in rules_registry.py detecting natural-language fake system boundaries: authority+boundary framing, pseudo-official headers, supersession language. PL2, context-suppressible. D3.5 (zero-width chars) confirmed already handled by L0 Cf-category stripping. 18 tests. ✅ DONE (2026-02-28)
 
 ##### Security Hardening (input_loader.py) 
 - [x] **SSRF protection** — DNS-resolve hostnames before connection, block private/loopback/link-local/reserved/metadata IPs via `_is_private_ip()` + `_validate_url_target()`. ✅ DONE (2026-02-15)
@@ -405,7 +411,7 @@ Layer 3 extracts 24 numeric features from input text that characterize prompt st
 
 **Files**: `src/predict.py` (223 lines), `src/model.py` (66 lines), `src/features.py` (38 lines), `src/dataset.py` (30 lines), `src/process_data.py` (43 lines), `src/scan_result.py`
 **Tests**: `tests/test_predict_pipeline.py` (12 tests)
-**Status**: Core pipeline — fully integrated with L0, L1, L2. All 3 bugs (BUG-L4-7, FIX-L4-8, FIX-L4-9) fixed (2026-02-20): logging for FingerprintStore errors, removed unused rule_score import, shared SEVERITY_WEIGHTS from rules.py. **Gap Closure Sprint (2026-02-28)**: ML confidence zone cap (uncertain 0.35-0.80 + no rules + no obf → cap below threshold), safe content scoring (safe_content.py subtraction when unsuppressed_rule_count==0), `_FP_EXEMPT_HITS` frozenset for obfuscation flag names.
+**Status**: Core pipeline — fully integrated with L0, L1, L2 + D6/C1/E1 detectors. All 3 bugs (BUG-L4-7, FIX-L4-8, FIX-L4-9) fixed (2026-02-20): logging for FingerprintStore errors, removed unused rule_score import, shared SEVERITY_WEIGHTS from rules.py. **Gap Closure Sprint (2026-02-28)**: ML confidence zone cap (uncertain 0.35-0.80 + no rules + no obf → cap below threshold), safe content scoring (safe_content.py subtraction when unsuppressed_rule_count==0), `_FP_EXEMPT_HITS` frozenset for obfuscation flag names. Three standalone detectors added (2026-02-28): multilingual_handler.py (D6), fictional_frame_detector.py (C1), extraction_detector.py (E1) — integrated with additive weights and re-evaluation.
 
 ### Updated Description
 Layer 4 is the primary ML classification engine. It uses TF-IDF vectorization (5K vocabulary) with isotonic-calibrated Logistic Regression (`class_weight='balanced'`). The `scan()` function in predict.py orchestrates the full pipeline: L0 sanitization → TF-IDF prediction → rule matching (L1) → obfuscation scan (L2) → decoded-view reclassification → weighted voting across 3 signals (ML 60%, rules severity-stacked, obfuscation 15%/flag capped 30%). Final decision at composite ≥0.55 threshold. Returns `ScanResult` dataclass with 12 fields. Registers malicious inputs to FingerprintStore for future fast-path detection.
@@ -419,6 +425,10 @@ scan(text)
   → obfuscation_scan(clean) → evasion_flags + decoded_views
   → for each decoded_view: reclassify with ML
   → _weighted_decision(ml_prob, ml_label, hits, obs_flags) → composite score
+  → multilingual_handler(clean) → D6 hits + additive weight
+  → fictional_frame_detector(clean) → C1 hits + additive weight
+  → extraction_detector(clean) → E1 hits + additive weight
+  → if additional weight pushes composite ≥0.55 → re-label MALICIOUS
   → if ML >0.8 safe AND only medium rules AND no obfuscation → override to SAFE
   → return ScanResult(...)
 ```
@@ -452,6 +462,7 @@ scan(text)
 - [x] **FIX-L4-9 (LOW)**: `_SEVERITY_WEIGHTS` duplicated in predict.py and cascade.py. DRY violation. **Fix**: Extract to rules.py or shared config. ✅ DONE (2026-02-20) — Both predict.py and cascade.py now import `SEVERITY_WEIGHTS` from rules.py. Verified by identity check (`is` same object).
 
 #### NEW (Discovered by research)
+- [x] **D6/C1/E1 detector integration** — Three standalone detectors (multilingual_handler, fictional_frame_detector, extraction_detector) integrated into predict.py `classify_prompt()` with optional imports, additive weights on top of composite score, and re-evaluation past threshold. Closes 22+ detection gaps (11 D6, 1 C1, 10 E1). 23 `@expectedFailure` decorators removed. Zero regressions. ✅ DONE (2026-02-28)
 - [x] **ML confidence zone cap (Track C)** — When ML is uncertain (0.35-0.80) AND no unsuppressed rules AND no obfuscation flags, cap composite below decision threshold (0.55 - 0.01 = 0.54). Prevents FPs where a borderline ML score alone triggers detection. `_FP_EXEMPT_HITS` frozenset excludes benign obfuscation flag names. Wired at line 325-327 of predict.py. ✅ DONE (2026-02-28)
 - [x] **Safe content scoring (Track C)** — New `safe_content.py` module: `calculate_safe_content_score(text, unsuppressed_rule_count)` returns score in [0.0, 0.3] based on 7 patterns (educational question, CTF framing, professional structure, educational framing, quiz context, professional email, analysis framing). Score subtracted from composite only when unsuppressed_rule_count == 0 (safety valve). All regex via safe_compile. 26 tests in test_fp_reduction.py. ✅ DONE (2026-02-28)
 - [x] **Threshold optimization** — Replace hardcoded 0.55 with data-driven threshold. `get_decision_threshold()` in `_voting.py` loads `recall95_threshold` from `data/processed/optimal_threshold.json`, with env-var override and 0.55 fallback. predict.py + ensemble.py use single source of truth. 13 tests. ✅ DONE (2026-03-13)
@@ -1077,7 +1088,7 @@ Layer 12 is the adversarial testing framework. Base classes (`Probe`, `Classifie
 - [x] **Add `importlib.resources`** — `_find_project_root()` with importlib.resources + Path fallback in `_base.py` and `_tags.py`. ✅ DONE (2026-03-15)
 - [x] **Add per-probe counts and top-N missed technique IDs** — `count_by_probe()`, `top_missed_techniques()`, `aggregation_summary()` in `_tags.py` + 19 tests. ✅ DONE (2026-03-14)
 - [x] **Combo technique probes** — New `combo_techniques.py` (CT): 183 attack + 24 benign = 207 samples, 15 two-technique + 5 three-technique combos. ✅ DONE (2026-03-14)
-- [x] **Per-probe validation tests** — `test_l12_probe_validation.py`: 14 test methods × 24 probes = 247 subtests. ✅ DONE (2026-03-14)
+- [x] **Per-probe validation tests** — `test_l12_probe_validation.py`: 14 test methods x 24 probes = 247 subtests. ✅ DONE (2026-03-14)
 - [x] **Adversarial benchmark integration** — New `adversarial_benchmarks.py` (AB): 120 attack + 28 benign = 148 samples across 12 benchmark-style techniques. ✅ DONE (2026-03-14)
 
 #### REMAINING (From original roadmap)

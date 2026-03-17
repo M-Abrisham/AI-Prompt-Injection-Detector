@@ -30,6 +30,8 @@ class ScanResult:
     judge_reasoning: str = ""      # Layer 7: LLM judge reasoning (CoT or summary)
     output_scan_flags: list = field(default_factory=list)   # Layer 9: output scan flags
     output_scan_risk: float = 0.0                           # Layer 9: output scan risk score
+    canary_triggered: bool = False                          # Layer 10: canary token triggered
+    canary_leaks: list = field(default_factory=list)        # Layer 10: canary leak details
     elapsed_ms: float = 0.0
 
     def to_dict(self) -> dict:

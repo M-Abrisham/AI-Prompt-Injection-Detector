@@ -13,11 +13,9 @@ os.environ["SCAN_TIMEOUT_SEC"] = "0"
 from scripts.taxonomy import ALL_PROBES
 from scripts.taxonomy._base import Probe
 
-# ContextOverflowProbe has a pre-existing bug: its generate() mixes
-# 2-tuples and 3-tuples but later unpacks all as 2-tuples, raising
-# ValueError.  We skip it in tests that call generate() so the suite
-# passes; the bug is tracked separately.
-_KNOWN_BROKEN_GENERATE = frozenset({"ContextOverflowProbe"})
+# Stale skip guard removed 2026-03-17: ContextOverflowProbe generate()
+# was fixed and now returns 208 valid 3-tuples.
+_KNOWN_BROKEN_GENERATE = frozenset()
 
 
 def _safe_generate(test_case, cls):

@@ -42,6 +42,11 @@ _audit = logging.getLogger("na0s.integrity_audit")
 # Valid pickle protocol 0 start bytes
 _PROTO0_OPCODES = frozenset(b"(]})\x89\x88IX\x80")
 
+# mtime-gated hash cache: avoids re-hashing unchanged files on every load.
+# Maps path -> (mtime, digest) for both SHA-256 and HMAC-SHA256.
+_sha256_cache: dict = {}  # path -> (mtime, hex_digest)
+_hmac_cache: dict = {}    # path -> (mtime, hex_digest)
+
 
 def _hash_path(pkl_path):
     return pkl_path + ".sha256"
@@ -53,6 +58,17 @@ def _sha256(path):
         for chunk in iter(lambda: f.read(1 << 16), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _cached_sha256(path):
+    """Return SHA-256 hex digest, using mtime-gated cache."""
+    mtime = os.path.getmtime(path)
+    cached = _sha256_cache.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    digest = _sha256(path)
+    _sha256_cache[path] = (mtime, digest)
+    return digest
 
 
 def _hmac_path(pkl_path):
@@ -73,6 +89,17 @@ def _hmac_sha256(path, key):
         for chunk in iter(lambda: f.read(1 << 16), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _cached_hmac_sha256(path, key):
+    """Return HMAC-SHA256 hex digest, using mtime-gated cache."""
+    mtime = os.path.getmtime(path)
+    cached = _hmac_cache.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    digest = _hmac_sha256(path, key)
+    _hmac_cache[path] = (mtime, digest)
+    return digest
 
 
 def _format_sidecar(algorithm, digest):
@@ -272,14 +299,14 @@ def safe_load(path):
     key = _get_signing_key()
 
     if source == "hardcoded":
-        actual = _sha256(path)
+        actual = _cached_sha256(path)
     elif source == "sidecar_hmac":
         if not key:
             raise ValueError(
                 "HMAC sidecar exists for {} but NA0S_PICKLE_KEY is not set. "
                 "Cannot verify without the signing key.".format(path)
             )
-        actual = _hmac_sha256(path, key)
+        actual = _cached_hmac_sha256(path, key)
     else:  # sidecar_sha256
         if key:
             _audit.warning(
@@ -293,7 +320,7 @@ def safe_load(path):
                 "NA0S_PICKLE_KEY is set but %s uses a plain SHA-256 sidecar. "
                 "Re-run safe_dump() to upgrade to HMAC protection.", path
             )
-        actual = _sha256(path)
+        actual = _cached_sha256(path)
 
     if not hmac.compare_digest(actual, expected):
         _audit.error(

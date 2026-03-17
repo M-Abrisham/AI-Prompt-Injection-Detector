@@ -1,5 +1,9 @@
 import logging
+import os
 import pathlib
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from contextlib import contextmanager
 
 from .result import Layer0Result
 from .validation import validate_input
@@ -38,6 +42,62 @@ from .resource_guard import (
 )
 
 _logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Timing instrumentation (opt-in via L0_ENABLE_TIMING=1)
+# ---------------------------------------------------------------------------
+_L0_TIMING_ENABLED = os.getenv("L0_ENABLE_TIMING", "").lower() in (
+    "1", "true", "yes",
+)
+
+
+class _PipelineTimer:
+    """Lightweight step-level timer for Layer 0 pipeline instrumentation.
+
+    Enabled via the ``L0_ENABLE_TIMING`` environment variable (``1``,
+    ``true``, or ``yes``).  When disabled, all operations are no-ops.
+    """
+
+    __slots__ = ("enabled", "_steps", "_start")
+
+    def __init__(self, enabled=None):
+        self.enabled = _L0_TIMING_ENABLED if enabled is None else enabled
+        self._steps = {}
+        self._start = time.monotonic() if self.enabled else 0.0
+
+    @contextmanager
+    def step(self, name):
+        """Context manager that records wall-clock time for *name*."""
+        if not self.enabled:
+            yield
+            return
+        start = time.monotonic()
+        yield
+        self._steps[name] = round(time.monotonic() - start, 6)
+
+    def record(self, name, duration_sec):
+        """Record a pre-measured duration (e.g. from a worker thread)."""
+        if self.enabled:
+            self._steps[name] = round(duration_sec, 6)
+
+    def to_dict(self):
+        """Return the collected timings as a plain dict.
+
+        Returns an empty dict when timing is disabled.
+        """
+        if not self.enabled:
+            return {}
+        return {
+            "steps": dict(self._steps),
+            "total_sec": round(time.monotonic() - self._start, 6),
+        }
+
+
+def _timed_call(func, *args, **kwargs):
+    """Execute *func* and return ``(result, elapsed_seconds)``."""
+    start = time.monotonic()
+    result = func(*args, **kwargs)
+    return result, time.monotonic() - start
 
 
 # ---------------------------------------------------------------------------
@@ -249,117 +309,126 @@ def layer0_sanitize(raw_input):
 
 
 def _layer0_sanitize_inner(raw_input):
-    """Internal Layer 0 pipeline — called by layer0_sanitize with timeout."""
+    """Internal Layer 0 pipeline — called by layer0_sanitize with timeout.
+
+    Steps -1 through 3 run sequentially (each transforms the input for the
+    next).  Steps 4, 5, and 6 are independent analyses on the final text
+    and run **in parallel** via a shared thread pool.
+
+    Set ``L0_ENABLE_TIMING=1`` to populate ``Layer0Result.timing`` with
+    per-step wall-clock durations.
+    """
+    timer = _PipelineTimer()
     all_flags = []
     source_metadata = {}
 
+    # ------------------------------------------------------------------
     # Step -1: Input loading — resolve file paths, URLs, pathlib.Path
-    # Only invoke loader for types that need resolution (Path, URL, file path)
-    needs_loading = (
-        isinstance(raw_input, pathlib.Path)
-        or (
-            isinstance(raw_input, str)
-            and (
-                raw_input.startswith("http://")
-                or raw_input.startswith("https://")
+    # ------------------------------------------------------------------
+    with timer.step("input_loading"):
+        needs_loading = (
+            isinstance(raw_input, pathlib.Path)
+            or (
+                isinstance(raw_input, str)
+                and (
+                    raw_input.startswith("http://")
+                    or raw_input.startswith("https://")
+                )
             )
         )
-    )
 
-    # Also check for file paths (strings that exist on disk),
-    # but only for strings that are short enough to plausibly be paths
-    # and are not URLs. We check os.path.exists only for strings <= 4096 chars
-    # to avoid calling os.path.exists on large text inputs.
-    if (
-        not needs_loading
-        and isinstance(raw_input, str)
-        and len(raw_input) <= 4096
-        and not raw_input.startswith("http://")
-        and not raw_input.startswith("https://")
-    ):
-        import os
-        if os.path.exists(raw_input):
-            needs_loading = True
+        # Also check for file paths (strings that exist on disk),
+        # but only for strings that are short enough to plausibly be paths
+        # and are not URLs.
+        if (
+            not needs_loading
+            and isinstance(raw_input, str)
+            and len(raw_input) <= 4096
+            and not raw_input.startswith("http://")
+            and not raw_input.startswith("https://")
+        ):
+            if os.path.exists(raw_input):
+                needs_loading = True
 
-    if needs_loading:
-        try:
-            raw_input, source_metadata = load_input(raw_input)
-            all_flags.append("input_loaded_from_{}".format(
-                source_metadata.get("source_type", "unknown")
-            ))
-        except InputLoadError as exc:
-            return Layer0Result(
-                rejected=True,
-                rejection_reason="Input load failed: {}".format(exc),
-                source_metadata=source_metadata,
-            )
-
-    # Step 0a: Binary content-type detection on raw bytes — before any
-    # decoding so we can inspect true magic bytes.  Executables are
-    # rejected immediately; other binary types are flagged for
-    # downstream layers (e.g. image OCR, doc parsing).
-    if isinstance(raw_input, (bytes, bytearray)):
-        ct_result = detect_content_type(raw_input)
-        if ct_result.detected_type:
-            all_flags.extend(ct_result.flags)
-            source_metadata["content_type_detected"] = ct_result.detected_type
-            source_metadata["content_type_mime"] = ct_result.mime_type
-            source_metadata["content_type_tier"] = ct_result.tier
-
-            # Step 0a-mismatch: Compare declared type (HTTP header / file
-            # extension) against magic-byte detected type.  Runs BEFORE
-            # the reject gate so the flag is present even on rejected inputs.
-            mismatch_flags = _check_content_type_mismatch(
-                source_metadata, ct_result,
-            )
-            all_flags.extend(mismatch_flags)
-
-            if ct_result.reject:
+        if needs_loading:
+            try:
+                raw_input, source_metadata = load_input(raw_input)
+                all_flags.append("input_loaded_from_{}".format(
+                    source_metadata.get("source_type", "unknown")
+                ))
+            except InputLoadError as exc:
                 return Layer0Result(
                     rejected=True,
-                    rejection_reason=ct_result.reject_reason,
-                    anomaly_flags=all_flags,
+                    rejection_reason="Input load failed: {}".format(exc),
                     source_metadata=source_metadata,
+                    timing=timer.to_dict(),
                 )
 
-    # Step 0: MIME detection — check if loaded bytes look like MIME
-    if isinstance(raw_input, (bytes, bytearray)) and _looks_like_mime(raw_input):
-        mime_result = parse_mime_input(raw_input)
-        all_flags.append("mime_parsed")
-        if mime_result.is_multipart:
-            all_flags.append("mime_multipart")
-        if mime_result.attachments:
-            all_flags.append(
-                "mime_attachments_count_{}".format(len(mime_result.attachments))
+    # ------------------------------------------------------------------
+    # Step 0a: Binary content-type detection on raw bytes
+    # ------------------------------------------------------------------
+    with timer.step("content_type_detection"):
+        if isinstance(raw_input, (bytes, bytearray)):
+            ct_result = detect_content_type(raw_input)
+            if ct_result.detected_type:
+                all_flags.extend(ct_result.flags)
+                source_metadata["content_type_detected"] = ct_result.detected_type
+                source_metadata["content_type_mime"] = ct_result.mime_type
+                source_metadata["content_type_tier"] = ct_result.tier
+
+                mismatch_flags = _check_content_type_mismatch(
+                    source_metadata, ct_result,
+                )
+                all_flags.extend(mismatch_flags)
+
+                if ct_result.reject:
+                    return Layer0Result(
+                        rejected=True,
+                        rejection_reason=ct_result.reject_reason,
+                        anomaly_flags=all_flags,
+                        source_metadata=source_metadata,
+                        timing=timer.to_dict(),
+                    )
+
+    # ------------------------------------------------------------------
+    # Step 0: MIME detection
+    # ------------------------------------------------------------------
+    with timer.step("mime_detection"):
+        if isinstance(raw_input, (bytes, bytearray)) and _looks_like_mime(raw_input):
+            mime_result = parse_mime_input(raw_input)
+            all_flags.append("mime_parsed")
+            if mime_result.is_multipart:
+                all_flags.append("mime_multipart")
+            if mime_result.attachments:
+                all_flags.append(
+                    "mime_attachments_count_{}".format(len(mime_result.attachments))
+                )
+            if mime_result.body_text:
+                raw_input = mime_result.body_text
+                source_metadata["mime_content_type"] = mime_result.content_type
+                source_metadata["mime_is_multipart"] = mime_result.is_multipart
+                source_metadata["mime_attachment_count"] = len(mime_result.attachments)
+                source_metadata["mime_attachments"] = [
+                    {
+                        "filename": att.filename,
+                        "content_type": att.content_type,
+                        "size": att.size,
+                    }
+                    for att in mime_result.attachments
+                ]
+
+    # ------------------------------------------------------------------
+    # Step 0c: Image / document extraction
+    # ------------------------------------------------------------------
+    with timer.step("binary_extraction"):
+        if isinstance(raw_input, (bytes, bytearray)):
+            raw_input, all_flags, source_metadata = _try_binary_extraction(
+                raw_input, all_flags, source_metadata, timer=timer,
             )
-        # Use the body text for sanitization pipeline
-        if mime_result.body_text:
-            raw_input = mime_result.body_text
-            source_metadata["mime_content_type"] = mime_result.content_type
-            source_metadata["mime_is_multipart"] = mime_result.is_multipart
-            source_metadata["mime_attachment_count"] = len(mime_result.attachments)
-            source_metadata["mime_attachments"] = [
-                {
-                    "filename": att.filename,
-                    "content_type": att.content_type,
-                    "size": att.size,
-                }
-                for att in mime_result.attachments
-            ]
 
-    # Step 0c: Image / document extraction — if raw bytes are a known
-    # binary format, extract text before encoding-decoding.  This is an
-    # extension point: when extraction libraries are not installed the
-    # result is empty and we fall through to the normal bytes->str path.
-    if isinstance(raw_input, (bytes, bytearray)):
-        raw_input, all_flags, source_metadata = _try_binary_extraction(
-            raw_input, all_flags, source_metadata,
-        )
-
-    # Step 0d-pre: Raw byte size guard — reject oversized binary payloads
-    # BEFORE decoding.  Wide encodings (e.g. UTF-32) can shrink dramatically
-    # when re-encoded to UTF-8, so checking the decoded string alone would
-    # let an attacker smuggle oversized raw payloads past the byte limit.
+    # ------------------------------------------------------------------
+    # Step 0d-pre: Raw byte size guard
+    # ------------------------------------------------------------------
     if isinstance(raw_input, (bytes, bytearray)):
         from .validation import MAX_INPUT_BYTES
         raw_byte_len = len(raw_input)
@@ -374,91 +443,106 @@ def _layer0_sanitize_inner(raw_input):
                 original_length=raw_byte_len,
                 anomaly_flags=all_flags,
                 source_metadata=source_metadata,
+                timing=timer.to_dict(),
             )
 
-    # Step 0d: Encoding detection — decode bytes before anything else
-    if isinstance(raw_input, (bytes, bytearray)):
-        raw_input, encoding_used, enc_flags = decode_to_str(raw_input)
-        all_flags.extend(enc_flags)
+    # ------------------------------------------------------------------
+    # Step 0d: Encoding detection — decode bytes -> str
+    # ------------------------------------------------------------------
+    with timer.step("encoding_detection"):
+        if isinstance(raw_input, (bytes, bytearray)):
+            raw_input, encoding_used, enc_flags = decode_to_str(raw_input)
+            all_flags.extend(enc_flags)
 
-    # Step 0e: Resource exhaustion guards — reject inputs that would
-    # blow memory, exceed depth limits, or violate rate limits.
-    # This runs BEFORE validation because validation only checks size;
-    # resource guards also check HTML depth and memory budget.
-    try:
-        run_entry_guards(raw_input)
-    except ResourceLimitExceeded as exc:
-        all_flags.append("resource_limit_{}".format(exc.guard_name))
-        return Layer0Result(
-            rejected=True,
-            rejection_reason="Resource limit exceeded: {}".format(exc.detail),
-            original_length=len(raw_input) if isinstance(raw_input, str) else 0,
-            anomaly_flags=all_flags,
-            source_metadata=source_metadata,
-        )
+    # ------------------------------------------------------------------
+    # Step 0e: Resource exhaustion guards
+    # ------------------------------------------------------------------
+    with timer.step("resource_guards"):
+        try:
+            run_entry_guards(raw_input)
+        except ResourceLimitExceeded as exc:
+            all_flags.append("resource_limit_{}".format(exc.guard_name))
+            return Layer0Result(
+                rejected=True,
+                rejection_reason="Resource limit exceeded: {}".format(exc.detail),
+                original_length=len(raw_input) if isinstance(raw_input, str) else 0,
+                anomaly_flags=all_flags,
+                source_metadata=source_metadata,
+                timing=timer.to_dict(),
+            )
 
+    # ------------------------------------------------------------------
     # Step 1: Fail-fast validation
-    rejection = validate_input(raw_input)
-    if rejection is not None:
-        rejection.anomaly_flags = all_flags + rejection.anomaly_flags
-        rejection.source_metadata = source_metadata
-        return rejection
+    # ------------------------------------------------------------------
+    with timer.step("validation"):
+        rejection = validate_input(raw_input)
+        if rejection is not None:
+            rejection.anomaly_flags = all_flags + rejection.anomaly_flags
+            rejection.source_metadata = source_metadata
+            rejection.timing = timer.to_dict()
+            return rejection
 
     original_length = len(raw_input)
 
+    # ------------------------------------------------------------------
     # Step 2: Normalization (with per-step timeout)
-    try:
-        text, chars_stripped, norm_flags = with_timeout(
-            normalize_text,
-            get_step_timeout("normalize"),
-            raw_input,
-            step_name="normalize",
-        )
-    except Layer0TimeoutError:
-        all_flags.append("timeout_normalize")
-        return Layer0Result(
-            rejected=True,
-            rejection_reason="Processing timeout: normalization step",
-            original_length=original_length,
-            anomaly_flags=all_flags,
-            source_metadata=source_metadata,
-        )
-    all_flags.extend(norm_flags)
+    # ------------------------------------------------------------------
+    with timer.step("normalization"):
+        try:
+            text, chars_stripped, norm_flags = with_timeout(
+                normalize_text,
+                get_step_timeout("normalize"),
+                raw_input,
+                step_name="normalize",
+            )
+        except Layer0TimeoutError:
+            all_flags.append("timeout_normalize")
+            return Layer0Result(
+                rejected=True,
+                rejection_reason="Processing timeout: normalization step",
+                original_length=original_length,
+                anomaly_flags=all_flags,
+                source_metadata=source_metadata,
+                timing=timer.to_dict(),
+            )
+        all_flags.extend(norm_flags)
 
-    # Step 2a: Expansion ratio guard — reject if normalization caused
-    # excessive expansion (zip-bomb style Unicode decomposition attacks).
-    try:
-        check_expansion_ratio(original_length, len(text))
-    except ResourceLimitExceeded as exc:
-        all_flags.append("resource_limit_expansion_ratio")
-        return Layer0Result(
-            rejected=True,
-            rejection_reason="Resource limit exceeded: {}".format(exc.detail),
-            original_length=original_length,
-            anomaly_flags=all_flags,
-            source_metadata=source_metadata,
-        )
+    # ------------------------------------------------------------------
+    # Step 2a: Expansion ratio guard
+    # ------------------------------------------------------------------
+    with timer.step("expansion_ratio_check"):
+        try:
+            check_expansion_ratio(original_length, len(text))
+        except ResourceLimitExceeded as exc:
+            all_flags.append("resource_limit_expansion_ratio")
+            return Layer0Result(
+                rejected=True,
+                rejection_reason="Resource limit exceeded: {}".format(exc.detail),
+                original_length=original_length,
+                anomaly_flags=all_flags,
+                source_metadata=source_metadata,
+                timing=timer.to_dict(),
+            )
 
-    # Step 2b: Store decoded tag steganography text in source_metadata
-    # for audit trail.  The decoded payload is already appended to `text`
-    # by normalize_text() so downstream layers scan it automatically.
+    # ------------------------------------------------------------------
+    # Step 2b: Tag steganography audit trail
+    # ------------------------------------------------------------------
     if "unicode_tag_stego" in norm_flags:
         from .normalization import _extract_tag_stego
         tag_decoded = _extract_tag_stego(raw_input)
         if tag_decoded:
             source_metadata["tag_stego_decoded"] = tag_decoded
 
-    # Step 2c: Store decoded variation selector steganography text in
-    # source_metadata for audit trail.  The decoded payload is already
-    # appended to `text` by normalize_text() so downstream layers scan it.
+    # ------------------------------------------------------------------
+    # Step 2c: Variation selector steganography audit trail
+    # ------------------------------------------------------------------
     if "variation_selector_stego" in norm_flags:
         from .normalization import _extract_variation_selector_stego
         vs_decoded = _extract_variation_selector_stego(raw_input)
         if vs_decoded:
             source_metadata["vs_stego_decoded"] = vs_decoded
 
-    # Post-normalization empty check — all-invisible input passes validate_input()
-    # but becomes empty after stripping. Reject it here.
+    # Post-normalization empty check
     if not text or not text.strip():
         return Layer0Result(
             sanitized_text="",
@@ -468,69 +552,92 @@ def _layer0_sanitize_inner(raw_input):
             rejected=True,
             rejection_reason="Input reduced to empty after normalization",
             source_metadata=source_metadata,
+            timing=timer.to_dict(),
         )
 
+    # ------------------------------------------------------------------
     # Step 3: HTML safe extraction (with per-step timeout)
-    try:
-        text, html_flags = with_timeout(
-            extract_safe_text,
-            get_step_timeout("html"),
-            text,
-            step_name="html",
-        )
-    except Layer0TimeoutError:
-        all_flags.append("timeout_html")
-        return Layer0Result(
-            rejected=True,
-            rejection_reason="Processing timeout: HTML extraction step",
-            original_length=original_length,
-            anomaly_flags=all_flags,
-            source_metadata=source_metadata,
-        )
-    all_flags.extend(html_flags)
+    # ------------------------------------------------------------------
+    with timer.step("html_extraction"):
+        try:
+            text, html_flags = with_timeout(
+                extract_safe_text,
+                get_step_timeout("html"),
+                text,
+                step_name="html",
+            )
+        except Layer0TimeoutError:
+            all_flags.append("timeout_html")
+            return Layer0Result(
+                rejected=True,
+                rejection_reason="Processing timeout: HTML extraction step",
+                original_length=original_length,
+                anomaly_flags=all_flags,
+                source_metadata=source_metadata,
+                timing=timer.to_dict(),
+            )
+        all_flags.extend(html_flags)
 
-    # Step 4: Tokenization anomaly detection + fingerprinting (with per-step timeout)
-    try:
-        tok_flags, token_char_ratio, fingerprint = with_timeout(
-            check_tokenization_anomaly,
-            get_step_timeout("tokenize"),
-            text,
-            step_name="tokenize",
-        )
-    except Layer0TimeoutError:
-        all_flags.append("timeout_tokenize")
-        return Layer0Result(
-            rejected=True,
-            rejection_reason="Processing timeout: tokenization step",
-            original_length=original_length,
-            anomaly_flags=all_flags,
-            source_metadata=source_metadata,
-        )
-    all_flags.extend(tok_flags)
-
-    # Calculate total characters removed (normalization + HTML stripping)
+    # ------------------------------------------------------------------
+    # Steps 4, 5, 6: Parallel analysis
+    #   - Tokenization anomaly detection + fingerprinting
+    #   - Language detection
+    #   - PII / secrets pre-screening
+    # All three consume the final `text` and produce independent outputs.
+    # ------------------------------------------------------------------
     total_stripped = original_length - len(text)
 
-    # Step 5: Language detection for multilingual routing
-    lang_result = detect_language(text)
-    if lang_result["anomaly_flags"]:
-        all_flags.extend(lang_result["anomaly_flags"])
-    source_metadata["language"] = {
-        "detected": lang_result["detected_language"],
-        "confidence": lang_result["language_confidence"],
-        "is_non_english": lang_result["is_non_english"],
-    }
+    with timer.step("parallel_analysis"):
+        pool = ThreadPoolExecutor(max_workers=3)
+        try:
+            tok_future = pool.submit(
+                _timed_call, check_tokenization_anomaly, text,
+            )
+            lang_future = pool.submit(_timed_call, detect_language, text)
+            pii_future = pool.submit(_timed_call, scan_pii, text)
 
-    # Step 6: PII / secrets pre-screening
-    pii_result = scan_pii(text)
-    if pii_result.has_pii:
-        all_flags.extend(sorted(pii_result.anomaly_flags))
-        source_metadata["pii_scan"] = {
-            "has_pii": True,
-            "pii_types_found": pii_result.pii_types_found,
-            "pii_count": pii_result.pii_count,
-            "details": pii_result.details,
-        }
+            # Step 4: Tokenization (has per-step timeout)
+            try:
+                (tok_flags, token_char_ratio, fingerprint), tok_elapsed = (
+                    tok_future.result(timeout=get_step_timeout("tokenize"))
+                )
+                timer.record("tokenization", tok_elapsed)
+            except FuturesTimeoutError:
+                all_flags.append("timeout_tokenize")
+                return Layer0Result(
+                    rejected=True,
+                    rejection_reason="Processing timeout: tokenization step",
+                    original_length=original_length,
+                    anomaly_flags=all_flags,
+                    source_metadata=source_metadata,
+                    timing=timer.to_dict(),
+                )
+            all_flags.extend(tok_flags)
+
+            # Step 5: Language detection (already running in parallel)
+            lang_result, lang_elapsed = lang_future.result()
+            timer.record("language_detection", lang_elapsed)
+            if lang_result["anomaly_flags"]:
+                all_flags.extend(lang_result["anomaly_flags"])
+            source_metadata["language"] = {
+                "detected": lang_result["detected_language"],
+                "confidence": lang_result["language_confidence"],
+                "is_non_english": lang_result["is_non_english"],
+            }
+
+            # Step 6: PII scanning (already running in parallel)
+            pii_result, pii_elapsed = pii_future.result()
+            timer.record("pii_scan", pii_elapsed)
+            if pii_result.has_pii:
+                all_flags.extend(sorted(pii_result.anomaly_flags))
+                source_metadata["pii_scan"] = {
+                    "has_pii": True,
+                    "pii_types_found": pii_result.pii_types_found,
+                    "pii_count": pii_result.pii_count,
+                    "details": pii_result.details,
+                }
+        finally:
+            pool.shutdown(wait=False)
 
     return Layer0Result(
         sanitized_text=text,
@@ -542,6 +649,7 @@ def _layer0_sanitize_inner(raw_input):
         rejected=False,
         rejection_reason="",
         source_metadata=source_metadata,
+        timing=timer.to_dict(),
     )
 
 
@@ -557,12 +665,15 @@ _MAGIC_TO_DOCTYPE = {
 }
 
 
-def _try_binary_extraction(raw_bytes, flags, metadata):
+def _try_binary_extraction(raw_bytes, flags, metadata, timer=None):
     """Attempt to extract text from binary image/document bytes.
 
     If the bytes match a known image or document signature AND the
     corresponding extraction library is installed, replaces the raw bytes
     with the extracted text string.  Otherwise returns the bytes unchanged.
+
+    For images, OCR and metadata extraction run **in parallel**.
+    For PDFs, text extraction and JavaScript detection run **in parallel**.
 
     Parameters
     ----------
@@ -572,6 +683,8 @@ def _try_binary_extraction(raw_bytes, flags, metadata):
         Accumulated anomaly flags (mutated in place via extend).
     metadata : dict
         Source metadata dict (mutated in place).
+    timer : _PipelineTimer | None
+        Optional timer for recording sub-step durations.
 
     Returns
     -------
@@ -583,15 +696,31 @@ def _try_binary_extraction(raw_bytes, flags, metadata):
     if img_fmt is not None:
         flags.append("image_detected_{}".format(img_fmt))
         metadata["detected_image_format"] = img_fmt
-        ocr_result = extract_text_from_image(raw_bytes)
+
+        # Run OCR and metadata extraction in parallel
+        pool = ThreadPoolExecutor(max_workers=2)
+        try:
+            ocr_future = pool.submit(
+                _timed_call, extract_text_from_image, raw_bytes,
+            )
+            meta_future = pool.submit(
+                _timed_call, extract_image_metadata, raw_bytes,
+            )
+            ocr_result, ocr_elapsed = ocr_future.result()
+            meta_result, meta_elapsed = meta_future.result()
+        finally:
+            pool.shutdown(wait=False)
+
+        if timer:
+            timer.record("ocr_extraction", ocr_elapsed)
+            timer.record("image_metadata_extraction", meta_elapsed)
+
         if ocr_result.warnings:
             for w in ocr_result.warnings:
                 _logger.debug("OCR warning: %s", w)
         metadata["ocr_engine"] = ocr_result.engine
         metadata["ocr_confidence"] = ocr_result.confidence
 
-        # --- EXIF/XMP metadata text extraction ---
-        meta_result = extract_image_metadata(raw_bytes)
         if meta_result.warnings:
             for w in meta_result.warnings:
                 _logger.debug("Image metadata warning: %s", w)
@@ -633,10 +762,37 @@ def _try_binary_extraction(raw_bytes, flags, metadata):
         if dtype:
             flags.append("document_detected_{}".format(dtype))
             metadata["detected_doc_type"] = dtype
-            doc_result = extract_text_from_document(raw_bytes, dtype)
+
+            # For PDFs, run text extraction and JS detection in parallel
+            if dtype == "pdf":
+                pool = ThreadPoolExecutor(max_workers=2)
+                try:
+                    doc_future = pool.submit(
+                        _timed_call, extract_text_from_document,
+                        raw_bytes, dtype,
+                    )
+                    js_future = pool.submit(
+                        _timed_call, detect_pdf_javascript, raw_bytes,
+                    )
+                    doc_result, doc_elapsed = doc_future.result()
+                    js_result, js_elapsed = js_future.result()
+                finally:
+                    pool.shutdown(wait=False)
+
+                if timer:
+                    timer.record("doc_text_extraction", doc_elapsed)
+                    timer.record("pdf_js_detection", js_elapsed)
+
+                if js_result["has_javascript"]:
+                    for js_flag in sorted(js_result["anomaly_flags"]):
+                        if js_flag not in flags:
+                            flags.append(js_flag)
+                    metadata["pdf_js_detection"] = js_result
+            else:
+                doc_result = extract_text_from_document(raw_bytes, dtype)
+
             if doc_result.warnings:
                 for w in doc_result.warnings:
-                    # Extract anomaly flags emitted by detect_pdf_javascript
                     if w.startswith("flag:"):
                         flags.append(w[5:])  # strip "flag:" prefix
                     else:
@@ -645,17 +801,6 @@ def _try_binary_extraction(raw_bytes, flags, metadata):
             metadata["doc_page_count"] = doc_result.page_count
             if doc_result.metadata:
                 metadata["doc_metadata"] = doc_result.metadata
-
-            # Run PDF JavaScript detection directly for PDFs (ensures
-            # detection even when text extraction fails or no PDF lib
-            # is installed -- the byte scan is independent of parsing).
-            if dtype == "pdf":
-                js_result = detect_pdf_javascript(raw_bytes)
-                if js_result["has_javascript"]:
-                    for js_flag in sorted(js_result["anomaly_flags"]):
-                        if js_flag not in flags:
-                            flags.append(js_flag)
-                    metadata["pdf_js_detection"] = js_result
 
             if doc_result.text:
                 flags.append("doc_text_extracted")

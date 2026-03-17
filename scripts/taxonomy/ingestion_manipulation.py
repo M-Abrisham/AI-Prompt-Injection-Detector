@@ -17,10 +17,10 @@ class IngestionManipulationProbe(Probe):
     category_id = "IG"
 
     # Difficulty metadata constants (score: Metasploit-style 100-400)
-    _BASIC = {"difficulty": "basic", "difficulty_score": 100}
-    _MODERATE = {"difficulty": "moderate", "difficulty_score": 200}
-    _ADVANCED = {"difficulty": "advanced", "difficulty_score": 300}
-    _EXPERT = {"difficulty": "expert", "difficulty_score": 400}
+    _BASIC = {"difficulty": "basic", "difficulty_score": 100, "evasion_type": "semantic"}
+    _MODERATE = {"difficulty": "moderate", "difficulty_score": 200, "evasion_type": "semantic"}
+    _ADVANCED = {"difficulty": "advanced", "difficulty_score": 300, "evasion_type": "structural"}
+    _EXPERT = {"difficulty": "expert", "difficulty_score": 400, "evasion_type": "token"}
 
     @staticmethod
     def _ev(base, evasion_type):

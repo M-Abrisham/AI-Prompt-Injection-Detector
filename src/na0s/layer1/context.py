@@ -378,6 +378,10 @@ _CONTEXT_SUPPRESSIBLE = frozenset({
     #   embedded in task sequences are always suspicious.
     # word_concatenation_game: NOT suppressible -- numbered word games
     #   are a known token smuggling vector.
+    # semantic_system_marker: Suppressible -- "IMPORTANT SYSTEM UPDATE"
+    #   and similar phrasing appears in legitimate security training,
+    #   corporate communications, and discussions about structural attacks.
+    "semantic_system_marker",
 })
 
 # Rules that require STRONG contextual framing to suppress -- NOT suppressed

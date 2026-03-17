@@ -1,0 +1,8 @@
+{"timestamp": "2026-03-05T22:06:28.706936+00:00", "passed": true, "accuracy": 1.0, "tpr": 1.0, "tnr": 1.0, "f1": 1.0, "sample_count": 10}
+{"timestamp": "2026-03-05T22:06:28.713798+00:00", "passed": false, "accuracy": 0.5, "tpr": 0.0, "tnr": 1.0, "f1": 0.0, "sample_count": 2}
+{"timestamp": "2026-03-05T22:16:49.175450+00:00", "passed": true, "accuracy": 1.0, "tpr": 1.0, "tnr": 1.0, "f1": 1.0, "sample_count": 10}
+{"timestamp": "2026-03-05T22:16:49.182202+00:00", "passed": false, "accuracy": 0.5, "tpr": 0.0, "tnr": 1.0, "f1": 0.0, "sample_count": 2}
+{"timestamp": "2026-03-06T16:45:06.335472+00:00", "passed": true, "accuracy": 1.0, "tpr": 1.0, "tnr": 1.0, "f1": 1.0, "sample_count": 10}
+{"timestamp": "2026-03-06T16:45:06.339970+00:00", "passed": false, "accuracy": 0.5, "tpr": 0.0, "tnr": 1.0, "f1": 0.0, "sample_count": 2}
+{"timestamp": "2026-03-06T16:54:57.573276+00:00", "passed": true, "accuracy": 1.0, "tpr": 1.0, "tnr": 1.0, "f1": 1.0, "sample_count": 10}
+{"timestamp": "2026-03-06T16:54:57.580180+00:00", "passed": false, "accuracy": 0.5, "tpr": 0.0, "tnr": 1.0, "f1": 0.0, "sample_count": 2}
