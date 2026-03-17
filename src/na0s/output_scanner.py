@@ -16,6 +16,7 @@ from __future__ import annotations
 import codecs
 import dataclasses
 import json
+import logging
 import re
 import base64
 import urllib.parse
@@ -727,9 +728,12 @@ class OutputScanner:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("Output Scanner Demo")
-    print("=" * 60)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    _demo_logger = logging.getLogger("na0s.demo")
+
+    _demo_logger.info("=" * 60)
+    _demo_logger.info("Output Scanner Demo")
+    _demo_logger.info("=" * 60)
 
     scanner = OutputScanner(sensitivity="medium")
 
@@ -764,9 +768,9 @@ if __name__ == "__main__":
             system_prompt=system_prompt,
         )
         status = "SUSPICIOUS" if result.is_suspicious else "CLEAN"
-        print(f"\n[{status}] {tc['label']}")
-        print(f"  Risk score: {result.risk_score}")
-        print(f"  Technique IDs: {result.technique_ids}")
+        _demo_logger.info(f"\n[{status}] {tc['label']}")
+        _demo_logger.info(f"  Risk score: {result.risk_score}")
+        _demo_logger.info(f"  Technique IDs: {result.technique_ids}")
         if result.flags:
             for flag in result.flags:
-                print(f"    - {flag}")
+                _demo_logger.info(f"    - {flag}")

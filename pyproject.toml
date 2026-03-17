@@ -54,6 +54,7 @@ dependencies = [
 [project.optional-dependencies]
 embedding = [
     "sentence-transformers>=2.2",
+    "faiss-cpu>=1.7.4",
 ]
 ocr = [
     "easyocr>=1.7",

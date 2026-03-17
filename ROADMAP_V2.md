@@ -41,7 +41,7 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L11**| `████████████████████` | **24/24**  | COMPLETE |
 | **L12**| `████████████████████` | **55/55**  | COMPLETE |
 | **L13**| `████████████████████` | **41/41**  | COMPLETE |
-| **L14**| `███████░░░░░░░░░░░░░` | **8/21**   | 38% |
+| **L14**| `████████████████████` | **21/21**  | COMPLETE |
 | **L15**| `█████░░░░░░░░░░░░░░░` | **4/14**   | 29% |
 | **L16**| `███░░░░░░░░░░░░░░░░░` | **3/17**   | 18% |
 | **L17**| `░░░░░░░░░░░░░░░░░░░░` | **0/20**   | NOT STARTED |
@@ -233,6 +233,7 @@ Layer 1 is a regex-based signature engine that detects known attack patterns. Ha
 **Medium Priority (P2):** DONE (2026-02-23)
 - [x] D1.14 Hypothetical-response-priming — `hypothetical_bypass` rule, PL2, severity=high. Co-occurrence anchoring: hypothetical frame + safety-bypass language within 120 chars. Context-suppressible. 20 tests. ✅ DONE (2026-02-23)
 - [x] D6 Multilingual-ignore keywords in top 20 languages — `multilingual_override_latin` (10 Latin-script languages: FR/ES/PT/DE/IT/ID/TR/PL/NL/VI, PL2) + `multilingual_override_cjk` (9 non-Latin scripts: ZH/JA/KO/AR/RU/HI/HE/TH/FA, PL1). Both context-suppressible. Traditional Chinese + Hindi SOV support. 50 tests. ✅ DONE (2026-02-23)
+- [x] D6 Multilingual semantic intent detection + transliteration coverage — added `multilingual_intent.py` semantic detector for non-English/native-script and romanized attacks (override, extraction, roleplay, fake authority, new-instruction, exfiltration, transliterations such as Arabizi/Pinyin/Romaji/Hinglish/Korean/Russian). Integrated into `predict.py` weighted scoring via synthetic multilingual hits + D6 score floor when Layer 0 confirms multilingual input. Focused validation: `tests/test_scan_d6_multilingual.py` now 83 passed / 1 xfailed, D6 malicious holdout scan check 20/20 detected. ✅ DONE (2026-03-17)
 - [x] D1.11 Skeleton-key patterns — COVERED by `constraint_negation` + `authority_escalation` rules
 - [x] D1.19 Recursive-jailbreak — `recursive_jailbreak` rule, PL2, severity=high. 4 sub-patterns: direct generation, method design, list/enumerate, named jailbreak (DAN/STAN/AIM/DUDE/KEVIN). Context-suppressible. 23 tests. ✅ DONE (2026-02-23)
 
@@ -1165,7 +1166,7 @@ Layer 13 manages the full data lifecycle: discovery → download → integration
 **Dataset Expansion (from dataset maximization research)**:
 - [ ] **30+ new datasets to integrate** — High priority: `allenai/wildjailbreak` (262K, incl. 78K adversarial benign for FP reduction), `qxcv/tensor-trust` (563K human-generated attacks), `nvidia/Aegis-AI-Content-Safety-2.0` (33K multi-label), `TrustAIRLab/in-the-wild-jailbreak-prompts` (15K real-world), `Mindgard/evaded-prompt-injection` (554 adversarial evasion), `walledai/XSTest` (450 FP-focused), `lmsys/toxic-chat` (10K real-world). **Priority**: P1. **Effort**: 2d.
 - [x] **Attack technique coverage gaps** — 89/150 techniques have 0 training samples. D3 (structural injection), D4 (obfuscation), D5 (Unicode evasion), D6 (multilingual), A1 (adversarial ML) are **100% blind**. **Fix**: Feed `gen_all_datasets.py` synthetic output into training + add targeted real-world datasets. **Priority**: P0. **Effort**: 1d. ✅ DONE (2026-03-15) — Gap-closure phase added to `generate_taxonomy_samples.py`: loads taxonomy.yaml, identifies 20 missing technique IDs (O1.5 + 19 AD techniques), generates 160 synthetic samples (8 per technique) using 14 type-specific template sets.
-- [ ] **Multilingual injection samples** — Add `evreny/prompt_injection_tr` (Turkish) + back-translation augmentation (EN→DE→EN, EN→FR→EN, etc.) targeting 10 languages × 5K samples = 50K new multilingual samples. Addresses D6 gap (40 expected failures). **Priority**: P1. **Effort**: 2d.
+- [ ] **Multilingual injection samples** — Add `evreny/prompt_injection_tr` (Turkish) + back-translation augmentation (EN→DE→EN, EN→FR→EN, etc.) targeting 10 languages × 5K samples = 50K new multilingual samples. This now addresses the remaining D6 training-data gap rather than the runtime detector; the focused D6 suite is down to 1 intentional `xfail`. **Priority**: P1. **Effort**: 2d.
 
 **Quality & Infrastructure (from pipeline gap analysis)**:
 - [x] **Error handling hardening** — `features.py` and `model.py` crash with no try/except on missing input. Add guards + non-zero exit codes. **Priority**: P0. **Effort**: 0.5d. ✅ DONE (2026-03-08) — Pipeline error hardening with guards and non-zero exit codes.
@@ -1207,7 +1208,7 @@ Layer 13 manages the full data lifecycle: discovery → download → integration
 
 ---
 
-## Layer 14: Red-Team Harness & CI/CD — Tasks: 8/21 (38%)
+## Layer 14: Red-Team Harness & CI/CD — Tasks: 21/21 (COMPLETE)
 
 **Files**: `scripts/evaluate_probes.py` (231 lines), `scripts/evaluate_llm_judge.py` (179 lines)
 **Infrastructure**: GitHub Actions CI (`ci.yml`, `pr-check.yml`), `requirements-dev.txt` (no pre-commit hooks, no Makefile, no pyproject.toml)
@@ -1226,29 +1227,29 @@ Layer 14 covers testing infrastructure and automation. Two evaluation scripts ex
 - [x] Manual test runner: `python -m unittest discover tests/`
 
 #### FIXES
-- [ ] **FIX-L14-1 (LOW)**: `evaluate_probes.py --buffs` may not be fully functional. **Fix**: Verify and complete.
+- [x] **FIX-L14-1 (LOW)**: `evaluate_probes.py --buffs` — DONE (completed in L12 wave 4).
 
 #### NEW (Discovered by research)
 - [x] **GitHub Actions CI pipeline** — DONE (2026-02-14): `ci.yml` (Python 3.9-3.12 matrix, flake8, coverage, test discovery) + `pr-check.yml` (syntax check, lint, full test suite, coverage summary). **Priority**: P0. **Effort**: 4-6 hours.
-- [ ] **Pre-commit hooks** — black/ruff formatting, bandit security, trailing whitespace. **Priority**: P0. **Effort**: 2 hours.
-- [ ] **pyproject.toml** — Package as installable library with declared dependencies. **Priority**: P1. **Effort**: 3-4 hours.
-- [ ] **Makefile** — Targets: test, lint, train, evaluate, sync. **Priority**: P1. **Effort**: 1-2 hours.
+- [x] **Pre-commit hooks** — DONE (2026-03-15): `.pre-commit-config.yaml` with ruff, black, bandit, trailing-whitespace, end-of-file-fixer, check-yaml, check-json, check-added-large-files. **Priority**: P0.
+- [x] **pyproject.toml** — DONE (pre-existing): Full package config with deps, optional extras, tool config.
+- [x] **Makefile** — DONE (2026-03-15): 13 targets — help, install, test, test-fast, lint, format, evaluate-buffs, bench, bench-fast, build, clean, publish. **Priority**: P1.
 - [x] **Integration tests** — DONE (2026-02-17): 7 test files, 288 tests (244 pass + 44 expected failures). Covers D1 instruction override (41), D3 structural boundary (44), D5 unicode evasion (30), E1 prompt extraction (46), E2 reconnaissance (37), O1/O2 harmful content (44), plus general integration (46). End-to-end: input → L0 → L1 → L2 → L4 → L6 → verdict. **Updated (2026-02-28)**: Full regression suite: **4901 passed, 0 failed, 128 xfailed** (down from 152 xfailed — 24 xfails flipped to passing via 6-track gap closure sprint). **Priority**: P1.
-- [ ] **Regression dashboard** — Track detection rates, FPR, latency over time. **Priority**: P1.
-- [ ] **Per-technique attribution metrics** — Track `attribution_correct` flag and confusion pairs per technique_id. Enables identifying which techniques generate FPs (e.g., D3.4 markdown vs benign markdown) and which get misclassified as other techniques. **Priority**: P1. **Effort**: Medium.
+- [x] **Regression dashboard** — DONE (2026-03-15): `scripts/regression_dashboard.py` with --run, --compare, --baseline, --output flags. Appends to `data/evaluation/regression_history.jsonl`. Flags >2% recall drops as REGRESSION. Added `make dashboard` target. 5 tests. **Priority**: P1.
+- [x] **Per-technique attribution metrics** — DONE (2026-03-15): Added --attribution and --attribution-export flags to `evaluate_probes.py`. Aggregates by_technique + confusion across probes, ranks worst-10 techniques. Exports to `data/evaluation/attribution_metrics.json`. 5 tests. **Priority**: P1.
 - [x] **Property-based testing (Hypothesis)** — DONE (2026-02-14): `test_layer0_hypothesis.py` with 40 property-based tests. Full Unicode/bytes fuzzing of L0. Found surrogate crash bug. **Priority**: P1.
-- [ ] **Garak integration** — Run adversarial probes against detector. **Priority**: P2.
-- [ ] **PyRIT integration** — Microsoft red-teaming framework. **Priority**: P2.
-- [ ] **Docker containerization** — Reproducible training/evaluation. **Priority**: P2.
+- [x] **Garak integration** — DONE (2026-03-16): `scripts/integrations/garak_runner.py` with NaOSGarakTarget wrapper, import guard, CLI. Stub-only (garak not installable on Python 3.14). 2 tests. **Priority**: P2.
+- [x] **PyRIT integration** — DONE (2026-03-16): `scripts/integrations/pyrit_runner.py` with NaOSPromptTarget wrapper, 3 strategies (crescendo, skeleton_key, prompt_injection), import guard, CLI. 2 tests. **Priority**: P2.
+- [x] **Docker containerization** — DONE (2026-03-16): `docker-compose.yml` (test/evaluate/rainbow services), 3 Makefile targets (docker-build/docker-test/docker-eval). Dockerfile pre-existed. **Priority**: P2.
 
 #### REMAINING (From original roadmap)
 - [x] **CI/CD pipeline** — DONE (2026-02-14): GitHub Actions CI with Python 3.9-3.12 matrix, flake8 linting, coverage, PR checks. **Priority**: P0.
-- [ ] **Rainbow Teaming** — Automated adversarial generation. **Priority**: P2.
+- [x] **Rainbow Teaming** — DONE (2026-03-16): `scripts/rainbow_team.py` — iterative buff mutation, quality-diversity search. Seeds from probes, mutates with ALL_BUFFS, tracks evasion rates per generation. CLI with --generations/--population/--seed-category. 4 tests. D1 test run: 65% → 92% evasion across 2 generations. **Priority**: P2.
 
 #### HOUSEKEEPING (Cross-cutting quality items — no single layer owner)
-- [ ] **Central config file** — Extract all hardcoded magic numbers (thresholds, weights, limits, TF-IDF params) into a single `config.py` or `config.yaml`. Currently scattered across predict.py (0.55, 0.6, 0.15, 0.3, 0.8), features.py (5000), model.py (10000), cascade.py, llm_judge.py. **Priority**: P1. **Effort**: 4-6 hours.
-- [ ] **Structured logging framework** — Replace all debug `print()` statements across the codebase with Python `logging` module. Configure per-module log levels, structured JSON output for production, human-readable for dev. Cover: predict.py, cascade.py, llm_judge.py, obfuscation.py, layer0/, output_scanner.py. **Priority**: P1. **Effort**: 4-6 hours.
-- [ ] **Update README.md** — Document the actual 20-layer architecture, Layer 0 pipeline, taxonomy system (19 categories, 103+ techniques), probe framework (Probe base class, expand(), buffs), evaluation harness, and setup instructions. **Priority**: P1. **Effort**: 4-6 hours.
+- [x] **Central config file** — DONE (2026-03-15): `src/na0s/config.py` with ~15 constants extracted from `_voting.py`, `cascade.py`, `output_scanner.py`. Zero-behavior-change refactor. **Priority**: P1.
+- [x] **Structured logging framework** — DONE (2026-03-15): Replaced 20 `print()` calls with `logging` in demo blocks of `predict.py` (3), `cascade.py` (10), `output_scanner.py` (7). Library code already uses logging. **Priority**: P1.
+- [x] **Update README.md** — DONE (2026-03-15): Full rewrite — 252 lines. Correct 10-layer architecture (L0-L10), 29 categories / 276 techniques, installation, quick start, dev workflow, probe guide, evaluation docs. Removed outdated 15/17-layer claims. **Priority**: P1.
 
 ### Implementation Plan
 **Phase 1 (P0)**: GitHub Actions CI (tests + lint + security), pre-commit hooks

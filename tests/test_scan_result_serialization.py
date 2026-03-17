@@ -39,6 +39,8 @@ class TestScanResultToDict:
             "judge_reasoning",
             "output_scan_flags",
             "output_scan_risk",
+            "canary_triggered",
+            "canary_leaks",
             "elapsed_ms",
         }
         assert set(d.keys()) == expected_keys

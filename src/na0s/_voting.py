@@ -36,6 +36,7 @@ import logging
 import os
 
 from .rules import RULES, SEVERITY_WEIGHTS
+from .multilingual_intent import HEURISTIC_HITS as _HEURISTIC_HITS
 from .signal_boost import calculate_boost_from_names
 
 _logger = logging.getLogger(__name__)
@@ -136,9 +137,15 @@ FP_EXEMPT_HITS = frozenset({
 RULE_SEVERITY = {rule.name: rule.severity for rule in RULES}
 RULE_SEVERITY["decoded_payload_malicious"] = "critical"
 RULE_SEVERITY["decoded_escape_malicious"] = "critical"
+RULE_SEVERITY.update({
+    name: meta["severity"] for name, meta in _HEURISTIC_HITS.items()
+})
 
 #: Rule name -> technique_ids lookup for technique-family boost.
 RULE_TECHNIQUE_IDS = {rule.name: rule.technique_ids for rule in RULES}
+RULE_TECHNIQUE_IDS.update({
+    name: list(meta["technique_ids"]) for name, meta in _HEURISTIC_HITS.items()
+})
 
 #: Structural feature weights (Layer 3 binary signals).
 STRUCTURAL_SIGNAL_WEIGHTS = {
@@ -150,6 +157,41 @@ STRUCTURAL_SIGNAL_WEIGHTS = {
 
 #: Multi-layer agreement boost values by number of agreeing layers.
 AGREEMENT_BOOST = {2: 0.10, 3: 0.12, 4: 0.15}
+
+
+# ── Shared Composite Helper (Phase A) ───────────────────────────────────
+
+
+def _weighted_composite(
+    ml_prob_malicious: float,
+    ml_weight: float,
+    rule_weight: float,
+    obf_weight: float,
+) -> float:
+    """Compute additive weighted composite from ML, rule, and obfuscation signals.
+
+    This is the shared arithmetic core used by both predict.py's
+    _weighted_decision() and cascade.py's WeightedClassifier.classify().
+
+    The formula is ADDITIVE (not normalized):
+        composite = (ml_weight * ml_prob_malicious) + rule_weight + obf_weight
+
+    Callers are responsible for:
+      - Converting ML probability to the malicious-probability axis
+      - Computing rule_weight from severity weights
+      - Computing obf_weight from obfuscation flags (capped)
+      - Adding structural features, boosts, overrides, and clamping AFTER
+
+    Args:
+        ml_prob_malicious: ML probability of malicious class (0.0-1.0)
+        ml_weight:  multiplier for ML signal (typically 0.6)
+        rule_weight: accumulated rule severity score (from SEVERITY_WEIGHTS)
+        obf_weight: obfuscation signal weight (typically capped at 0.3)
+
+    Returns:
+        Raw additive composite (unclamped, unboosted).
+    """
+    return (ml_weight * ml_prob_malicious) + rule_weight + obf_weight
 
 
 # ── Core Weighted Decision ───────────────────────────────────────────────
@@ -342,35 +384,3 @@ def weighted_decision(
     if composite >= threshold:
         return "MALICIOUS", composite
     return "SAFE", composite
-
-
-def _weighted_composite(
-    ml_prob_malicious: float,
-    ml_weight: float,
-    rule_weight: float,
-    obf_weight: float,
-) -> float:
-    """Compute additive weighted composite from ML, rule, and obfuscation signals.
-
-    This is the shared arithmetic core used by both predict.py's
-    _weighted_decision() and cascade.py's WeightedClassifier.classify().
-
-    The formula is ADDITIVE (not normalized):
-        composite = (ml_weight * ml_prob_malicious) + rule_weight + obf_weight
-
-    Callers are responsible for:
-      - Converting ML probability to the malicious-probability axis
-      - Computing rule_weight from severity weights
-      - Computing obf_weight from obfuscation flags (capped)
-      - Adding structural features, boosts, overrides, and clamping AFTER
-
-    Args:
-        ml_prob_malicious: ML probability of malicious class (0.0-1.0)
-        ml_weight:  multiplier for ML signal (typically 0.6)
-        rule_weight: accumulated rule severity score (from SEVERITY_WEIGHTS)
-        obf_weight: obfuscation signal weight (typically capped at 0.3)
-
-    Returns:
-        Raw additive composite (unclamped, unboosted).
-    """
-    return (ml_weight * ml_prob_malicious) + rule_weight + obf_weight

@@ -231,6 +231,78 @@ def _select_probes(probe_ids):
     return selected
 
 
+def _print_attribution_summary(probe_results):
+    """Print worst-performing techniques by recall."""
+    # Aggregate by_technique across all probes
+    technique_stats = {}
+    for probe_result in probe_results:
+        by_tech = probe_result.get("by_technique", {})
+        confusion = probe_result.get("confusion", {})
+        for tech_id, stats in by_tech.items():
+            if tech_id not in technique_stats:
+                technique_stats[tech_id] = {"detected": 0, "missed": 0, "attributed": 0, "confusion": {}}
+            technique_stats[tech_id]["detected"] += stats.get("detected", 0)
+            technique_stats[tech_id]["missed"] += stats.get("missed", 0)
+            technique_stats[tech_id]["attributed"] += stats.get("attributed", 0)
+            # Merge confusion
+            if tech_id in confusion:
+                for predicted, count in confusion[tech_id].items():
+                    technique_stats[tech_id]["confusion"][predicted] = (
+                        technique_stats[tech_id]["confusion"].get(predicted, 0) + count
+                    )
+
+    # Compute recall and attribution_rate per technique
+    techniques = []
+    for tech_id, stats in technique_stats.items():
+        total = stats["detected"] + stats["missed"]
+        recall = stats["detected"] / total if total > 0 else 0.0
+        attr_rate = stats["attributed"] / stats["detected"] if stats["detected"] > 0 else 0.0
+        # Top 3 confusion pairs (exclude self-attribution)
+        confusion_pairs = [
+            {"predicted": pred, "true": tech_id, "count": cnt}
+            for pred, cnt in sorted(stats["confusion"].items(), key=lambda x: -x[1])
+            if pred != tech_id and pred != "_none"
+        ][:3]
+        techniques.append({
+            "technique_id": tech_id,
+            "recall": round(recall, 4),
+            "attribution_rate": round(attr_rate, 4),
+            "detected": stats["detected"],
+            "total": total,
+            "confusion_pairs": confusion_pairs,
+        })
+
+    # Sort by recall ascending (worst first)
+    techniques.sort(key=lambda t: t["recall"])
+    worst_10 = techniques[:10]
+
+    # Print table
+    print("\n=== Attribution Summary ===")
+    print(f"{'technique_id':<15} {'recall':>8} {'attr_rate':>10} {'detected':>10} {'total':>8}  confusion_top3")
+    print("-" * 80)
+    for t in worst_10:
+        conf_str = ", ".join(f"{p['predicted']}({p['count']})" for p in t["confusion_pairs"]) or "—"
+        print(f"{t['technique_id']:<15} {t['recall']:>8.3f} {t['attribution_rate']:>10.3f} {t['detected']:>10} {t['total']:>8}  {conf_str}")
+
+    return {"techniques": {t["technique_id"]: t for t in techniques}, "worst_10": [t["technique_id"] for t in worst_10]}
+
+
+def _export_attribution(attribution_data):
+    """Write attribution metrics to JSON file."""
+    import datetime
+    out_dir = os.path.join(os.path.dirname(__file__), "..", "data", "evaluation")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, "attribution_metrics.json")
+    export = {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "techniques": attribution_data["techniques"],
+        "worst_10": attribution_data["worst_10"],
+    }
+    with open(out_path, "w") as f:
+        json.dump(export, f, indent=2)
+    print(f"\nAttribution metrics exported to {out_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate taxonomy probes")
     parser.add_argument("--probes", nargs="*", default=None,
@@ -246,6 +318,10 @@ def main():
     parser.add_argument("--buff-samples", type=int, default=20,
                         help="Max samples per probe in buff matrix (default: 20)")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--attribution", action="store_true",
+                        help="Print per-technique attribution summary")
+    parser.add_argument("--attribution-export", action="store_true",
+                        help="Export attribution metrics to data/evaluation/attribution_metrics.json")
     args = parser.parse_args()
 
     print("Loading model...")
@@ -317,6 +393,12 @@ def main():
         with open(json_path, "w") as f:
             json.dump(report, f, indent=2)
         print("\nResults written to: {}".format(json_path))
+
+    # Attribution summary
+    if args.attribution:
+        attribution_data = _print_attribution_summary(all_results)
+        if args.attribution_export:
+            _export_attribution(attribution_data)
 
 
 if __name__ == "__main__":
