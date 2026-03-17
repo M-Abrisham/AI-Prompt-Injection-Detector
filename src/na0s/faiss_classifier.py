@@ -38,18 +38,31 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Graceful import: faiss-cpu is an optional dependency
 # ---------------------------------------------------------------------------
-try:
-    import faiss
-    import numpy as np
+# Defer faiss import to avoid SWIG side-effects at module load time
+# (SWIG shared libs can interfere with SQLite thread-safety).
+import numpy as np
 
-    _HAS_FAISS = True
-except ImportError:
-    _HAS_FAISS = False
-    # numpy may still be available but we need faiss for this module
-    try:
-        import numpy as np
-    except ImportError:
-        pass
+_faiss = None  # lazy-loaded module reference
+_HAS_FAISS = None  # tri-state: None=unchecked, True/False=resolved
+
+
+def _get_faiss():
+    """Lazily import faiss on first use."""
+    global _faiss, _HAS_FAISS
+    if _HAS_FAISS is None:
+        try:
+            import faiss as _f
+            _faiss = _f
+            _HAS_FAISS = True
+        except ImportError:
+            _HAS_FAISS = False
+    return _faiss
+
+
+def _faiss_available() -> bool:
+    """Check if faiss-cpu is installed (triggers lazy import)."""
+    _get_faiss()
+    return bool(_HAS_FAISS)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -137,7 +150,7 @@ class FAISSClassifier:
             1-D array of integer labels (one per embedding). Typically
             all 1 (malicious) when building an attack-only index.
         """
-        if not _HAS_FAISS:
+        if not _faiss_available():
             raise RuntimeError(
                 "faiss-cpu is required to build a FAISS index. "
                 "Install it with: pip install faiss-cpu"
@@ -146,7 +159,7 @@ class FAISSClassifier:
         embeddings = _l2_normalize(embeddings)
         dim = embeddings.shape[1]
 
-        index = faiss.IndexFlatIP(dim)
+        index = _get_faiss().IndexFlatIP(dim)
         index.add(embeddings)
 
         self._index = index
@@ -174,12 +187,12 @@ class FAISSClassifier:
         path : str
             Output path for the FAISS index file.
         """
-        if not _HAS_FAISS:
+        if not _faiss_available():
             raise RuntimeError("faiss-cpu is required to save a FAISS index.")
         if self._index is None:
             raise RuntimeError("No index to save. Call build_index() first.")
 
-        faiss.write_index(self._index, path)
+        _get_faiss().write_index(self._index, path)
 
         labels_path = path + ".labels.pkl"
         with open(labels_path, "wb") as f:
@@ -196,10 +209,10 @@ class FAISSClassifier:
             Path to the FAISS index file. Labels are expected at
             ``path + '.labels.pkl'``.
         """
-        if not _HAS_FAISS:
+        if not _faiss_available():
             raise RuntimeError("faiss-cpu is required to load a FAISS index.")
 
-        self._index = faiss.read_index(path)
+        self._index = _get_faiss().read_index(path)
 
         labels_path = path + ".labels.pkl"
         with open(labels_path, "rb") as f:
@@ -341,7 +354,7 @@ class FAISSClassifier:
         -------
         bool
         """
-        if not _HAS_FAISS:
+        if not _faiss_available():
             return False
         path = index_path or DEFAULT_INDEX_PATH
         return os.path.exists(path)
