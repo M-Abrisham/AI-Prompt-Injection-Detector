@@ -12,11 +12,15 @@ to the original classify_prompt() pipeline while maintaining high recall on
 genuinely malicious inputs.
 """
 
+import logging
+import os
 import re
+import time
+import threading
 from typing import Dict, List, Optional, Tuple
 
 from .safe_pickle import safe_load
-from .predict import _get_cached_models
+from .predict import _get_cached_models, _get_cached_scaler, _transform, _get_model_version
 from .rules import rule_score, rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .config import THRESHOLDS
 from ._voting import _weighted_composite
@@ -25,8 +29,71 @@ from .layer0 import layer0_sanitize
 from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult
 from .models import get_model_path
+from .signal_boost import calculate_boost
+from ._voting import weighted_decision as _voting_weighted_decision
+from .complexity_router import (
+    assess_complexity, get_pipeline_stages, is_adaptive_routing_enabled,
+    ComplexityLevel,
+)
+
+_logger = logging.getLogger(__name__)
+
+# Layer 6: RRF fusion — optional alternative to linear weighted voting
+from .rrf_fusion import rrf_score as _rrf_score, rrf_decision as _rrf_decision
+
+# Layer 6: Groundedness check
+from .groundedness import verify_verdict_grounded as _verify_grounded
+
+# Layer 6: Bayesian fusion — optional alternative
+try:
+    from .bayesian_fusion import BayesianFusion, DEFAULT_LIKELIHOOD_RATIOS
+    _HAS_BAYESIAN = True
+except ImportError:
+    _HAS_BAYESIAN = False
+
+# Layer 6: Stacking meta-learner — optional
+try:
+    from .stacking_classifier import StackingMetaLearner
+    _HAS_STACKING = True
+except ImportError:
+    _HAS_STACKING = False
+
+# Layer 6: Performance SLO tracking
+from .performance_slo import SLOTracker
+
+# Layer 6: Evidence grading
+from .evidence_grading import filter_graded_hits
+
+# ---------------------------------------------------------------------------
+# Valid cascade stage names and dependency ordering
+# ---------------------------------------------------------------------------
+
+#: All recognised stage names in canonical order.
+VALID_STAGES = [
+    "whitelist", "ml_basic", "weighted", "embedding",
+    "late_chunking", "judge",
+]
+
+#: Default stage list (current behavior).
+DEFAULT_STAGES = ["whitelist", "weighted", "judge"]
+
+# Paranoid-mode uncertain zone boundaries.
+_PARANOID_LOWER = 0.35
+_PARANOID_UPPER = 0.65
+
+# Layer 3: Structural features — optional import
+try:
+    from .structural_features import extract_structural_features
+    _HAS_STRUCTURAL = True
+except ImportError:
+    _HAS_STRUCTURAL = False
 
 # Layer 5: Embedding-based classifier — optional import
+# DEPRECATED PATH: This import supports the legacy ``enable_embedding=True``
+# code path (Path B below) which does ad-hoc 60/40 blending of the embedding
+# result with the TF-IDF weighted result.  New callers should prefer
+# ``enable_ensemble=True`` (Path A) which uses ensemble.py for a principled
+# weighted average of calibrated probabilities from both models.
 try:
     from .predict_embedding import classify_prompt_embedding, load_models as _load_embedding_models
     _HAS_EMBEDDING = True
@@ -34,6 +101,9 @@ except ImportError:
     _HAS_EMBEDDING = False
 
 # Layer 4+5 Ensemble — optional import
+# CANONICAL PATH: This is the recommended way to combine TF-IDF and embedding
+# signals.  Uses ensemble.py which does a proper weighted average of
+# calibrated P(malicious) from both models.
 try:
     from .ensemble import ensemble_scan as _ensemble_scan
     _HAS_ENSEMBLE = True
@@ -254,14 +324,19 @@ class WeightedClassifier:
             payloads visible only before normalization (FIX-5).
         """
         # --- ML prediction ---
-        X = vectorizer.transform([text])
+        scaler = _get_cached_scaler()
+        X = _transform(text, vectorizer, scaler)
         prediction = model.predict(X)[0]
         proba = model.predict_proba(X)[0]
-        # Probability of the malicious class (class index 1)
-        if len(proba) > 1:
-            ml_prob = proba[1]
+        # Fix proba[1] fragility: derive ml_prob and ml_label correctly
+        # from the model's own prediction rather than assuming class index 1.
+        import numpy as np
+        if isinstance(prediction, (int, np.integer)):
+            prediction = int(prediction)
+            ml_label = "MALICIOUS" if prediction == 1 else "SAFE"
         else:
-            ml_prob = proba[0] if prediction == 1 else 1.0 - proba[0]
+            ml_label = str(prediction)
+        ml_prob = float(max(proba))  # confidence in predicted class
 
         # --- Rule hits ---
         # FIX-5: Run rules on sanitized text AND raw text (if different).
@@ -274,68 +349,79 @@ class WeightedClassifier:
                     hit_names_seen.add(rh.name)
         hit_names = [h.name for h in detailed_hits]
 
-        rule_weight = 0.0
-        max_severity = "medium"
-        for hit in detailed_hits:
-            w = SEVERITY_WEIGHTS.get(hit.severity, 0.1)
-            rule_weight += w
-            # Track the highest severity for override protection.
-            # critical_content is even more specific than critical (near-zero
-            # FP rate) so it must also prevent ML-trust overrides.
-            if hit.severity in ("critical", "critical_content"):
-                max_severity = "critical"
-            elif hit.severity == "high" and max_severity != "critical":
-                max_severity = "high"
-
         # --- Obfuscation flags ---
         obs = obfuscation_scan(text)
         obfuscation_flags = obs.get("evasion_flags", [])
-        hit_names.extend(obfuscation_flags)
+        # BUG-L2-03 FIX: Do NOT extend hit_names with obs_flags before
+        # calling _voting.  obs_flags are scored separately as obf_weight;
+        # adding them to hits would double-count them as medium-severity rules.
+        # They are added to hit_names AFTER the _voting call for reporting.
 
-        obf_weight = min(
-            len(obfuscation_flags) * self.OBFUSCATION_WEIGHT_PER_FLAG,
-            self.OBFUSCATION_WEIGHT_CAP,
-        )
+        # --- Layer 3: Structural features (Phase 3a) ---
+        structural = None
+        if _HAS_STRUCTURAL:
+            try:
+                structural = extract_structural_features(text)
+            except Exception:
+                structural = None
 
-        # --- Composite score (Phase A: shared helper) ---
-        final_score = _weighted_composite(
-            ml_prob, self.ML_WEIGHT, rule_weight, obf_weight,
-        )
-
-        # --- Combined signal boosting ---
-        # When persona hijack AND encoded payload signals co-occur in the
-        # same message, apply an extra boost.  See predict.py for rationale.
-        _COMBINED_SIGNAL_BOOST = THRESHOLDS.COMBINED_SIGNAL_BOOST
-        has_persona_signal = "roleplay" in hit_names_seen
-        has_encoding_signal = bool(obfuscation_flags)
-        if has_persona_signal and has_encoding_signal:
-            final_score += _COMBINED_SIGNAL_BOOST
-
-        # Clamp to [0, 1]
-        final_score = max(0.0, min(1.0, final_score))
-
-        # --- Override protection ---
-        # If ML is highly confident it is safe AND only medium-severity
-        # rules triggered AND the composite score is below the threshold,
-        # trust the ML model.  BUG-L6-2 fix: only override when composite
-        # < threshold; otherwise a valid MALICIOUS decision is suppressed.
-        ml_safe_confidence = 1.0 - ml_prob
-        if (ml_safe_confidence > 0.8
-                and max_severity == "medium"
-                and obf_weight == 0.0
-                and final_score < self.threshold):
-            return "SAFE", round(1.0 - final_score, 4), hit_names
-
-        # --- Threshold decision ---
-        # BUG-L6-4 note: confidence semantics are P(label correct):
-        #   MALICIOUS -> confidence = final_score (composite malicious probability)
-        #   SAFE      -> confidence = 1.0 - final_score (probability it's truly safe)
-        # This is intentional: callers always get "how confident are we in
-        # this label?" regardless of which label was chosen.
-        if final_score >= self.threshold:
-            return "MALICIOUS", round(final_score, 4), hit_names
+        # --- Delegate to canonical weighted voting logic ---
+        # _voting.weighted_decision handles ALL scoring: ML signal, rule
+        # severity, obfuscation weight, structural features, signal boost,
+        # override protection, agreement boost, technique-family boost.
+        #
+        # Layer 6 RRF alternative: When NA0S_USE_RRF=1, use Reciprocal
+        # Rank Fusion instead of the linear weighted sum.
+        if os.environ.get("NA0S_USE_RRF") == "1":
+            rrf_signals = {"ml": ml_prob_malicious}
+            if hit_names:
+                from .rules import SEVERITY_WEIGHTS as _sw
+                rule_w = 0.0
+                for hn in hit_names:
+                    sev = {r.name: r.severity for r in RULES}.get(hn, "medium")
+                    rule_w += _sw.get(sev, 0.1)
+                rrf_signals["rules"] = min(rule_w, 1.0)
+            if obfuscation_flags:
+                rrf_signals["obfuscation"] = min(0.15 * len(obfuscation_flags), 0.3)
+            if structural is not None:
+                from ._voting import STRUCTURAL_SIGNAL_WEIGHTS as _ssw
+                sw = sum(
+                    w for feat, w in _ssw.items()
+                    if structural.get(feat, 0)
+                )
+                if sw > 0:
+                    rrf_signals["structural"] = min(sw, 1.0)
+            label, composite = _rrf_decision(
+                rrf_signals, threshold=self.threshold,
+            )
         else:
-            return "SAFE", round(1.0 - final_score, 4), hit_names
+            label, composite = _voting_weighted_decision(
+                ml_prob=ml_prob,
+                ml_label=ml_label,
+                hits=hit_names,
+                obs_flags=obfuscation_flags,
+                structural=structural,
+                threshold=self.threshold,
+            )
+
+        # Add obs flags and boost reasons to returned hits for reporting.
+        # These are AFTER the _voting call to avoid double-counting.
+        hit_names.extend(obfuscation_flags)
+        _boost_score, boost_reasons = calculate_boost(
+            detailed_hits, obfuscation_flags,
+        )
+        hit_names.extend(boost_reasons)
+
+        # --- Convert composite to P(label correct) for cascade API ---
+        # BUG-L6-4 note: confidence semantics are P(label correct):
+        #   MALICIOUS -> confidence = composite (composite malicious probability)
+        #   SAFE      -> confidence = 1.0 - composite (probability it's truly safe)
+        if label == "MALICIOUS":
+            confidence = round(composite, 4)
+        else:
+            confidence = round(1.0 - composite, 4)
+
+        return label, confidence, hit_names
 
 
 # ---------------------------------------------------------------------------
@@ -383,19 +469,59 @@ class CascadeClassifier:
     def __init__(self, vectorizer=None, model=None, llm_judge=None,
                  enable_embedding=False, enable_positive_validation=True,
                  enable_canary=False, enable_output_scanner=True,
-                 enable_ensemble=False):
+                 enable_ensemble=False, paranoid_mode=False,
+                 stages=None):
         self._vectorizer = vectorizer
         self._model = model
         self._whitelist = WhitelistFilter()
         self._weighted = WeightedClassifier()
         self._judge = llm_judge  # Optional LLMJudge or LLMJudgeWithCircuitBreaker
 
+        # Layer 6: Paranoid confidence mode — "if unsure, block"
+        # Env var overrides constructor parameter.
+        self._paranoid_mode = (
+            os.environ.get("NA0S_PARANOID_MODE", "0") == "1"
+            or paranoid_mode
+        )
+
+        # Layer 6: Configurable stage pipeline
+        # Env var overrides constructor parameter.
+        env_stages = os.environ.get("NA0S_CASCADE_STAGES")
+        if env_stages is not None:
+            self._stages = [s.strip() for s in env_stages.split(",") if s.strip()]
+        elif stages is not None:
+            self._stages = list(stages)
+        else:
+            self._stages = list(DEFAULT_STAGES)
+
+        # Validate stages
+        for s in self._stages:
+            if s not in VALID_STAGES:
+                raise ValueError(
+                    "Unknown cascade stage {!r}; valid stages: {}".format(
+                        s, ", ".join(VALID_STAGES),
+                    )
+                )
+
         # Layer 5: Embedding classifier — optional
+        # NOTE: There are TWO mutually-exclusive embedding integration paths:
+        #
+        #   Path A (CANONICAL): enable_ensemble=True
+        #     Uses ensemble.py for a principled weighted average of calibrated
+        #     probabilities from both TF-IDF and embedding models.  This is
+        #     the recommended path for new deployments.
+        #
+        #   Path B (LEGACY): enable_embedding=True (and enable_ensemble=False)
+        #     Uses predict_embedding.py directly with ad-hoc 60/40 blending
+        #     and hard-coded confidence thresholds for disagreement resolution.
+        #     Retained for backward compatibility only.
+        #
+        # If both are True, Path A takes precedence (via the elif in classify).
         self._embedding_model = None
         self._embedding_classifier = None
         self._enable_embedding = enable_embedding and _HAS_EMBEDDING
 
-        # Layer 4+5 Ensemble — optional
+        # Layer 4+5 Ensemble — optional (Path A, canonical)
         self._enable_ensemble = enable_ensemble and _HAS_ENSEMBLE
         self._ensemble_used = 0
 
@@ -431,6 +557,7 @@ class CascadeClassifier:
         # Last L0 result from classify() — reused by classify_for_evaluate()
         # to avoid running layer0_sanitize() twice on the same input.
         self._last_l0 = None
+        self._last_judge_reasoning = ""  # BUG-L7-5: persist judge reasoning
 
         # Stats counters
         self._total = 0
@@ -443,6 +570,23 @@ class CascadeClassifier:
         self._positive_validated = 0
         self._positive_validation_overrides = 0
         self._canary_checks = 0
+
+        # Layer 6: SLO tracker — enabled by NA0S_SLO_TRACKING=1
+        self._slo_enabled = os.environ.get("NA0S_SLO_TRACKING") == "1"
+        self._slo = SLOTracker() if self._slo_enabled else None
+
+        # Thread lock for batch classification
+        self._batch_lock = threading.Lock()
+
+    def _record_slo(self, stage, elapsed_ms):
+        """Record a timing observation if SLO tracking is enabled."""
+        if self._slo is not None:
+            self._slo.record(stage, elapsed_ms)
+
+    @property
+    def slo_tracker(self):
+        """Return the SLO tracker instance (or None if disabled)."""
+        return self._slo
 
     def _ensure_model(self) -> None:
         """Lazy-load model and vectorizer on first use.
@@ -498,6 +642,7 @@ class CascadeClassifier:
                    'positive_validation', or 'blocked'
         """
         self._total += 1
+        self._last_judge_reasoning = ""  # BUG-L7-5: reset per call
 
         # Layer 0: sanitize input before anything else
         l0 = layer0_sanitize(text)
@@ -508,24 +653,81 @@ class CascadeClassifier:
 
         clean = l0.sanitized_text
 
+        # Layer 6: Adaptive complexity routing — determine which stages
+        # to run based on input complexity (when enabled).
+        active_stages = list(self._stages)
+        if is_adaptive_routing_enabled():
+            complexity = assess_complexity(clean)
+            active_stages = get_pipeline_stages(complexity)
+            _logger.debug(
+                "Adaptive routing: complexity=%s, stages=%s",
+                complexity.value, active_stages,
+            )
+
         # Stage 1: whitelist filter (operates on sanitized text)
-        is_safe, reason = self._whitelist.is_whitelisted(clean)
-        if is_safe:
-            self._whitelisted += 1
-            return "SAFE", 0.99, [], "whitelist"
+        if "whitelist" in active_stages:
+            is_safe, reason = self._whitelist.is_whitelisted(clean)
+            if is_safe:
+                self._whitelisted += 1
+                return "SAFE", 0.99, [], "whitelist"
 
         # Stage 2: weighted classifier (operates on sanitized text)
         # FIX-5: Pass raw text so rules also run on pre-normalization input
-        self._ensure_model()
-        label, confidence, hits = self._weighted.classify(
-            clean, self._vectorizer, self._model, raw_text=text,
-        )
-        self._classified += 1
+        # "ml_basic" maps to the same weighted classifier but is used by
+        # the SIMPLE complexity path name; both mean "run ML".
+        if "weighted" in active_stages or "ml_basic" in active_stages:
+            self._ensure_model()
+            label, confidence, hits = self._weighted.classify(
+                clean, self._vectorizer, self._model, raw_text=text,
+            )
+            self._classified += 1
+        else:
+            # If weighted/ml_basic not in stages, return SAFE by default
+            label, confidence, hits = "SAFE", 0.99, []
 
-        # Layer 4+5: Ensemble (TF-IDF + Embedding weighted average)
-        # When ensemble is enabled, it replaces the ad-hoc embedding blending
-        # with a principled weighted average of calibrated probabilities.
-        if self._enable_ensemble and _HAS_ENSEMBLE:
+        # ---------------------------------------------------------------
+        # Layer 6: Groundedness check — verify MALICIOUS verdicts are
+        # backed by 2+ independent evidence sources.  If not grounded,
+        # flag for review by lowering confidence (potential FP).
+        # ---------------------------------------------------------------
+        if label == "MALICIOUS":
+            _stage2_scan = ScanResult(
+                sanitized_text=clean,
+                is_malicious=True,
+                risk_score=confidence,
+                label="malicious",
+                rule_hits=hits,
+                ml_confidence=confidence,
+                ml_label="malicious",
+                anomaly_flags=l0.anomaly_flags if l0 else [],
+                technique_tags=[],  # populated later in scan()
+            )
+            gcheck = _verify_grounded(_stage2_scan)
+            if not gcheck["grounded"]:
+                # Not enough independent evidence — lower confidence to
+                # reduce false positives while keeping the label.
+                confidence = round(confidence * 0.85, 4)
+                hits.append("groundedness:review")
+
+        # ---------------------------------------------------------------
+        # Embedding integration: TWO mutually-exclusive paths.
+        # Gated by "embedding" being in active_stages.
+        #
+        # Path A (CANONICAL) -- enable_ensemble=True:
+        #   Uses ensemble.py for a principled weighted average of calibrated
+        #   P(malicious) from TF-IDF and embedding models.  Preferred.
+        #
+        # Path B (LEGACY) -- enable_embedding=True, enable_ensemble=False:
+        #   Ad-hoc 60/40 blending with hard-coded disagreement thresholds.
+        #   Retained for backward compatibility; see predict_embedding.py.
+        #
+        # Path A takes precedence when both flags are set (via elif).
+        # ---------------------------------------------------------------
+
+        # Path A: Ensemble (TF-IDF + Embedding weighted average)
+        if "embedding" not in active_stages:
+            pass  # Skip embedding when not in active stages
+        elif self._enable_ensemble and _HAS_ENSEMBLE:
             try:
                 ensemble_result = _ensemble_scan(
                     clean,
@@ -542,8 +744,9 @@ class CascadeClassifier:
             except Exception:
                 pass  # Ensemble failure is non-fatal
 
-        # Layer 5: Embedding classifier (legacy ad-hoc blending)
+        # Path B (LEGACY): Embedding classifier with ad-hoc blending.
         # Only used when ensemble is NOT enabled but embedding IS enabled.
+        # Superseded by Path A (ensemble); retained for backward compatibility.
         elif self._enable_embedding:
             try:
                 if self._ensure_embedding_model():
@@ -585,9 +788,13 @@ class CascadeClassifier:
                 pass  # Layer 5 failure is non-fatal
 
         # Layer 7: LLM judge for ambiguous cases
-        judge = self._judge
-        if judge is None:
-            judge = self._ensure_llm_checker()
+        # Only run if "judge" is in the active stage list.
+        if "judge" not in active_stages:
+            judge = None
+        else:
+            judge = self._judge
+            if judge is None:
+                judge = self._ensure_llm_checker()
 
         if judge is not None:
             needs_judge = (
@@ -617,6 +824,8 @@ class CascadeClassifier:
                             )
                             if label != original_label:
                                 self._judge_overrides += 1
+                            # BUG-L7-5: persist judge reasoning
+                            self._last_judge_reasoning = getattr(result, "rationale", "")
                             return label, confidence, hits, "judge"
                     else:
                         # Original LLMJudge interface
@@ -631,6 +840,8 @@ class CascadeClassifier:
                             )
                             if label != original_label:
                                 self._judge_overrides += 1
+                            # BUG-L7-5: persist judge reasoning
+                            self._last_judge_reasoning = getattr(verdict, "reasoning", "")
                             return label, confidence, hits, "judge"
                 except Exception:
                     pass  # Layer 7 failure is non-fatal
@@ -662,6 +873,22 @@ class CascadeClassifier:
                         return label, confidence, hits, "positive_validation"
             except Exception:
                 pass  # Layer 8 failure is non-fatal
+
+        # Layer 6: Paranoid confidence mode — if the composite score
+        # lands in the uncertain zone, default to MALICIOUS.
+        if self._paranoid_mode and label == "SAFE":
+            # Derive composite P(malicious) from confidence semantics:
+            # For SAFE, confidence = P(safe) = 1 - P(malicious)
+            p_mal = 1.0 - confidence
+            if _PARANOID_LOWER <= p_mal <= _PARANOID_UPPER:
+                _logger.warning(
+                    "Paranoid mode: flipping SAFE -> MALICIOUS "
+                    "(P(malicious)=%.4f in uncertain zone [%.2f, %.2f])",
+                    p_mal, _PARANOID_LOWER, _PARANOID_UPPER,
+                )
+                label = "MALICIOUS"
+                confidence = round(p_mal, 4)
+                hits.append("paranoid_mode:uncertain_flip")
 
         return label, confidence, hits, "weighted"
 
@@ -718,6 +945,7 @@ class CascadeClassifier:
                 ml_confidence=confidence,
                 ml_label="blocked",
                 cascade_stage=stage,
+                model_version=_get_model_version(),
             )
 
         # Derive technique_tags from the detailed rule hits available
@@ -750,6 +978,8 @@ class CascadeClassifier:
             ml_label="malicious" if is_mal else "safe",
             anomaly_flags=l0.anomaly_flags if l0 else [],
             cascade_stage=stage,
+            model_version=_get_model_version(),
+            judge_reasoning=self._last_judge_reasoning,  # BUG-L7-5
         )
 
     # ------------------------------------------------------------------
@@ -889,6 +1119,84 @@ class CascadeClassifier:
             "positive_validation_overrides": self._positive_validation_overrides,
             "canary_checks": self._canary_checks,
         }
+
+    def classify_batch(self, texts):
+        """Classify a batch of texts, returning results in input order.
+
+        Parameters
+        ----------
+        texts : list[str]
+            Input texts to classify.
+
+        Returns
+        -------
+        list[ScanResult]
+            One ScanResult per input, in the same order.
+
+        Notes
+        -----
+        Thread-safe.  Whitelist filtering is applied in batch before
+        running the ML pipeline on remaining texts.
+        """
+        n = len(texts)
+        results = [None] * n
+
+        # Stage 1: batch whitelist filtering
+        needs_ml = []  # list of (original_index, text)
+        for i, text in enumerate(texts):
+            l0 = layer0_sanitize(text)
+            if l0.rejected:
+                results[i] = ScanResult(
+                    sanitized_text="",
+                    is_malicious=True,
+                    risk_score=1.0,
+                    label="blocked",
+                    rejected=True,
+                    rejection_reason=l0.rejection_reason if l0 else "blocked",
+                    anomaly_flags=l0.anomaly_flags if l0 else [],
+                    ml_confidence=1.0,
+                    ml_label="blocked",
+                    cascade_stage="blocked",
+                    model_version=_get_model_version(),
+                )
+                continue
+            is_safe, reason = self._whitelist.is_whitelisted(l0.sanitized_text)
+            if is_safe:
+                results[i] = ScanResult(
+                    sanitized_text=l0.sanitized_text,
+                    is_malicious=False,
+                    risk_score=0.01,
+                    label="safe",
+                    ml_confidence=0.99,
+                    ml_label="safe",
+                    cascade_stage="whitelist",
+                    model_version=_get_model_version(),
+                )
+            else:
+                needs_ml.append((i, text, l0))
+
+        # Stage 2: run full classify for remaining texts
+        if needs_ml:
+            self._ensure_model()
+            for idx, text, l0 in needs_ml:
+                # Re-use the single-item classify path for correctness
+                self._last_l0 = l0
+                label, confidence, hits, stage = self.classify(text)
+                is_mal = label == "MALICIOUS"
+                results[idx] = ScanResult(
+                    sanitized_text=l0.sanitized_text,
+                    is_malicious=is_mal,
+                    risk_score=round(confidence, 4),
+                    label="malicious" if is_mal else "safe",
+                    rule_hits=hits,
+                    ml_confidence=round(confidence, 4),
+                    ml_label="malicious" if is_mal else "safe",
+                    anomaly_flags=l0.anomaly_flags if l0 else [],
+                    cascade_stage=stage,
+                    model_version=_get_model_version(),
+                )
+
+        return results
 
     def reset_stats(self) -> None:
         """Zero all counters."""

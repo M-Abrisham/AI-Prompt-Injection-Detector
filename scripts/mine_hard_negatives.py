@@ -13,6 +13,9 @@ import os
 import sys
 
 import csv
+import hashlib
+import re
+import unicodedata
 
 import numpy as np
 import pandas as pd
@@ -443,9 +446,22 @@ def phase4_merge(original_df, hard_neg_df):
 
     combined = pd.concat([original_df, merge_df], ignore_index=True)
 
-    # Deduplicate by text
+    def _canon_text(text):
+        text = str(text)
+        text = unicodedata.normalize("NFKC", text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _text_hash(text):
+        canon = _canon_text(text)
+        return hashlib.sha256(canon.encode("utf-8", errors="replace")).hexdigest()
+
+    # Deduplicate by normalized text hash (Unicode-aware)
     before_dedup = len(combined)
-    combined = combined.drop_duplicates(subset=["text"], keep="first")
+    combined["_hash"] = combined["text"].apply(_text_hash)
+    combined = combined.drop_duplicates(subset=["_hash"], keep="first")
+    # Stable idempotent ordering across repeated runs
+    combined = combined.sort_values("_hash", kind="mergesort").reset_index(drop=True)
+    combined = combined.drop(columns=["_hash"])
     after_dedup = len(combined)
     dropped = before_dedup - after_dedup
 
@@ -461,6 +477,11 @@ def phase4_merge(original_df, hard_neg_df):
     os.makedirs(os.path.dirname(MERGED_CSV), exist_ok=True)
     combined.to_csv(MERGED_CSV, index=False, quoting=csv.QUOTE_ALL)
     print(f"\n  Saved merged dataset -> {MERGED_CSV}")
+
+    # Write to canonical training path so downstream feature/model scripts
+    # automatically consume hard negatives without extra manual merge steps.
+    combined.to_csv(COMBINED_CSV, index=False, quoting=csv.QUOTE_ALL)
+    print(f"  Updated canonical training dataset -> {COMBINED_CSV}")
 
 
 # ========================================================================== #

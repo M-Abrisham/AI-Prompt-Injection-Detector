@@ -17,6 +17,7 @@ import os
 
 from .scan_result import ScanResult
 from .predict import scan as tfidf_scan
+from ._voting import get_decision_threshold as _get_decision_threshold
 
 # Layer 5: Embedding-based classifier -- optional import
 try:
@@ -47,8 +48,8 @@ if _ENV_TFIDF_WEIGHT is not None:
     except (ValueError, TypeError):
         pass  # Keep defaults if env var is invalid
 
-# Decision threshold -- same as predict.py for consistency
-_DECISION_THRESHOLD = 0.55
+# Decision threshold -- loaded dynamically from _voting.py (single source of truth)
+_DECISION_THRESHOLD = _get_decision_threshold()
 
 
 def ensemble_scan(
@@ -192,3 +193,159 @@ def ensemble_scan(
         ml_label=tfidf_result.ml_label,
         anomaly_flags=list(tfidf_result.anomaly_flags),
     )
+
+
+# ---------------------------------------------------------------------------
+# EnsembleClassifier — object-oriented wrapper around ensemble_scan()
+# ---------------------------------------------------------------------------
+
+import threading as _threading
+
+
+class EnsembleClassifier:
+    """Object-oriented ensemble of TF-IDF (Layer 4) and Embedding (Layer 5).
+
+    Wraps :func:`ensemble_scan` into a reusable, thread-safe class that
+    pre-loads models once and reuses them across calls.  Gracefully degrades
+    to TF-IDF-only when the embedding model is unavailable.
+
+    Parameters
+    ----------
+    tfidf_weight : float or None
+        Weight for the TF-IDF model's P(malicious).  Defaults to 0.5
+        (or the ``NA0S_ENSEMBLE_TFIDF_WEIGHT`` env var).
+    embedding_weight : float or None
+        Weight for the embedding model's P(malicious).  Defaults to
+        ``1.0 - tfidf_weight``.
+    threshold : float
+        Decision threshold for the combined score.  Defaults to 0.55.
+
+    Usage::
+
+        clf = EnsembleClassifier(tfidf_weight=0.6)
+        result = clf.scan("Ignore all previous instructions")
+        print(result.is_malicious, result.risk_score)
+
+        label, confidence, hits = clf.classify("some prompt")
+    """
+
+    def __init__(
+        self,
+        tfidf_weight=None,
+        embedding_weight=None,
+        threshold=None,
+    ):
+        self._tfidf_weight = tfidf_weight
+        self._embedding_weight = embedding_weight
+        self._threshold = threshold if threshold is not None else _DECISION_THRESHOLD
+
+        # Pre-loaded sklearn objects (lazy, thread-safe)
+        self._vectorizer = None
+        self._model = None
+        self._embedding_model = None
+        self._embedding_classifier = None
+        self._loaded = False
+        self._lock = _threading.Lock()
+
+    # ------------------------------------------------------------------
+    # Lazy model loading (thread-safe, double-checked locking)
+    # ------------------------------------------------------------------
+
+    def _ensure_loaded(self):
+        """Lazy-load TF-IDF and (optionally) embedding models.
+
+        Thread-safe via double-checked locking.  If the embedding model
+        is unavailable the classifier still works — it falls back to
+        TF-IDF only through :func:`ensemble_scan`.
+        """
+        if self._loaded:
+            return
+        with self._lock:
+            if self._loaded:
+                return
+
+            # TF-IDF models — loaded from predict.py's lazy loader
+            try:
+                from .predict import _ensure_model_loaded, _vectorizer, _model
+                _ensure_model_loaded()
+                # Re-import after loading (module-level globals updated)
+                from .predict import _vectorizer, _model
+                self._vectorizer = _vectorizer
+                self._model = _model
+            except Exception as exc:
+                logger.warning(
+                    "EnsembleClassifier: TF-IDF model load failed: %s", exc,
+                )
+
+            # Embedding models — optional, graceful degradation
+            if _HAS_EMBEDDING:
+                try:
+                    emb_model, emb_clf = _load_embedding_models()
+                    self._embedding_model = emb_model
+                    self._embedding_classifier = emb_clf
+                except Exception as exc:
+                    logger.warning(
+                        "EnsembleClassifier: embedding model unavailable, "
+                        "falling back to TF-IDF only: %s", exc,
+                    )
+
+            self._loaded = True
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def scan(self, text):
+        """Scan text and return a :class:`ScanResult`.
+
+        Combines TF-IDF and embedding classification via weighted average.
+        Falls back to TF-IDF only when the embedding model is unavailable.
+
+        Parameters
+        ----------
+        text : str
+            The prompt text to scan.
+
+        Returns
+        -------
+        ScanResult
+        """
+        self._ensure_loaded()
+        return ensemble_scan(
+            text,
+            tfidf_weight=self._tfidf_weight,
+            embedding_weight=self._embedding_weight,
+            vectorizer=self._vectorizer,
+            model=self._model,
+            embedding_model=self._embedding_model,
+            embedding_classifier=self._embedding_classifier,
+        )
+
+    def classify(self, text):
+        """Classify text and return a ``(label, confidence, rule_hits)`` tuple.
+
+        This is a convenience method that calls :meth:`scan` and unpacks
+        the result into the same shape returned by
+        :meth:`CascadeClassifier.classify`.
+
+        Parameters
+        ----------
+        text : str
+            The prompt text to classify.
+
+        Returns
+        -------
+        tuple[str, float, list]
+            ``(label, confidence, rule_hits)`` where *label* is
+            ``"malicious"`` or ``"safe"``, *confidence* is the combined
+            risk score, and *rule_hits* is the merged list of rule hits.
+        """
+        result = self.scan(text)
+        return result.label, result.risk_score, list(result.rule_hits)
+
+    def __repr__(self):
+        return (
+            "EnsembleClassifier("
+            "tfidf_weight={!r}, embedding_weight={!r}, threshold={!r}"
+            ")".format(self._tfidf_weight, self._embedding_weight, self._threshold)
+        )

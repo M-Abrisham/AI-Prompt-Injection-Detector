@@ -1,0 +1,183 @@
+# Trust Tier Registry for Na0S Dataset Quarantine System
+#
+# Defines trust levels for all data sources and maps each known source
+# to its tier.  Used by scripts/quarantine.py and scripts/validate_data.py
+# to enforce tiered validation and quarantine policies.
+#
+# Maintained by: security engineering
+# Last updated: 2026-03-03
+
+version: "1.0"
+
+# ── Tier Definitions ──────────────────────────────────────────────────────
+#
+# Each tier specifies:
+#   label          Human-readable name
+#   description    What kind of sources belong here
+#   validation     Which validate_data.py check suite to run
+#                    basic    = schema only
+#                    standard = schema + text quality + class balance
+#                    strict   = all checks (schema + quality + balance +
+#                               duplicates + label consistency + source size)
+#   quarantine     Whether data must land in data/quarantine/ first
+#   min_confidence Minimum heuristic confidence to accept scraped rows
+#                    (only relevant for tier4; ignored for others)
+
+tiers:
+  tier1:
+    label: "Trusted"
+    description: >-
+      Vetted sources from major companies and research labs with established
+      track records in AI safety and security research.  These datasets
+      have been manually reviewed and are considered authoritative.
+    validation: "basic"
+    quarantine: false
+    min_confidence: 0.0
+
+  tier2:
+    label: "Community"
+    description: >-
+      HuggingFace community datasets with clear licenses, meaningful
+      download counts, and at least one prior manual review by Na0S
+      maintainers.  Moderate trust -- schema and quality checks applied.
+    validation: "standard"
+    quarantine: false
+    min_confidence: 0.0
+
+  tier3:
+    label: "New Discovery"
+    description: >-
+      Newly discovered datasets from weekly_harvest.py or manual addition
+      that have NOT yet been manually reviewed.  Data is quarantined until
+      a maintainer inspects samples and promotes it.
+    validation: "strict"
+    quarantine: true
+    min_confidence: 0.0
+
+  tier4:
+    label: "Scraped"
+    description: >-
+      Social media scrapes and web crawls from social_scraper.py.
+      Highest risk -- heuristic labels may be wrong, text may contain
+      noise, spam, or adversarial content.  Full validation plus
+      confidence filtering required before promotion.
+    validation: "strict"
+    quarantine: true
+    min_confidence: 0.6
+
+
+# ── Source-to-Tier Mapping ────────────────────────────────────────────────
+#
+# Keys match the source names in data/datasets.yaml or the source tags
+# written by social_scraper.py / weekly_harvest.py.
+#
+# For HuggingFace datasets, the key is the "repo" field value.
+# For GitHub CSV sources, the key is the source name from datasets.yaml.
+# For scrapers, the key is the source tag they write (e.g. "reddit/*").
+
+sources:
+
+  # ── Tier 1: Trusted ──────────────────────────────────────────────────
+  # Major companies, research labs, and curated competition datasets.
+
+  # deepset -- German AI company, original prompt-injection dataset authors
+  "deepset/prompt-injections": tier1
+
+  # Lakera -- Swiss AI security company, Gandalf red-team challenge
+  "Lakera/gandalf-rct": tier1
+
+  # Microsoft -- LLMail prompt injection challenge
+  "microsoft/llmail-inject-challenge": tier1
+
+  # ETH Zurich -- academic CTF from SaTML 2024 conference
+  "ethz-spylab/ctf-satml24": tier1
+
+  # Meta -- CyberSecEval prompt injection test suite (via DatasetAgent)
+  "cyberseceval_prompt_injection": tier1
+
+  # Babelscape -- ALERT safety benchmark (published research)
+  "Babelscape/ALERT": tier1
+
+  # OpenSafetyLab -- Salad-Data safety benchmark
+  "OpenSafetyLab/Salad-Data": tier1
+
+  # HackaPrompt -- Prompt hacking competition (EMNLP 2023)
+  "hackaprompt/hackaprompt-dataset": tier1
+
+  # ── Tier 2: Community ────────────────────────────────────────────────
+  # HuggingFace community datasets reviewed by Na0S maintainers.
+
+  # Safe prompt sources -- large, well-known instruction datasets
+  "tatsu-lab/alpaca": tier2
+  "databricks/databricks-dolly-15k": tier2
+  "OpenAssistant/oasst1": tier2
+  "alespalla/chatbot_instruction_prompts": tier2
+  "LLM-LAT/benign-dataset": tier2
+  "WizardLMTeam/WizardLM_evol_instruct_70k": tier2
+  "HuggingFaceH4/ultrachat_200k": tier2
+
+  # Prompt injection community datasets -- useful but less rigorous curation
+  "xTRam1/safe-guard-prompt-injection": tier2
+  "reshabhs/SPML_Chatbot_Prompt_Injection": tier2
+  "imoxto/prompt_injection_cleaned_dataset-v2": tier2
+  "geekyrakshit/prompt-injection-dataset": tier2
+  "guychuk/benign-malicious-prompt-classification": tier2
+
+  # Jailbreak-specific community datasets
+  "JailbreakV-28K/JailBreakV-28k": tier2
+  "walledai/JailbreakHub": tier2
+
+  # GitHub CSV sources referenced in datasets.yaml
+  "jailbreak_llms": tier2
+  "awesome_chatgpt_prompts": tier2
+
+  # Kaggle dataset from DatasetAgent
+  "kaggle_injection_wild": tier2
+
+  # ── Tier 3: New Discovery ────────────────────────────────────────────
+  # Placeholder -- weekly_harvest.py discoveries land here by default.
+  # No specific sources listed; any source NOT found in this map
+  # is automatically classified as tier3.
+
+  # ── Tier 4: Scraped ─────────────────────────────────────────────────
+  # Social media scrapes from social_scraper.py.
+  # Source tags use prefix matching: "reddit/*" matches "reddit/r/ChatGPT".
+
+  "reddit/*": tier4
+  "twitter": tier4
+  "reddit/comment": tier4
+
+
+# ── Quarantine Settings ───────────────────────────────────────────────────
+
+quarantine:
+  # Directory where quarantined data is held pending review
+  directory: "data/quarantine"
+
+  # Log file for all quarantine actions (ingest, promote, reject)
+  log_file: "data/quarantine/quarantine_log.json"
+
+  # Maximum days data can sit in quarantine before auto-expiry warning
+  max_quarantine_days: 30
+
+  # Require explicit --promote to move data out of quarantine
+  require_manual_promotion: true
+
+# ── Staging Settings ─────────────────────────────────────────────────────
+
+staging:
+  # Directory where staged data is held pending label quality validation
+  directory: "data/staging"
+
+  # Maximum days data can sit in staging before auto-expiry warning
+  max_staging_days: 14
+
+  # Minimum rows required per staged dataset for promotion
+  min_rows: 10
+
+  # Label quality thresholds
+  label_quality:
+    # Both classes must be present
+    require_both_classes: true
+    # Maximum suspicious label rate (safe text with injection phrases)
+    max_suspicious_rate: 0.15

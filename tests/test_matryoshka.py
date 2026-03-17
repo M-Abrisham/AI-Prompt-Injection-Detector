@@ -539,6 +539,7 @@ class TestEdgeCases(unittest.TestCase):
         expected_keys = {
             "obfuscation_score", "decoded_views", "evasion_flags",
             "decoded_chain", "max_depth_reached", "encoding_chains",
+            "combined_boost", "combined_reasons",
         }
         self.assertEqual(set(result.keys()), expected_keys)
 

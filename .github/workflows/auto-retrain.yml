@@ -1,0 +1,199 @@
+name: Auto-Retrain Model
+
+on:
+  schedule:
+    # Tuesday 08:00 UTC — after Monday's weekly harvest
+    - cron: '0 8 * * 2'
+
+  workflow_run:
+    workflows:
+      - "Weekly Dataset Harvest"
+      - "Social Scraper (3h)"
+    types: [completed]
+    branches: [main]
+
+  workflow_dispatch:  # Manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    # Skip if triggered by a failed upstream workflow
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas scikit-learn datasets huggingface_hub \
+                    requests chardet pyarrow
+
+      - name: Sync datasets from registry
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python -m scripts.sync_datasets
+
+      - name: Ingest harvest & scrape data (quarantine-aware)
+        run: python -m scripts.integrate_harvest
+
+      - name: Validate quarantined datasets
+        run: python -m scripts.quarantine --validate-quarantined
+
+      - name: Promote validated quarantined → staging
+        run: python -m scripts.quarantine --promote-validated
+
+      - name: Validate staged datasets (label quality)
+        run: python -m scripts.quarantine --validate-staged
+
+      - name: Promote staged → production
+        run: python -m scripts.quarantine --promote-staged-validated
+
+      - name: Generate synthetic training samples (D3/D4/D5/D6/D7/D8/E1/E2/C1/O1/P1)
+        run: python scripts/gen_all_datasets.py
+
+      - name: Merge and deduplicate all data
+        run: python -m scripts.process_data
+
+      - name: Validate data quality
+        run: python -m scripts.validate_data --fix
+
+      # Hard-negative mining: generate benign samples that resemble attacks
+      # (security discussions, benign roleplay, override-like language) and
+      # merge them into combined_data.csv to reduce false-positive rate.
+      - name: Mine hard negatives into training data
+        run: python -m scripts.mine_hard_negatives
+
+      - name: Extract TF-IDF features
+        run: python -m scripts.features
+
+      - name: Train model
+        run: python -m scripts.model
+
+      - name: Run canary evaluation
+        id: canary
+        continue-on-error: true
+        run: |
+          python -m scripts.canary_eval 2>&1 | tee canary_output.txt
+          CANARY_EXIT=${PIPESTATUS[0]}
+          echo "exit_code=${CANARY_EXIT}" >> $GITHUB_OUTPUT
+          if [ "$CANARY_EXIT" -eq 0 ]; then
+            echo "result=PASSED" >> $GITHUB_OUTPUT
+            echo "Canary evaluation PASSED -- all quality gates met"
+          else
+            echo "result=FAILED" >> $GITHUB_OUTPUT
+            echo "::error::Canary evaluation FAILED -- quality gates not met"
+          fi
+          # Extract TPR and TNR lines from output for PR body
+          TPR_LINE=$(grep -o 'Injection TPR >= [0-9]*%:.*' canary_output.txt || echo "TPR: unable to parse")
+          TNR_LINE=$(grep -o 'Benign TNR    >= [0-9]*%:.*' canary_output.txt || echo "TNR: unable to parse")
+          echo "tpr_line=${TPR_LINE}" >> $GITHUB_OUTPUT
+          echo "tnr_line=${TNR_LINE}" >> $GITHUB_OUTPUT
+          exit 0
+
+      - name: Deploy model and update hashes
+        if: steps.canary.outputs.result == 'PASSED'
+        run: python scripts/deploy_model.py
+
+      - name: Check for model changes
+        id: diff
+        run: |
+          if git diff --quiet src/na0s/models/; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "Model unchanged — skipping PR"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Model updated — will create PR"
+          fi
+
+      - name: Create PR with retrained model
+        if: steps.canary.outputs.result == 'PASSED' && steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANARY_RESULT: ${{ steps.canary.outputs.result }}
+          CANARY_TPR: ${{ steps.canary.outputs.tpr_line }}
+          CANARY_TNR: ${{ steps.canary.outputs.tnr_line }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          BRANCH="retrain/$(date +%Y-%m-%d)"
+          git checkout -b "$BRANCH"
+          git add src/na0s/models/
+          git add data/canary/canary_eval.csv
+          git commit -m "Retrain model on latest data ($(date +%Y-%m-%d))"
+          git push -u origin "$BRANCH"
+
+          SAMPLE_COUNT=$(( $(wc -l < data/processed/combined_data.csv) - 1 )) || SAMPLE_COUNT="unknown"
+          TODAY=$(date +%Y-%m-%d)
+
+          # Build canary evaluation section for PR body
+          if [ "$CANARY_RESULT" = "PASSED" ]; then
+            CANARY_ICON="white_check_mark"
+            CANARY_STATUS="PASSED"
+            CANARY_NOTE="All quality gates met. Model is ready for review."
+          else
+            CANARY_ICON="warning"
+            CANARY_STATUS="FAILED"
+            CANARY_NOTE="Quality gates not met. Review carefully before merging."
+          fi
+
+          # Build label flags
+          LABEL_FLAGS=""
+          if [ "$CANARY_RESULT" = "FAILED" ]; then
+            LABEL_FLAGS="--label canary-warning"
+          fi
+
+          gh pr create \
+            --title "Retrain model ($TODAY)" \
+            --body "## Auto-Retrain Report
+
+          The model has been retrained on the latest dataset.
+
+          **Pipeline steps completed:**
+          1. Synced all datasets from \`data/datasets.yaml\`
+          2. Ingested harvest/scrape discoveries via quarantine routing
+          3. Validated quarantined datasets (tier-appropriate checks)
+          4. Promoted validated → staging
+          5. Validated staged datasets (label quality)
+          6. Promoted staged → production (\`data/aggregated/\`)
+          7. Merged and deduplicated into \`combined_data.csv\`
+          8. Extracted TF-IDF features (10K max)
+          9. Trained calibrated LogisticRegression
+          10. Deployed model + updated \`KNOWN_HASHES\`
+          11. Ran canary evaluation (200 hand-verified samples)
+
+          **Training samples:** ~${SAMPLE_COUNT}
+
+          ## Canary Evaluation :${CANARY_ICON}:
+
+          **Overall: ${CANARY_STATUS}**
+
+          | Quality Gate | Result |
+          |-------------|--------|
+          | ${CANARY_TPR} |
+          | ${CANARY_TNR} |
+
+          ${CANARY_NOTE}
+
+          ---
+          *Automated by auto-retrain.yml*" \
+            --base main ${LABEL_FLAGS}
+
+      - name: Fail workflow if canary did not pass
+        if: steps.canary.outputs.result == 'FAILED'
+        run: |
+          echo "::error::Canary evaluation failed. Deploy and PR were skipped."
+          echo "TPR gate: ${{ steps.canary.outputs.tpr_line }}"
+          echo "TNR gate: ${{ steps.canary.outputs.tnr_line }}"
+          exit 1

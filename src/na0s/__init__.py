@@ -33,10 +33,11 @@ from na0s.predict import scan
 from na0s.cascade import CascadeClassifier
 
 try:
-    from na0s.ensemble import ensemble_scan
+    from na0s.ensemble import ensemble_scan, EnsembleClassifier
 except ImportError:
     pass  # Embedding dependency may not be installed
 from na0s.output_scanner import OutputScanner, OutputScanResult
+from na0s.streaming_scanner import StreamingOutputScanner
 from na0s.positive_validation import TrustBoundary
 from na0s.canary import CanaryManager, CanaryToken
 
@@ -44,11 +45,13 @@ __all__ = [
     "__version__",
     "scan",
     "ensemble_scan",
+    "EnsembleClassifier",
     "scan_output",
     "CascadeClassifier",
     "ScanResult",
     "OutputScanner",
     "OutputScanResult",
+    "StreamingOutputScanner",
     "TrustBoundary",
     "CanaryManager",
     "CanaryToken",

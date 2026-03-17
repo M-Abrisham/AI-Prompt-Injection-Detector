@@ -12,15 +12,24 @@ import os
 import sys
 import json
 
-import matplotlib
-matplotlib.use('Agg')
-
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+from sklearn.base import clone
 from sklearn.metrics import roc_curve, precision_recall_curve, auc
+from sklearn.model_selection import StratifiedKFold
 
 from na0s.safe_pickle import safe_load
+
+try:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    _HAS_PLOTTING = True
+except Exception:
+    plt = None
+    _HAS_PLOTTING = False
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -32,6 +41,38 @@ DATA_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'combined_data.csv')
 ROC_PLOT_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'roc_curve.png')
 PR_PLOT_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'pr_curve.png')
 THRESHOLD_JSON_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'optimal_threshold.json')
+CV_FOLDS = 5
+
+
+def _compute_oof_probabilities(model, X, labels, n_splits=CV_FOLDS):
+    """Return out-of-fold P(malicious) probabilities via stratified k-fold CV."""
+    labels = np.asarray(labels)
+    n_samples = labels.shape[0]
+    if n_samples == 0:
+        return np.array([])
+
+    class_counts = np.bincount(labels.astype(int), minlength=2)
+    min_class = int(class_counts.min()) if class_counts.size else 0
+    if min_class < 2:
+        # Not enough samples for CV; fall back to in-sample probabilities.
+        return model.predict_proba(X)[:, 1]
+
+    folds = min(int(n_splits), min_class)
+    if folds < 2:
+        return model.predict_proba(X)[:, 1]
+
+    splitter = StratifiedKFold(
+        n_splits=folds,
+        shuffle=True,
+        random_state=42,
+    )
+
+    oof_probs = np.zeros(n_samples, dtype=float)
+    for train_idx, valid_idx in splitter.split(np.zeros(n_samples), labels):
+        fold_model = clone(model)
+        fold_model.fit(X[train_idx], labels[train_idx])
+        oof_probs[valid_idx] = fold_model.predict_proba(X[valid_idx])[:, 1]
+    return oof_probs
 
 
 def main():
@@ -55,11 +96,11 @@ def main():
           f"malicious={int((labels == 1).sum())})")
 
     # ------------------------------------------------------------------
-    # 3. Compute predicted probabilities
+    # 3. Compute out-of-fold predicted probabilities (k-fold CV)
     # ------------------------------------------------------------------
-    print("[3/7] Computing predicted probabilities ...")
+    print(f"[3/7] Computing out-of-fold predicted probabilities ({CV_FOLDS}-fold CV) ...")
     X = vectorizer.transform(texts)
-    probs = model.predict_proba(X)[:, 1]  # P(malicious)
+    probs = _compute_oof_probabilities(model, X, labels, n_splits=CV_FOLDS)
 
     # ------------------------------------------------------------------
     # 4. Sweep thresholds 0.01 .. 0.99
@@ -134,73 +175,76 @@ def main():
     # ------------------------------------------------------------------
     # 5. Plot ROC and PR curves
     # ------------------------------------------------------------------
-    print("[5/7] Plotting ROC curve ...")
-    sk_fpr, sk_tpr, _ = roc_curve(labels, probs)
-    roc_auc = auc(sk_fpr, sk_tpr)
+    if _HAS_PLOTTING:
+        print("[5/7] Plotting ROC curve ...")
+        sk_fpr, sk_tpr, _ = roc_curve(labels, probs)
+        roc_auc = auc(sk_fpr, sk_tpr)
 
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.plot(sk_fpr, sk_tpr, color='steelblue', lw=2,
-            label=f'ROC curve (AUC = {roc_auc:.4f})')
-    ax.plot([0, 1], [0, 1], 'k--', lw=1, label='Random')
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.plot(sk_fpr, sk_tpr, color='steelblue', lw=2,
+                label=f'ROC curve (AUC = {roc_auc:.4f})')
+        ax.plot([0, 1], [0, 1], 'k--', lw=1, label='Random')
 
-    # Mark Youden-optimal
-    ax.scatter([best_youden_fpr], [best_youden_tpr],
-               marker='o', s=120, color='red', zorder=5,
-               label=f'Youden optimal (t={best_youden_thresh})')
-    # Mark 95%-recall
-    ax.scatter([best_r95_fpr], [best_r95_tpr],
-               marker='^', s=120, color='green', zorder=5,
-               label=f'95%-recall (t={best_r95_thresh})')
-    # Mark default 0.5
-    ax.scatter([default_fpr], [default_tpr],
-               marker='s', s=100, color='orange', zorder=5,
-               label=f'Default (t=0.50)')
+        # Mark Youden-optimal
+        ax.scatter([best_youden_fpr], [best_youden_tpr],
+                   marker='o', s=120, color='red', zorder=5,
+                   label=f'Youden optimal (t={best_youden_thresh})')
+        # Mark 95%-recall
+        ax.scatter([best_r95_fpr], [best_r95_tpr],
+                   marker='^', s=120, color='green', zorder=5,
+                   label=f'95%-recall (t={best_r95_thresh})')
+        # Mark default 0.5
+        ax.scatter([default_fpr], [default_tpr],
+                   marker='s', s=100, color='orange', zorder=5,
+                   label=f'Default (t=0.50)')
 
-    ax.set_xlabel('False Positive Rate')
-    ax.set_ylabel('True Positive Rate (Recall)')
-    ax.set_title('ROC Curve - Prompt Injection Detector')
-    ax.legend(loc='lower right')
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(ROC_PLOT_PATH, dpi=150)
-    plt.close(fig)
-    print(f"      Saved: {ROC_PLOT_PATH}")
+        ax.set_xlabel('False Positive Rate')
+        ax.set_ylabel('True Positive Rate (Recall)')
+        ax.set_title('ROC Curve - Prompt Injection Detector')
+        ax.legend(loc='lower right')
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(ROC_PLOT_PATH, dpi=150)
+        plt.close(fig)
+        print(f"      Saved: {ROC_PLOT_PATH}")
 
-    print("[5/7] Plotting PR curve ...")
-    sk_precision, sk_recall, _ = precision_recall_curve(labels, probs)
-    pr_auc = auc(sk_recall, sk_precision)
+        print("[5/7] Plotting PR curve ...")
+        sk_precision, sk_recall, _ = precision_recall_curve(labels, probs)
+        pr_auc = auc(sk_recall, sk_precision)
 
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.plot(sk_recall, sk_precision, color='steelblue', lw=2,
-            label=f'PR curve (AUC = {pr_auc:.4f})')
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.plot(sk_recall, sk_precision, color='steelblue', lw=2,
+                label=f'PR curve (AUC = {pr_auc:.4f})')
 
-    # Look up precision at the marked thresholds from sweep data
-    youden_row = metrics_df.loc[
-        metrics_df['threshold'] == best_youden_thresh
-    ].iloc[0]
-    r95_row = metrics_df.loc[
-        metrics_df['threshold'] == best_r95_thresh
-    ].iloc[0]
+        # Look up precision at the marked thresholds from sweep data
+        youden_row = metrics_df.loc[
+            metrics_df['threshold'] == best_youden_thresh
+        ].iloc[0]
+        r95_row = metrics_df.loc[
+            metrics_df['threshold'] == best_r95_thresh
+        ].iloc[0]
 
-    ax.scatter([youden_row['tpr']], [youden_row['precision']],
-               marker='o', s=120, color='red', zorder=5,
-               label=f'Youden optimal (t={best_youden_thresh})')
-    ax.scatter([r95_row['tpr']], [r95_row['precision']],
-               marker='^', s=120, color='green', zorder=5,
-               label=f'95%-recall (t={best_r95_thresh})')
-    ax.scatter([default_tpr], [float(default_row['precision'])],
-               marker='s', s=100, color='orange', zorder=5,
-               label=f'Default (t=0.50)')
+        ax.scatter([youden_row['tpr']], [youden_row['precision']],
+                   marker='o', s=120, color='red', zorder=5,
+                   label=f'Youden optimal (t={best_youden_thresh})')
+        ax.scatter([r95_row['tpr']], [r95_row['precision']],
+                   marker='^', s=120, color='green', zorder=5,
+                   label=f'95%-recall (t={best_r95_thresh})')
+        ax.scatter([default_tpr], [float(default_row['precision'])],
+                   marker='s', s=100, color='orange', zorder=5,
+                   label=f'Default (t=0.50)')
 
-    ax.set_xlabel('Recall')
-    ax.set_ylabel('Precision')
-    ax.set_title('Precision-Recall Curve - Prompt Injection Detector')
-    ax.legend(loc='lower left')
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(PR_PLOT_PATH, dpi=150)
-    plt.close(fig)
-    print(f"      Saved: {PR_PLOT_PATH}")
+        ax.set_xlabel('Recall')
+        ax.set_ylabel('Precision')
+        ax.set_title('Precision-Recall Curve - Prompt Injection Detector')
+        ax.legend(loc='lower left')
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(PR_PLOT_PATH, dpi=150)
+        plt.close(fig)
+        print(f"      Saved: {PR_PLOT_PATH}")
+    else:
+        print("[5/7] matplotlib unavailable -- skipping ROC/PR plot generation.")
 
     # ------------------------------------------------------------------
     # 6. Print summary table

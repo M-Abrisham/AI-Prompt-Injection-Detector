@@ -18,7 +18,7 @@ Output schema::
 Usage::
 
     python scripts/social_scraper.py
-    python scripts/social_scraper.py --since-hours 3 --sources reddit,twitter
+    python scripts/social_scraper.py --since-hours 24 --sources reddit,twitter
     python scripts/social_scraper.py --dry-run --verbose
 """
 
@@ -129,9 +129,11 @@ STATIC_DATASETS = [
         "name": "cyberseceval_prompt_injection",
         "type": "github_json",
         "urls": [
+            # Path updated 2026-03: repo restructured CyberSecEval ->
+            # CybersecurityBenchmarks/datasets
             (
                 "https://raw.githubusercontent.com/meta-llama/PurpleLlama"
-                "/main/CyberSecEval/prompt_injection/test_cases"
+                "/main/CybersecurityBenchmarks/datasets/prompt_injection"
                 "/prompt_injection.json"
             ),
         ],
@@ -219,9 +221,13 @@ def _classify_injection(text):
         return 1, 0.80
     if weak_hits >= 3:
         return 1, 0.60
-    if weak_hits >= 1:
+    if weak_hits >= 2:
         return 1, 0.40
-    return 0, 0.10
+    if weak_hits == 1:
+        # Single weak keyword is too noisy on social posts (e.g., benign
+        # discussion mentioning "jailbreak"), so keep as benign.
+        return 0, 0.20
+    return 0, 0.15
 
 
 def _load_known_hashes(path):
@@ -286,7 +292,7 @@ class RedditAgent:
     using the public JSON API (no authentication required).
     """
 
-    def __init__(self, since_hours=3, verbose=False):
+    def __init__(self, since_hours=24, verbose=False):
         self.since_hours = since_hours
         self.verbose = verbose
         self._last_request = 0.0
@@ -450,11 +456,10 @@ class TwitterAgent:
 
     API_URL = "https://api.twitter.com/2/tweets/search/recent"
 
-    def __init__(self, bearer_token=None, since_hours=3, verbose=False):
+    def __init__(self, bearer_token=None, since_hours=24, verbose=False):
         self.bearer_token = (
-            bearer_token
-            or os.environ.get("TWITTER_BEARER_TOKEN", "")
-        )
+            bearer_token or os.environ.get("TWITTER_BEARER_TOKEN") or ""
+        ).strip()
         self.since_hours = since_hours
         self.verbose = verbose
         self._last_request = 0.0
@@ -513,7 +518,12 @@ class TwitterAgent:
         return records
 
     def search(self):
-        """Run all Twitter searches and return collected records."""
+        """Run all Twitter searches and return collected records.
+
+        Degrades gracefully when ``TWITTER_BEARER_TOKEN`` is missing or
+        invalid -- logs a warning and returns an empty list instead of
+        raising an exception.
+        """
         if not self.bearer_token:
             _log(
                 "TwitterAgent: TWITTER_BEARER_TOKEN not set, skipping",
@@ -774,7 +784,7 @@ class DatasetAgent:
 
 def run_scrape(
     sources=("reddit", "twitter", "datasets"),
-    since_hours=3,
+    since_hours=24,
     output_dir="data/scraped",
     dry_run=False,
     verbose=False,
@@ -909,6 +919,18 @@ def run_scrape(
     with open(history_path, "w") as fh:
         json.dump(history, fh, indent=2)
 
+    # Write latest_scrape.json summary for CI/CD integrations
+    latest_summary = {
+        "total_new": len(new_records),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "sources": list(results.keys()),
+        "records_per_source": {k: len(v) for k, v in results.items()},
+    }
+    latest_path = os.path.join(output_dir, "latest_scrape.json")
+    with open(latest_path, "w") as fh:
+        json.dump(latest_summary, fh, indent=2)
+    _log(f"Wrote summary -> {latest_path}", verbose)
+
     _log(f"Done in {elapsed:.1f}s -- {len(new_records)} new records", verbose)
     return stats
 
@@ -934,8 +956,8 @@ def build_parser():
     parser.add_argument(
         "--since-hours",
         type=int,
-        default=3,
-        help="Scrape content from the last N hours (default: 3).",
+        default=24,
+        help="Scrape content from the last N hours (default: 24).",
     )
     parser.add_argument(
         "--sources",

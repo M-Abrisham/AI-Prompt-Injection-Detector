@@ -20,7 +20,13 @@ from ..layer0.safe_regex import safe_search, RegexTimeoutError
 from .result import RuleHit
 from .rules_registry import RULES
 from .unicode_defense import _fold_angle_homoglyphs, _strip_combining_marks
-from .context import _has_contextual_framing, _is_legitimate_roleplay, _CONTEXT_SUPPRESSIBLE
+from .context import (
+    _has_contextual_framing,
+    _has_strong_contextual_framing,
+    _is_legitimate_roleplay,
+    _CONTEXT_SUPPRESSIBLE,
+    _STRONG_CONTEXT_ONLY_SUPPRESSIBLE,
+)
 from . import paranoia as _paranoia_mod
 from .ioc_extractor import refang
 from ..layer2.syllable_splitting import dehyphenate_suspicious
@@ -113,6 +119,8 @@ def rule_score_detailed(text):
             if _has_contextual_framing(view):
                 has_context = True
                 break
+    # Strong context excludes _QUESTION_FRAME (computed lazily below).
+    has_strong_context = None
     hits = []
     current_pl = _paranoia_mod.get_paranoia_level()
     for rule in RULES:
@@ -139,6 +147,18 @@ def rule_score_detailed(text):
             continue
         if has_context and rule.name in _CONTEXT_SUPPRESSIBLE:
             continue
+        # Strong-context-only suppression: rules that need quoting/educational/
+        # code/narrative framing (not just a question word) to be suppressed.
+        if rule.name in _STRONG_CONTEXT_ONLY_SUPPRESSIBLE:
+            if has_strong_context is None:
+                has_strong_context = _has_strong_contextual_framing(folded)
+                if not has_strong_context:
+                    for view in alt_views:
+                        if _has_strong_contextual_framing(view):
+                            has_strong_context = True
+                            break
+            if has_strong_context:
+                continue
         if rule.name == "roleplay":
             if _is_legitimate_roleplay(folded):
                 continue

@@ -34,7 +34,7 @@ jobs:
         id: check
         run: |
           if [ -f data/harvest/latest_scan.json ]; then
-            count=$(python3 -c "import json; d=json.load(open('data/harvest/latest_scan.json')); print(d.get('total_new', 0))")
+            count=$(python3 -c "import json; d=json.load(open('data/harvest/latest_scan.json')); print(d.get('total_discovered', 0))")
             echo "new_count=$count" >> $GITHUB_OUTPUT
             echo "Found $count new dataset(s)"
           else

@@ -9,3 +9,4 @@ from .pii_detector import scan_pii, PiiScanResult
 from .ocr_extractor import extract_image_metadata, ImageMetadataResult
 from .timeout import Layer0TimeoutError, with_timeout
 from .resource_guard import ResourceLimitExceeded
+from .normalization import quick_normalize_concat

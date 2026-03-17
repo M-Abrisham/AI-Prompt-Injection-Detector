@@ -25,6 +25,20 @@ from .obfuscation import (
     obfuscation_scan,
     shannon_entropy,
     DecodedView,
+    # Externalized named constants (for testing and env var override)
+    PUNCTUATION_FLOOD_RATIO,
+    CASING_TRANSITION_THRESHOLD,
+    CASING_TRANSITION_RATIO,
+    DEFAULT_MAX_DECODES,
+    MIN_BASE64_LENGTH,
+    MIN_HEX_LENGTH,
+    MIN_PRINTABLE_CHARS,
+    MIN_PRINTABLE_RATIO,
+    MIN_CANDIDATE_ALPHA,
+    MIN_ENTROPY_TEXT_LENGTH,
+    MIN_KL_LETTERS,
+    MIN_DECODED_STRIP_LENGTH,
+    ZLIB_COMPRESSION_LEVEL,
 )
 from .morse_code import detect_morse, MorseResult
 from .numeric_decode import (

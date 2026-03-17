@@ -11,6 +11,9 @@ Usage:
     python scripts/evaluate_probes.py --taxonomy lmrc
     python scripts/evaluate_probes.py --json
     python scripts/evaluate_probes.py --buffs
+    python scripts/evaluate_probes.py --buffs --buff-samples 50
+    python scripts/evaluate_probes.py --probes P001 P002
+    python scripts/evaluate_probes.py --buffs --output report.json
 """
 
 import argparse
@@ -101,13 +104,16 @@ def _print_taxonomy_report(results, namespace, label):
         summary["attribution_rate"] * 100))
 
 
-def _run_buff_matrix(classify_fn, seed, num_probes, max_samples):
-    """Run N probes x M buffs and print a recall matrix."""
+def _run_buff_matrix(classify_fn, probe_classes, seed, max_samples):
+    """Run ALL selected probes x ALL buffs and return structured results.
+
+    Returns a dict with:
+      - "matrix": list of per-probe rows, each with per-buff recall
+      - "per_buff_summary": aggregate detection rate per buff across all probes
+      - "per_probe_summary": aggregate detection rate per probe across all buffs
+    """
     buff_instances = [B() for B in ALL_BUFFS]
     buff_names = ["raw"] + [b.name for b in buff_instances]
-
-    # Select a subset of probes (first N from ALL_PROBES)
-    probe_classes = ALL_PROBES[:num_probes]
 
     print("\nBuff mutation matrix ({} probes x {} buffs, {} samples/probe):".format(
         len(probe_classes), len(buff_instances) + 1, max_samples))
@@ -119,49 +125,124 @@ def _run_buff_matrix(classify_fn, seed, num_probes, max_samples):
     print(header)
     print("-" * (25 + 9 * len(buff_names)))
 
+    # Accumulators for per-buff aggregate totals
+    # Index 0 = raw, 1..N = each buff
+    agg_detected = [0] * (len(buff_instances) + 1)
+    agg_total = [0] * (len(buff_instances) + 1)
+
+    matrix_rows = []
+
     for i, ProbeClass in enumerate(probe_classes):
         probe = ProbeClass()
         random.seed(seed + i)
         samples = probe.generate()[:max_samples]
+        n_samples = len(samples)
 
+        row_data = {
+            "probe": probe.category_id,
+            "name": probe.name,
+            "n_samples": n_samples,
+            "buffs": {},
+        }
         row = "{:<25s}".format("{} {}".format(probe.category_id, probe.name[:20]))
 
         # Raw (no buff)
         det = 0
         for text, tech_id in samples:
-            label, prob, hits, l0 = classify_fn(text)
+            label, prob, hits, l0, *_ = classify_fn(text)
             if l0.rejected or ("SAFE" not in label.upper()):
                 det += 1
-        recall = det / len(samples) * 100 if samples else 0
+        recall = det / n_samples * 100 if n_samples else 0
         row += " {:>7.1f}%".format(recall)
+        row_data["buffs"]["raw"] = {"detected": det, "total": n_samples,
+                                     "recall": det / n_samples if n_samples else 0}
+        agg_detected[0] += det
+        agg_total[0] += n_samples
 
         # Each buff
-        for buff in buff_instances:
+        for j, buff in enumerate(buff_instances):
             det = 0
+            tested = 0
+            missed = []
             for text, tech_id in samples:
                 try:
                     mutated = buff.apply(text)
                 except Exception:
                     continue
-                label, prob, hits, l0 = classify_fn(mutated)
+                tested += 1
+                label, prob, hits, l0, *_ = classify_fn(mutated)
                 if l0.rejected or ("SAFE" not in label.upper()):
                     det += 1
-            recall = det / len(samples) * 100 if samples else 0
+                else:
+                    missed.append({"tech_id": tech_id, "confidence": prob,
+                                   "original_snippet": text[:80]})
+            recall = det / tested * 100 if tested else 0
             row += " {:>7.1f}%".format(recall)
+            row_data["buffs"][buff.name] = {
+                "detected": det, "total": tested,
+                "recall": det / tested if tested else 0,
+                "missed_count": len(missed),
+            }
+            agg_detected[j + 1] += det
+            agg_total[j + 1] += tested
 
         print(row)
+        matrix_rows.append(row_data)
+
+    # Print aggregate per-buff summary row
+    print("-" * (25 + 9 * len(buff_names)))
+    agg_row = "{:<25s}".format("AGGREGATE")
+    per_buff_summary = {}
+    for k, name in enumerate(buff_names):
+        pct = agg_detected[k] / agg_total[k] * 100 if agg_total[k] else 0
+        agg_row += " {:>7.1f}%".format(pct)
+        per_buff_summary[name] = {
+            "detected": agg_detected[k],
+            "total": agg_total[k],
+            "recall": agg_detected[k] / agg_total[k] if agg_total[k] else 0,
+        }
+    print(agg_row)
+
+    # Per-buff detection rate summary
+    print("\nPer-buff detection rate summary:")
+    print("{:<15s} {:>7s} {:>7s} {:>8s}".format("Buff", "Det", "Total", "Recall"))
+    print("-" * 40)
+    for name in buff_names:
+        s = per_buff_summary[name]
+        marker = "  <-- WEAK" if s["recall"] < 0.8 else ""
+        print("{:<15s} {:>7d} {:>7d} {:>7.1f}%{}".format(
+            name, s["detected"], s["total"], s["recall"] * 100, marker))
+
+    return {
+        "matrix": matrix_rows,
+        "per_buff_summary": per_buff_summary,
+    }
+
+
+def _select_probes(probe_ids):
+    """Filter ALL_PROBES by category_id list. Returns all if probe_ids is None."""
+    if not probe_ids:
+        return ALL_PROBES
+    id_set = set(probe_ids)
+    selected = [P for P in ALL_PROBES if P.category_id in id_set]
+    missing = id_set - {P.category_id for P in selected}
+    if missing:
+        print("WARNING: unknown probe IDs: {}".format(", ".join(sorted(missing))))
+    return selected
 
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate taxonomy probes")
+    parser.add_argument("--probes", nargs="*", default=None,
+                        help="Probe category_ids to evaluate (default: all)")
     parser.add_argument("--taxonomy", choices=["owasp", "avid", "lmrc", "all"],
                         default=None, help="Show results grouped by external taxonomy")
     parser.add_argument("--json", action="store_true",
                         help="Write full results to data/evaluation/probe_results.json")
+    parser.add_argument("--output", type=str, default=None,
+                        help="Custom JSON report output path")
     parser.add_argument("--buffs", action="store_true",
-                        help="Run buff mutation matrix (probe x encoding)")
-    parser.add_argument("--buff-probes", type=int, default=3,
-                        help="Number of probes to test in buff matrix (default: 3)")
+                        help="Run buff mutation sweep across ALL probes x ALL buffs")
     parser.add_argument("--buff-samples", type=int, default=20,
                         help="Max samples per probe in buff matrix (default: 20)")
     parser.add_argument("--seed", type=int, default=42)
@@ -170,11 +251,13 @@ def main():
     print("Loading model...")
     classify_fn = _load_classifier()
 
-    print("Evaluating {} probes...\n".format(len(ALL_PROBES)))
+    selected_probes = _select_probes(args.probes)
+
+    print("Evaluating {} probes...\n".format(len(selected_probes)))
     all_results = []
     start = time.time()
 
-    for i, ProbeClass in enumerate(ALL_PROBES):
+    for i, ProbeClass in enumerate(selected_probes):
         probe = ProbeClass()
         random.seed(args.seed + i)
         result = probe.evaluate(classify_fn)
@@ -204,16 +287,20 @@ def main():
         ns, label = taxonomy_map[args.taxonomy]
         _print_taxonomy_report(all_results, ns, label)
 
-    # Buff mutation matrix
+    # Buff mutation matrix — sweep ALL selected probes x ALL buffs
+    buff_results = None
     if args.buffs:
-        _run_buff_matrix(classify_fn, args.seed, args.buff_probes, args.buff_samples)
+        buff_results = _run_buff_matrix(
+            classify_fn, selected_probes, args.seed, args.buff_samples)
 
     # JSON output
-    if args.json:
+    json_path = args.output
+    if args.json and not json_path:
         out_dir = os.path.join(_project_root, "data", "evaluation")
         os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, "probe_results.json")
+        json_path = os.path.join(out_dir, "probe_results.json")
 
+    if json_path:
         # Strip missed_samples text for JSON (keep tech_id and prob only)
         for r in all_results:
             r["missed_samples"] = [
@@ -221,9 +308,15 @@ def main():
                 for _, t, p in r["missed_samples"]
             ]
 
-        with open(out_path, "w") as f:
-            json.dump(all_results, f, indent=2)
-        print("\nResults written to: {}".format(out_path))
+        report = {"probe_results": all_results}
+        if buff_results is not None:
+            report["buff_matrix"] = buff_results
+
+        out_dir = os.path.dirname(os.path.abspath(json_path))
+        os.makedirs(out_dir, exist_ok=True)
+        with open(json_path, "w") as f:
+            json.dump(report, f, indent=2)
+        print("\nResults written to: {}".format(json_path))
 
 
 if __name__ == "__main__":

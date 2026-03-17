@@ -34,7 +34,6 @@ sources:
     split: "train"
     text_column: "instruction"
     label: 0
-    max_samples: 2000
     output: "hf_alpaca.csv"
 
   dolly:
@@ -43,7 +42,6 @@ sources:
     split: "train"
     text_column: "instruction"
     label: 0
-    max_samples: 2000
     output: "hf_dolly.csv"
 
   openassistant:
@@ -54,8 +52,39 @@ sources:
     label: 0
     filter:
       role: "prompter"
-    max_samples: 1000
     output: "hf_openassistant.csv"
+
+  chatbot_instruction_prompts:
+    type: huggingface
+    repo: "alespalla/chatbot_instruction_prompts"
+    split: "train"
+    text_column: "prompt"
+    label: 0
+    output: "hf_chatbot_instruction_prompts.csv"
+
+  llm_lat_benign:
+    type: huggingface
+    repo: "LLM-LAT/benign-dataset"
+    split: "train"
+    text_column: "prompt"
+    label: 0
+    output: "hf_llm_lat_benign.csv"
+
+  wizardlm_evol_instruct:
+    type: huggingface
+    repo: "WizardLMTeam/WizardLM_evol_instruct_70k"
+    split: "train"
+    text_column: "instruction"
+    label: 0
+    output: "hf_wizardlm_evol_instruct.csv"
+
+  ultrachat_200k:
+    type: huggingface
+    repo: "HuggingFaceH4/ultrachat_200k"
+    split: "train_sft"
+    text_column: "prompt"
+    label: 0
+    output: "hf_ultrachat_200k.csv"
 
   # ── HuggingFace — prompt injection datasets ─────────────────────
 
@@ -97,12 +126,11 @@ sources:
     repo: "hackaprompt/hackaprompt-dataset"
     split: "train"
     text_column: "user_input"
-    label: 1  # all rows are injection attempts
+    label: 1
     gated: true
-    max_samples: 5000
     output: "hf_hackaprompt.csv"
 
-  # ── HuggingFace — aggregated prompt injection datasets (large) ──
+  # ── HuggingFace — large aggregated datasets (uncapped) ──────────
 
   imoxto_cleaned:
     type: huggingface
@@ -113,7 +141,6 @@ sources:
     label_map:
       0: 0
       1: 1
-    max_samples: 50000
     output: "hf_imoxto_cleaned.csv"
 
   geekyrakshit:
@@ -125,7 +152,6 @@ sources:
     label_map:
       0: 0
       1: 1
-    max_samples: 50000
     output: "hf_geekyrakshit.csv"
 
   gandalf_rct:
@@ -139,7 +165,7 @@ sources:
       false: 0
     filter:
       kind: "prompt"
-    max_samples: 50000
+    max_samples: 100000
     output: "hf_gandalf_rct.csv"
 
   llmail_inject:
@@ -147,8 +173,7 @@ sources:
     repo: "microsoft/llmail-inject-challenge"
     split: "Phase1"
     text_column: "body"
-    label: 1  # all are injection attempts
-    max_samples: 50000
+    label: 1
     output: "hf_llmail_inject.csv"
 
   ctf_satml24:
@@ -158,6 +183,97 @@ sources:
     split: "attack"
     text_column: "history"
     label: 1
-    max_samples: 10000
     output: "hf_ctf_satml24.csv"
-    note: "Nested history column requires flattening"
+
+  # ── HuggingFace — NEW large datasets ────────────────────────────
+
+  guychuk_classification:
+    type: huggingface
+    repo: "guychuk/benign-malicious-prompt-classification"
+    split: "train"
+    text_column: "prompt"
+    label_column: "label"
+    label_map:
+      0: 0
+      1: 1
+    output: "hf_guychuk_classification.csv"
+
+  # gentelbench: DISABLED — parquet CastError in jailbreaking_attack_dataset.parquet
+  # gentelbench:
+  #   type: huggingface
+  #   repo: "GenTelLab/gentelbench-v1"
+  #   split: "train"
+  #   text_column: "text"
+  #   label_column: "label"
+  #   label_map:
+  #     0: 0
+  #     1: 1
+  #   output: "hf_gentelbench.csv"
+
+  alert_standard:
+    type: huggingface
+    repo: "Babelscape/ALERT"
+    config: "alert"
+    split: "test"
+    text_column: "prompt"
+    label: 1
+    output: "hf_alert_standard.csv"
+
+  alert_adversarial:
+    type: huggingface
+    repo: "Babelscape/ALERT"
+    config: "alert_adversarial"
+    split: "test"
+    text_column: "prompt"
+    label: 1
+    output: "hf_alert_adversarial.csv"
+
+  jailbreakv_28k:
+    type: huggingface
+    repo: "JailbreakV-28K/JailBreakV-28k"
+    config: "JailBreakV_28K"
+    split: "JailBreakV_28K"
+    text_column: "jailbreak_query"
+    label: 1
+    output: "hf_jailbreakv_28k.csv"
+
+  salad_data_base:
+    type: huggingface
+    repo: "OpenSafetyLab/Salad-Data"
+    config: "base_set"
+    split: "train"
+    text_column: "question"
+    label: 1
+    output: "hf_salad_data_base.csv"
+
+  salad_data_attack:
+    type: huggingface
+    repo: "OpenSafetyLab/Salad-Data"
+    config: "attack_enhanced_set"
+    split: "train"
+    text_column: "augq"
+    label: 1
+    output: "hf_salad_data_attack.csv"
+
+  jailbreakhub:
+    type: huggingface
+    repo: "walledai/JailbreakHub"
+    split: "train"
+    text_column: "prompt"
+    label_column: "jailbreak"
+    label_map:
+      true: 1
+      false: 0
+    output: "hf_jailbreakhub.csv"
+
+  qualifire_benchmark:
+    type: huggingface
+    repo: "qualifire/prompt-injection-jailbreak-dataset"
+    split: "train"
+    text_column: "text"
+    label_column: "label"
+    label_map:
+      0: 0
+      1: 1
+    trust_tier: 2
+    output: "hf_qualifire_benchmark.csv"

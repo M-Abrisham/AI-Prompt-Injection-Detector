@@ -33,6 +33,12 @@ class TestScanResultToDict:
             "rejected",
             "rejection_reason",
             "cascade_stage",
+            "embedding_score",
+            "model_version",
+            "perplexity_score",
+            "judge_reasoning",
+            "output_scan_flags",
+            "output_scan_risk",
             "elapsed_ms",
         }
         assert set(d.keys()) == expected_keys
@@ -160,7 +166,7 @@ class TestOutputScanResultToDict:
     def test_has_all_keys(self):
         r = OutputScanResult(is_suspicious=False, risk_score=0.0)
         d = r.to_dict()
-        expected_keys = {"is_suspicious", "risk_score", "flags", "redacted_text"}
+        expected_keys = {"is_suspicious", "risk_score", "flags", "redacted_text", "technique_ids"}
         assert set(d.keys()) == expected_keys
 
     def test_populated_values(self):

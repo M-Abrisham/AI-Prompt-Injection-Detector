@@ -2,7 +2,8 @@
 
 Detects the primary language of input text and flags non-English or
 mixed-language content.  Uses the ``langdetect`` library when available;
-gracefully degrades to ``unknown`` when it is not installed.
+gracefully degrades to a built-in heuristic that uses Unicode script
+analysis and non-English stopword detection.
 
 Technique mapping:
     non_english_input    -> D6   (Multilingual Injection)
@@ -11,6 +12,7 @@ Technique mapping:
 
 import logging
 import re
+import unicodedata
 
 _logger = logging.getLogger(__name__)
 
@@ -26,14 +28,14 @@ try:
     _HAS_LANGDETECT = True
 except ImportError:
     _HAS_LANGDETECT = False
-    _logger.debug("langdetect not installed; language detection disabled")
+    _logger.debug("langdetect not installed; using built-in heuristic")
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-# Minimum character count for reliable detection.  Below this threshold the
-# library returns unreliable guesses so we report "unknown" instead.
+# Minimum character count for reliable langdetect detection.  Below this
+# threshold the library returns unreliable guesses so we use heuristics.
 _MIN_CHARS_FOR_DETECTION = 20
 
 # Confidence threshold -- below this we treat the result as unreliable.
@@ -43,19 +45,101 @@ _MIN_CONFIDENCE = 0.5
 # Thai, or other non-Latin script blocks -- used for mixed-language detection.
 _NON_LATIN_RE = re.compile(
     "["
-    "؀-ۿ"   # Arabic
-    "Ѐ-ӿ"   # Cyrillic
-    "ऀ-ॿ"   # Devanagari
-    "฀-๿"   # Thai
-    "぀-ヿ"   # Hiragana + Katakana
-    "一-鿿"   # CJK Unified
-    "가-힯"   # Hangul Syllables
-    "㐀-䶿"   # CJK Extension A
-    "𠀀-𪛟"  # CJK Extension B
+    "\u0600-\u06ff"   # Arabic
+    "\u0400-\u04ff"   # Cyrillic
+    "\u0900-\u097f"   # Devanagari
+    "\u0e00-\u0e7f"   # Thai
+    "\u3040-\u30ff"   # Hiragana + Katakana
+    "\u4e00-\u9fff"   # CJK Unified
+    "\uac00-\ud7af"   # Hangul Syllables
+    "\u3400-\u4dbf"   # CJK Extension A
+    "\U00020000-\U0002a6df"  # CJK Extension B
     "]"
 )
 
 _LATIN_LETTER_RE = re.compile(r"[a-zA-Z]")
+
+# ---------------------------------------------------------------------------
+# Latin-script non-English stopword detection
+# ---------------------------------------------------------------------------
+# Common function words in major non-English languages that use the Latin
+# script.  These words are extremely common in their respective languages
+# but virtually never appear in English text.  We require multiple hits
+# to avoid false positives from loanwords or proper nouns.
+#
+# Covers: French, Spanish, Portuguese, German, Italian, Dutch, Turkish,
+# Romanian, Polish, Czech, Swedish, Danish, Norwegian, Indonesian/Malay,
+# Swahili, Estonian, Croatian, and transliterated Arabic/Japanese/Hindi.
+_NON_ENGLISH_STOPWORDS = frozenset({
+    # French
+    "les", "des", "une", "est", "pas", "sont", "mais", "dans", "avec",
+    "pour", "sur", "tout", "qui", "que", "cette", "ses", "ces", "vous",
+    "nous", "ils", "ont", "aux", "oubliez", "affichez", "devoilez",
+    "comme", "aucune", "votre", "vos", "tous", "sans", "aucun", "etre",
+    "peut", "aussi", "chez", "entre", "depuis", "vers", "avant", "apres",
+    "tres", "pouvez", "quelque", "chose", "bonjour", "merci", "puis",
+    "allez", "comment", "aujourd", "puis",
+    # Spanish
+    "los", "las", "una", "del", "con", "por", "como", "pero", "sus",
+    "mas", "hay", "sin", "puede", "esta", "este", "esto", "ese", "esa",
+    "donde", "cuando", "porque", "cual", "entre", "desde", "todos",
+    "otro", "otra", "otros", "cada", "algo", "sido", "tiene", "muy",
+    "favor", "hola", "pueden", "ayudar",
+    "olvidate", "revelame", "secretos", "guardados",
+    # Portuguese
+    "nao", "uma", "dos", "foi", "com", "por", "mais", "como", "pode",
+    "tem", "para", "isso", "todo", "essa", "este", "tudo", "muito",
+    "tambem", "receita", "fazer", "preciso",
+    # German
+    "und", "die", "der", "das", "ein", "eine", "ist", "nicht", "mit",
+    "den", "von", "auf", "ich", "sie", "wir", "sind", "auch", "haben",
+    "oder", "werden", "kann", "nach", "vor", "noch", "nur", "wie",
+    "vergiss", "enthuelle", "geheimen", "wurde", "alles",
+    # Italian
+    "gli", "dei", "del", "che", "con", "sono", "una", "questo", "anche",
+    "essere", "hanno", "suo", "sua", "suoi", "loro", "tutto", "tutti",
+    # Dutch
+    "het", "een", "van", "dat", "met", "zijn", "niet", "voor", "ook",
+    "nog", "wel", "maar", "deze", "naar",
+    # Turkish
+    "bir", "ile", "olan", "gibi", "daha", "icin", "kadar", "sonra",
+    "bana", "unut", "goster", "sifreleri", "hepsini",
+    # Romanian
+    "este", "sunt", "din", "pentru", "prin", "care", "dar",
+    # Transliterated Arabic (Arabizi)
+    "kull", "sabiqan", "ikshif", "qeel", "insa",
+    # Transliterated Japanese (Romaji)
+    "subete", "meirei", "wasurete", "oshiete", "himitsu",
+    # Transliterated Chinese (Pinyin)
+    "suoyou", "mingling", "wangji", "yiqian",
+    # Transliterated Hindi (Hinglish)
+    "sabhi", "aadesh", "bhool", "pehle", "diye", "gaye", "batao",
+    # Transliterated Korean
+    "modeun", "jisileul", "musihago", "ijeonui",
+    # Transliterated Russian
+    "predydushchie", "pravila", "pokashi", "skrytuyu", "otmeni",
+    # Indonesian/Malay
+    "dari", "atau", "juga", "akan", "sudah",
+})
+
+# Minimum number of non-English stopword hits required to flag text.
+# Require >= 2 to avoid false positives from isolated loanwords.
+_MIN_STOPWORD_HITS = 2
+
+# Regex for Latin Extended characters (accented letters common in European
+# languages but rare in English).  Covers Latin Extended-A, Extended-B,
+# and Latin Extended Additional.
+_LATIN_EXTENDED_RE = re.compile(
+    "["
+    "\u00c0-\u024f"  # Latin Extended-A + Extended-B (accented chars)
+    "\u1e00-\u1eff"  # Latin Extended Additional
+    "]"
+)
+
+# Minimum ratio of Latin Extended characters to total alpha characters
+# to flag as likely non-English.  French/Spanish/German text typically
+# has 3-8% accented characters; English text has near 0%.
+_MIN_ACCENT_RATIO = 0.02  # 2% of alpha chars
 
 
 # ---------------------------------------------------------------------------
@@ -97,27 +181,25 @@ def detect_language(text):
     if not text or not text.strip():
         return result
 
-    # --- Guard: text too short for reliable detection ---
-    # Script-based heuristic works without langdetect, so check BEFORE
-    # the langdetect availability guard.
     stripped = text.strip()
+
+    # --- Short text: always use heuristic (langdetect unreliable) ---
     if len(stripped) < _MIN_CHARS_FOR_DETECTION:
-        # Even for short text, use script heuristic for non-Latin detection
         return _heuristic_detect(stripped)
 
-    # --- Guard: langdetect not available ---
+    # --- langdetect not available: use enhanced heuristic fallback ---
     if not _HAS_LANGDETECT:
-        return result
+        return _heuristic_detect(stripped)
 
     # --- Primary detection via langdetect ---
     try:
         langs = detect_langs(stripped)
     except LangDetectException:
         _logger.debug("langdetect raised LangDetectException for input")
-        return result
+        return _heuristic_detect(stripped)
 
     if not langs:
-        return result
+        return _heuristic_detect(stripped)
 
     top = langs[0]
     # langdetect returns objects with .lang and .prob attributes
@@ -164,11 +246,19 @@ def detect_language(text):
 # ---------------------------------------------------------------------------
 
 def _heuristic_detect(text):
-    """Fallback detection for short text using Unicode script analysis.
+    """Fallback detection using Unicode script analysis and stopword matching.
 
-    For text shorter than _MIN_CHARS_FOR_DETECTION we do not trust
-    langdetect but we can still check for non-Latin scripts which are
-    a strong signal of non-English content.
+    Uses three complementary signals to detect non-English content
+    without requiring the ``langdetect`` library:
+
+    1. **Non-Latin script detection**: CJK, Arabic, Cyrillic, Devanagari,
+       Thai, Hangul characters are strong signals of non-English content.
+    2. **Latin Extended / accented character detection**: Characters like
+       accented vowels common in French, Spanish, German, Portuguese, etc.
+       but rare in English.
+    3. **Non-English stopword detection**: Matching common function words
+       from major non-English languages (requires >= 2 hits to avoid
+       false positives from loanwords).
     """
     result = {
         "detected_language": "unknown",
@@ -181,15 +271,30 @@ def _heuristic_detect(text):
     has_latin = bool(_LATIN_LETTER_RE.search(text))
 
     if has_non_latin and has_latin:
-        # Mixed scripts in short text
+        # Mixed scripts -- both Latin letters and non-Latin characters
         result["is_non_english"] = True
         result["anomaly_flags"].append("non_english_input")
         result["anomaly_flags"].append("mixed_language_input")
-    elif has_non_latin and not has_latin:
-        # Purely non-Latin short text
+        return result
+
+    if has_non_latin and not has_latin:
+        # Purely non-Latin text (Arabic, CJK, Cyrillic, etc.)
         result["is_non_english"] = True
         result["anomaly_flags"].append("non_english_input")
-    # else: purely Latin short text -- treat as unknown/English, no flags
+        return result
+
+    # --- Latin-script text: check for non-English indicators ---
+    # Signal 1: Accented / Latin Extended characters
+    if _has_significant_accented_chars(text):
+        result["is_non_english"] = True
+        result["anomaly_flags"].append("non_english_input")
+        return result
+
+    # Signal 2: Non-English stopword frequency
+    if _has_non_english_stopwords(text):
+        result["is_non_english"] = True
+        result["anomaly_flags"].append("non_english_input")
+        return result
 
     return result
 
@@ -204,3 +309,31 @@ def _has_mixed_scripts(text):
     has_non_latin = bool(_NON_LATIN_RE.search(text))
     has_latin = bool(_LATIN_LETTER_RE.search(text))
     return has_non_latin and has_latin
+
+
+def _has_significant_accented_chars(text):
+    """Return True if text contains a significant proportion of accented
+    Latin characters (common in European non-English languages)."""
+    alpha_count = sum(1 for ch in text if ch.isalpha())
+    if alpha_count < 10:
+        return False
+    accent_count = len(_LATIN_EXTENDED_RE.findall(text))
+    return accent_count / alpha_count >= _MIN_ACCENT_RATIO
+
+
+def _has_non_english_stopwords(text):
+    """Return True if text contains >= _MIN_STOPWORD_HITS non-English
+    stopwords.
+
+    Tokenizes on whitespace and punctuation boundaries, lowercases,
+    and checks against the stopword set.
+    """
+    # Split on non-alpha characters to get word tokens
+    words = re.findall(r"[a-zA-Z\u00c0-\u024f]+", text.lower())
+    hits = 0
+    for word in words:
+        if word in _NON_ENGLISH_STOPWORDS:
+            hits += 1
+            if hits >= _MIN_STOPWORD_HITS:
+                return True
+    return False

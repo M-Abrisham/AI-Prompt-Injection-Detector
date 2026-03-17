@@ -46,6 +46,8 @@ categories:
       D1.18: { name: "Semantic-paraphrase", severity: high }
       D1.19: { name: "Recursive-self-jailbreak", severity: high }
       D1.20: { name: "Context-memory-poisoning", severity: high }
+      D1.21: { name: "Sleeper trigger planting", severity: critical }
+      D1.22: { name: "False prior context injection", severity: high }
 
   D2:
     name: "Persona/Roleplay Hijack"
@@ -151,6 +153,7 @@ categories:
       D7.3: { name: "Code-block-hiding", severity: high }
       D7.4: { name: "Nested-encoding", severity: high }
       D7.5: { name: "Token-smuggling (GCG-style)", severity: critical }
+      D7.6: { name: "Multi-turn escalation", severity: high }
 
   D8:
     name: "Context Window Manipulation"
@@ -169,6 +172,8 @@ categories:
       D8.2: { name: "Conversation-history-stuffing", severity: high }
       D8.3: { name: "Document-overflow", severity: medium }
       D8.4: { name: "Strategic-displacement", severity: critical }
+      D8.5: { name: "State-confusion", severity: high }
+      D8.6: { name: "Attention-hijacking", severity: high }
 
   # ════════════════════════════════════════════════════════════════
   # Category I — Indirect Prompt Injection
@@ -191,6 +196,10 @@ categories:
       I1.2: { name: "Document-injection", severity: critical }
       I1.3: { name: "Email-injection", severity: high }
       I1.4: { name: "Database-poisoning", severity: critical }
+      I1.5: { name: "Vector DB poisoning", severity: critical }
+      I1.6: { name: "Agent memory poisoning", severity: high }
+      I1.7: { name: "Email signature/footer injection", severity: high }
+      I1.8: { name: "Broad-distribution injection", severity: high }
 
   I2:
     name: "HTML/Markup Injection"
@@ -286,7 +295,10 @@ categories:
       O1.5: { name: "CSAM/illegal-content", severity: critical }
       O2.1: { name: "Markdown-injection", severity: medium }
       O2.2: { name: "Link-injection", severity: medium }
-      O2.3: { name: "Code-injection-output", severity: high }
+      O2.3: { name: "JSON output injection", severity: high }
+      O2.4: { name: "SQL-in-output injection", severity: critical }
+      O2.5: { name: "API call manipulation", severity: high }
+      O2.6: { name: "Code-injection-output", severity: high }
 
   # ════════════════════════════════════════════════════════════════
   # Category T — Agent/Tool Abuse
@@ -358,6 +370,35 @@ categories:
       P1.3: { name: "Training-data-extraction", severity: high }
       P1.4: { name: "Cross-session-leakage", severity: high }
       P1.5: { name: "API-key-extraction", severity: critical }
+      P1.6: { name: "Memory exfiltration via persistence", severity: high }
+
+  P2:
+    name: "Privacy Extraction Attacks"
+    description: "Attacks that extract private training data, perform membership inference, or elicit PII through privacy-framed requests."
+    type: privacy
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm06"
+    expected_layers: ["L1", "L9"]
+    techniques:
+      P2.1: { name: "Training data extraction", severity: critical }
+      P2.2: { name: "Membership inference", severity: high }
+      P2.3: { name: "PII elicitation", severity: high }
+      P2.4: { name: "System prompt extraction via privacy framing", severity: high }
+
+  P3:
+    name: "Malicious Code Generation"
+    description: "Attempts to get the model to generate malware, exploit code, or obfuscated malicious programs."
+    type: compliance
+    severity: critical
+    tags:
+      - "owasp-llm:2025:llm02"
+    expected_layers: ["L1", "L9"]
+    techniques:
+      P3.1: { name: "Malware generation", severity: critical }
+      P3.2: { name: "Exploit code request", severity: critical }
+      P3.3: { name: "Obfuscated malware", severity: critical }
+      P3.4: { name: "Vulnerability exploitation guidance", severity: high }
 
   # ════════════════════════════════════════════════════════════════
   # Category M — Multi-Modal Injection
@@ -373,11 +414,24 @@ categories:
       - "avid-effect:security:S0403"
     expected_layers: ["layer0", "layer1_ml"]
     techniques:
-      M1.1: { name: "Image-text-injection (OCR)", severity: high }
-      M1.2: { name: "Image-steganography", severity: high }
-      M1.3: { name: "Audio-injection", severity: medium }
-      M1.4: { name: "PDF-hidden-text", severity: high }
-      M1.5: { name: "SVG-script-injection", severity: high }
+      # M1 — Image Injection
+      M1.1: { name: "Hidden text in images", severity: high }
+      M1.2: { name: "Adversarial image perturbation", severity: high }
+      M1.3: { name: "Steganographic payload", severity: high }
+      # M2 — Audio Injection
+      M2.1: { name: "Hidden voice commands", severity: medium }
+      M2.2: { name: "Adversarial audio", severity: high }
+      M2.3: { name: "Ultrasonic injection", severity: high }
+      # M3 — Document Injection
+      M3.1: { name: "PDF/DOCX hidden content", severity: high }
+      M3.2: { name: "Metadata injection", severity: medium }
+      M3.3: { name: "Font-based steganography", severity: high }
+      M3.4: { name: "Embedded macro injection", severity: high }
+      # M4 — Code Injection
+      M4.1: { name: "Code comment injection", severity: high }
+      M4.2: { name: "Variable naming attacks", severity: medium }
+      M4.3: { name: "Docstring injection", severity: high }
+      M4.4: { name: "Import chain poisoning", severity: critical }
 
   # ════════════════════════════════════════════════════════════════
   # Category S — Supply Chain / Model Integrity
@@ -402,6 +456,9 @@ categories:
       S1.3: { name: "Training-data-poisoning", severity: critical }
       S1.4: { name: "Dependency-compromise", severity: critical }
       S1.5: { name: "Fingerprint-store-manipulation", severity: high }
+      S1.6: { name: "Reward-hacking", severity: high }
+      S1.7: { name: "Alignment-tax-exploitation", severity: high }
+      S1.8: { name: "Shadow-fine-tuning", severity: critical }
 
   # ════════════════════════════════════════════════════════════════
   # Category C — Compliance / Policy Evasion
@@ -426,3 +483,268 @@ categories:
       C1.3: { name: "Academic-framing", severity: medium }
       C1.4: { name: "Emotional-manipulation", severity: medium }
       C1.5: { name: "Authority-impersonation", severity: high }
+      C1.6: { name: "Sycophancy-exploitation", severity: high }
+      C1.7: { name: "Conflicting-instruction-injection", severity: high }
+      C1.8: { name: "Negation-confusion", severity: medium }
+
+  C1:
+    name: "Compliance/Policy Evasion (C1)"
+    description: "Social-engineering and logic-based evasion of LLM safety policies (gradual escalation, analogy, academic framing, emotional manipulation, authority, sycophancy, conflicting instructions, negation confusion)."
+    type: evasion
+    severity: medium
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "owasp-llm:2025:llm09"
+      - "avid-effect:security:S0403"
+      - "avid-effect:ethics:E0301"
+      - "risk-cards:lmrc:manipulation"
+      - "risk-cards:lmrc:harmful_instructions"
+    expected_layers: ["layer1_ml"]
+    techniques:
+      C1.1: { name: "Gradual-escalation", severity: medium }
+      C1.2: { name: "Analogical-bypass", severity: medium }
+      C1.3: { name: "Academic-framing", severity: medium }
+      C1.4: { name: "Emotional-manipulation", severity: medium }
+      C1.5: { name: "Authority-impersonation", severity: high }
+      C1.6: { name: "Sycophancy-exploitation", severity: high }
+      C1.7: { name: "Conflicting-instruction-injection", severity: high }
+      C1.8: { name: "Negation-confusion", severity: medium }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category IM — Inter-Model Propagation
+  # ════════════════════════════════════════════════════════════════
+
+  IM:
+    name: "Inter-Model Propagation"
+    description: "Attacks that propagate between AI models in multi-agent systems, pipelines, or cascading architectures."
+    type: indirect
+    severity: critical
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "owasp-llm:2025:llm15"
+    expected_layers: ["L1", "L9"]
+    techniques:
+      IM1.1: { name: "Recursive prompt injection", severity: critical }
+      IM1.2: { name: "Output-to-input chaining", severity: critical }
+      IM1.3: { name: "Instruction amplification", severity: high }
+      IM1.4: { name: "Cross-model context smuggling", severity: high }
+      IM1.5: { name: "Cascading jailbreak", severity: critical }
+      IM2.1: { name: "Judge model manipulation", severity: critical }
+      IM2.2: { name: "Supervisor prompt override", severity: critical }
+      IM2.3: { name: "Evaluation metric gaming", severity: high }
+      IM3.1: { name: "Agent-to-agent injection", severity: critical }
+      IM3.2: { name: "Shared memory poisoning", severity: high }
+      IM3.3: { name: "Tool output injection", severity: high }
+      IM3.4: { name: "Delegation chain exploit", severity: high }
+      IM3.5: { name: "Multi-agent consensus manipulation", severity: medium }
+      IM4.1: { name: "Transparent proxy injection", severity: high }
+      IM4.2: { name: "API response tampering", severity: high }
+      IM4.3: { name: "Middleware payload injection", severity: high }
+      # IM5 — Supply Chain & Trust Exploitation
+      IM5.1: { name: "Browser extension hijacking", severity: critical }
+      IM5.2: { name: "API gateway tampering", severity: critical }
+      IM5.3: { name: "MCP tool poisoning", severity: critical }
+      IM5.4: { name: "Rug-pull attack (model swap after trust)", severity: critical }
+      IM5.5: { name: "Supply chain model poisoning", severity: critical }
+      IM5.6: { name: "Prompt template poisoning", severity: high }
+      IM5.7: { name: "Checkpoint poisoning", severity: critical }
+      # IM6 — Ecosystem & Marketplace Attacks
+      IM6.1: { name: "Shared memory/context poisoning", severity: high }
+      IM6.2: { name: "Plugin marketplace attacks", severity: high }
+      IM6.3: { name: "Model registry tampering", severity: critical }
+      IM6.4: { name: "Inference API hijacking", severity: critical }
+      IM6.5: { name: "Federated learning poisoning", severity: critical }
+      IM6.6: { name: "Model card/documentation deception", severity: high }
+    defenses:
+      DM0007.1: { name: "Inter-model authentication", description: "Mutual authentication between models in a pipeline" }
+      DM0007.2: { name: "Output sanitization between models", description: "Sanitize all model outputs before passing to next stage" }
+      DM0007.3: { name: "Trust boundary enforcement", description: "Enforce strict trust boundaries between pipeline stages" }
+      DM0007.4: { name: "Model provenance verification", description: "Verify model identity and integrity before accepting output" }
+      DM0007.5: { name: "Communication channel integrity", description: "Ensure integrity of inter-model communication channels" }
+      DM0007.6: { name: "Behavioral monitoring", description: "Monitor model behavior for anomalous inter-model interactions" }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category IG — Ingestion Manipulation
+  # ════════════════════════════════════════════════════════════════
+
+  IG:
+    name: "Ingestion Manipulation"
+    description: "Attacks targeting the data ingestion pipeline: RAG poisoning, vector DB injection, embedding collision, and retrieval manipulation."
+    type: indirect
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+    expected_layers: ["L1", "L9"]
+    techniques:
+      IG1.1: { name: "RAG context poisoning", severity: critical }
+      IG1.2: { name: "Vector DB injection", severity: critical }
+      IG1.3: { name: "Adversarial retrieval manipulation", severity: high }
+      IG1.4: { name: "Cross-chunk boundary injection", severity: high }
+      IG1.5: { name: "Embedding collision attack", severity: high }
+      IG1.6: { name: "Backdoor model insertion", severity: critical }
+      IG1.7: { name: "ETL pipeline compromise", severity: high }
+      IG1.8: { name: "Agent memory poisoning", severity: high }
+      IG2.1: { name: "Retrieval result reranking attack", severity: medium }
+      IG2.2: { name: "Document metadata injection", severity: medium }
+      IG2.3: { name: "Embedding space manipulation", severity: high }
+      IG2.4: { name: "Index poisoning", severity: high }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category AD — Altered Delivery
+  # ════════════════════════════════════════════════════════════════
+
+  AD:
+    name: "Altered Delivery"
+    description: "Attacks delivered through compromised infrastructure, supply chain, or deployment mechanisms rather than direct prompt input."
+    type: supply
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm05"
+    expected_layers: ["L11"]
+    techniques:
+      AD1.1: { name: "Browser extension hijacking", severity: critical }
+      AD1.2: { name: "API gateway tampering", severity: critical }
+      AD1.3: { name: "MCP tool poisoning", severity: critical }
+      AD1.4: { name: "Rug-pull attack", severity: critical }
+      AD1.5: { name: "Proxy MITM injection", severity: high }
+      AD1.6: { name: "SDK patch injection", severity: high }
+      AD2.1: { name: "Framework CVE exploitation", severity: critical }
+      AD2.2: { name: "Framework deserialization attack", severity: critical }
+      AD2.3: { name: "Plugin supply chain compromise", severity: high }
+      AD2.4: { name: "Webhook callback injection", severity: high }
+      AD2.5: { name: "OAuth scope escalation", severity: high }
+      AD2.6: { name: "Custom tool trojan", severity: high }
+      AD2.7: { name: "Config override injection", severity: medium }
+      AD3.1: { name: "Transport signing bypass", severity: high }
+      AD3.2: { name: "Prompt attestation forgery", severity: high }
+      AD3.3: { name: "Tool validation bypass", severity: medium }
+      AD3.4: { name: "MCP integrity check evasion", severity: medium }
+      AD3.5: { name: "Extension allowlist bypass", severity: medium }
+      AD3.6: { name: "API request signing bypass", severity: medium }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category CT — Combo Techniques
+  # ════════════════════════════════════════════════════════════════
+
+  CT:
+    name: "Combo Techniques"
+    description: "Realistic multi-technique attacks that combine 2-3 injection techniques simultaneously to evade layered defenses."
+    type: composite
+    severity: critical
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+      - "avid-effect:security:S0402"
+    expected_layers: ["layer0", "layer1_ml", "layer2_rules"]
+    techniques:
+      # CT1 — Two-technique combos
+      CT1.1:  { name: "Instruction-override + Base64-encoding", severity: critical }
+      CT1.2:  { name: "Instruction-override + Role-impersonation", severity: critical }
+      CT1.3:  { name: "Base64-encoding + Payload-splitting", severity: high }
+      CT1.4:  { name: "Instruction-override + Markdown-delimiter", severity: high }
+      CT1.5:  { name: "Indirect-injection + Base64-encoding", severity: critical }
+      CT1.6:  { name: "Role-impersonation + Hex-encoding", severity: high }
+      CT1.7:  { name: "Instruction-override + Context-flooding", severity: critical }
+      CT1.8:  { name: "Data-exfiltration + Encoding", severity: high }
+      CT1.9:  { name: "PII-extraction + Role-play", severity: critical }
+      CT1.10: { name: "Instruction-override + Few-shot-manipulation", severity: high }
+      CT1.11: { name: "Compliance-bypass + Encoding", severity: high }
+      CT1.12: { name: "Payload-splitting + Hex-encoding", severity: high }
+      CT1.13: { name: "Indirect-injection + Persona", severity: critical }
+      CT1.14: { name: "Instruction-override + Token-smuggling", severity: critical }
+      CT1.15: { name: "Exfiltration + Role-impersonation", severity: high }
+      # CT2 — Three-technique combos
+      CT2.1:  { name: "Override + Base64 + Persona", severity: critical }
+      CT2.2:  { name: "Indirect + Encoding + Splitting", severity: critical }
+      CT2.3:  { name: "Override + Delimiter + Context-flood", severity: critical }
+      CT2.4:  { name: "Exfiltration + Encoding + Role-play", severity: critical }
+      CT2.5:  { name: "PII + Override + Encoding", severity: critical }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category AB — Adversarial Benchmarks
+  # ════════════════════════════════════════════════════════════════
+
+  AB:
+    name: "Adversarial Benchmarks"
+    description: "Cross-validation samples inspired by well-known jailbreak/prompt-injection benchmarks (HarmBench, JailbreakBench, TensorTrust, real-world disclosures)."
+    type: adversarial
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+      - "avid-effect:security:S0402"
+    expected_layers: ["layer0", "layer1_ml", "layer2_rules"]
+    techniques:
+      # AB1 — HarmBench-style (instruction-following attacks)
+      AB1.1: { name: "Direct harmful request", severity: high }
+      AB1.2: { name: "Jailbreak template attack", severity: high }
+      AB1.3: { name: "Adversarial suffix attack", severity: critical }
+      # AB2 — JailbreakBench-style (jailbreak techniques)
+      AB2.1: { name: "DAN-style prompt", severity: high }
+      AB2.2: { name: "Character roleplay jailbreak", severity: high }
+      AB2.3: { name: "Translation-based jailbreak", severity: medium }
+      # AB3 — TensorTrust-style (prompt injection)
+      AB3.1: { name: "System prompt extraction", severity: high }
+      AB3.2: { name: "Instruction override", severity: critical }
+      AB3.3: { name: "Delimiter escape", severity: high }
+      # AB4 — Real-world patterns (public disclosures)
+      AB4.1: { name: "Indirect injection via web content", severity: critical }
+      AB4.2: { name: "Multi-step manipulation", severity: high }
+      AB4.3: { name: "Context window exploitation", severity: high }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category MB — Multi-Buff Combos
+  # ════════════════════════════════════════════════════════════════
+
+  MB:
+    name: "Multi-Buff Combos"
+    description: "Layered encoding/obfuscation attacks that chain 2-3 buff transforms (Base64, ROT13, Leet, Fullwidth, ZeroWidth, Homoglyph, Reverse, CaseAlternating) to evade single-encoding detectors."
+    type: composite
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+      - "avid-effect:security:S0402"
+    expected_layers: ["layer0", "layer1_ml"]
+    techniques:
+      # MB1 — Two-buff combos
+      MB1.1:  { name: "Base64 + ROT13", severity: high }
+      MB1.2:  { name: "Base64 + Leet", severity: high }
+      MB1.3:  { name: "ROT13 + Reverse", severity: high }
+      MB1.4:  { name: "Leet + Fullwidth", severity: high }
+      MB1.5:  { name: "ZeroWidth + Homoglyph", severity: high }
+      MB1.6:  { name: "Base64 + CaseAlternating", severity: high }
+      MB1.7:  { name: "ROT13 + Leet", severity: high }
+      MB1.8:  { name: "Fullwidth + ZeroWidth", severity: high }
+      MB1.9:  { name: "Homoglyph + CaseAlternating", severity: medium }
+      MB1.10: { name: "Reverse + ROT13", severity: high }
+      # MB2 — Three-buff combos
+      MB2.1:  { name: "Base64 + ROT13 + Leet", severity: critical }
+      MB2.2:  { name: "Leet + Fullwidth + ZeroWidth", severity: critical }
+      MB2.3:  { name: "ROT13 + Reverse + CaseAlternating", severity: critical }
+      MB2.4:  { name: "Base64 + Homoglyph + ZeroWidth", severity: critical }
+      MB2.5:  { name: "Leet + ROT13 + Reverse", severity: critical }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category C1MT — C1 Compliance Multi-Turn Probes
+  # ════════════════════════════════════════════════════════════════
+
+  C1MT:
+    name: "Compliance Multi-Turn Probes"
+    description: "Multi-turn conversation attacks that exploit dialogue dynamics to evade compliance policies over multiple exchanges: trust building, context switching, incremental boundary pushing, authority escalation, contradiction exploitation, and memory manipulation."
+    type: evasion
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "owasp-llm:2025:llm09"
+      - "avid-effect:security:S0403"
+      - "avid-effect:ethics:E0301"
+      - "risk-cards:lmrc:manipulation"
+    expected_layers: ["layer1_ml"]
+    techniques:
+      C1MT.1: { name: "Gradual trust building", severity: high }
+      C1MT.2: { name: "Context switching", severity: high }
+      C1MT.3: { name: "Incremental boundary pushing", severity: high }
+      C1MT.4: { name: "Authority escalation", severity: high }
+      C1MT.5: { name: "Contradiction exploitation", severity: high }
+      C1MT.6: { name: "Memory manipulation", severity: high }

@@ -15,9 +15,11 @@ defense with positive validation was the most resilient.
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .rules import PERSONA_OVERRIDE_PATTERNS
 
@@ -34,6 +36,7 @@ class ValidationResult:
     confidence: float          # 0.0 .. 1.0
     reason: str
     task_match: float          # 0.0 .. 1.0 -- how well input fits expected task
+    technique_ids: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +77,57 @@ _SYSTEM_PROMPT_MARKERS = [
 
 _INSTRUCTION_BOUNDARIES = ["---", "===", "***", "###", "```"]
 
+# ---------------------------------------------------------------------------
+# Taxonomy mapping: validation failure -> technique ID
+# ---------------------------------------------------------------------------
+
+VALIDATION_TAXONOMY_MAP: Dict[str, str] = {
+    "persona_override": "D2",       # persona hijack
+    "system_prompt_markers": "D3",  # structural boundary
+    "low_coherence": "D4",          # obfuscation
+    "contradiction": "D1",          # instruction override
+    "boundary_count": "D3",         # structural boundary
+}
+
+# ---------------------------------------------------------------------------
+# Default check weights (P1: configurable)
+# ---------------------------------------------------------------------------
+
+DEFAULT_VALIDATION_WEIGHTS: Dict[str, float] = {
+    "coherence": 0.15,
+    "intent": 0.15,
+    "scope": 0.20,
+    "persona": 0.30,
+    "task": 0.20,
+}
+
+# ---------------------------------------------------------------------------
+# Output validation constants
+# ---------------------------------------------------------------------------
+
+_OUTPUT_SYSTEM_LEAK_MARKERS = [
+    re.compile(r"^system\s*:", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"^instructions\s*:", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"\bmy\s+system\s+prompt\s+is\b", re.IGNORECASE),
+    re.compile(r"\bmy\s+instructions\s+are\b", re.IGNORECASE),
+    re.compile(r"\bi\s+was\s+told\s+to\b", re.IGNORECASE),
+    re.compile(r"\bmy\s+original\s+instructions\b", re.IGNORECASE),
+]
+
+_OUTPUT_ROLE_BREAK_PATTERNS = [
+    re.compile(r"^\s*\[?(user|human|assistant|system)\]?\s*:", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"\bi\s+am\s+now\s+(a|an|the)\b", re.IGNORECASE),
+    re.compile(r"\bi\s+am\s+no\s+longer\b", re.IGNORECASE),
+    re.compile(r"\bmy\s+new\s+role\b", re.IGNORECASE),
+]
+
+_OUTPUT_EXFILTRATION_MARKERS = [
+    re.compile(r"https?://[^\s]+\?.*(?:key|token|secret|password|api)", re.IGNORECASE),
+    re.compile(r"\b(?:BEGIN|END)\s+(?:RSA|PRIVATE|PUBLIC)\s+KEY\b", re.IGNORECASE),
+    re.compile(r"\bsk-[a-zA-Z0-9]{20,}\b"),  # OpenAI-style API key
+    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}\b"),  # GitHub tokens
+]
+
 _SUMMARIZATION_KEYWORDS = {
     "summarize", "summary", "summarise", "key points", "tl;dr",
     "tldr", "main points", "brief overview", "condense", "recap",
@@ -107,13 +161,30 @@ class PositiveValidator:
 
     VALID_TASK_TYPES = {"general", "summarization", "qa", "coding"}
 
-    def __init__(self, task_type: str = "general") -> None:
+    def __init__(
+        self,
+        task_type: str = "general",
+        weights: Optional[Dict[str, float]] = None,
+    ) -> None:
         if task_type not in self.VALID_TASK_TYPES:
             raise ValueError(
                 f"Unknown task_type {task_type!r}. "
                 f"Choose from {sorted(self.VALID_TASK_TYPES)}."
             )
         self.task_type = task_type
+
+        # Resolve weights: explicit param > env var > defaults
+        if weights is not None:
+            self.weights = dict(weights)
+        else:
+            env_weights = os.environ.get("NA0S_VALIDATION_WEIGHTS")
+            if env_weights:
+                try:
+                    self.weights = json.loads(env_weights)
+                except (json.JSONDecodeError, TypeError):
+                    self.weights = dict(DEFAULT_VALIDATION_WEIGHTS)
+            else:
+                self.weights = dict(DEFAULT_VALIDATION_WEIGHTS)
 
     # ---- public API -------------------------------------------------------
 
@@ -152,38 +223,67 @@ class PositiveValidator:
 
         text = text.strip()
         issues: List[str] = []
-        scores: List[float] = []
+        technique_ids: List[str] = []
+        weighted_scores: List[tuple] = []  # (weight_key, score)
 
         # 1. Coherence
         coh_ok, coh_score, coh_reason = self._check_coherence(text)
-        scores.append(coh_score)
+        weighted_scores.append(("coherence", coh_score))
         if not coh_ok:
             issues.append(coh_reason)
+            tid = VALIDATION_TAXONOMY_MAP.get("low_coherence")
+            if tid and tid not in technique_ids:
+                technique_ids.append(tid)
 
         # 2. Intent
         int_ok, int_score, int_reason = self._check_intent(text)
-        scores.append(int_score)
+        weighted_scores.append(("intent", int_score))
         if not int_ok:
             issues.append(int_reason)
 
         # 3. Scope
         scp_ok, scp_score, scp_reason = self._check_scope(text)
-        scores.append(scp_score)
+        weighted_scores.append(("scope", scp_score))
         if not scp_ok:
             issues.append(scp_reason)
+            # Map specific scope failures to technique IDs
+            if "Contradictory" in scp_reason:
+                tid = VALIDATION_TAXONOMY_MAP.get("contradiction")
+                if tid and tid not in technique_ids:
+                    technique_ids.append(tid)
+            if "instruction boundaries" in scp_reason:
+                tid = VALIDATION_TAXONOMY_MAP.get("boundary_count")
+                if tid and tid not in technique_ids:
+                    technique_ids.append(tid)
 
         # 4. Persona boundary
         per_ok, per_score, per_reason = self._check_persona_boundary(text)
-        scores.append(per_score)
+        weighted_scores.append(("persona", per_score))
         if not per_ok:
             issues.append(per_reason)
+            if "Persona override" in per_reason:
+                tid = VALIDATION_TAXONOMY_MAP.get("persona_override")
+                if tid and tid not in technique_ids:
+                    technique_ids.append(tid)
+            if "System prompt marker" in per_reason:
+                tid = VALIDATION_TAXONOMY_MAP.get("system_prompt_markers")
+                if tid and tid not in technique_ids:
+                    technique_ids.append(tid)
 
         # 5. Task match
         task_match = self._check_task_match(text)
+        weighted_scores.append(("task", task_match))
 
-        confidence = sum(scores) / len(scores) if scores else 0.0
+        # Weighted confidence instead of simple mean
+        total_weight = 0.0
+        weighted_sum = 0.0
+        for key, score in weighted_scores:
+            w = self.weights.get(key, 0.0)
+            weighted_sum += w * score
+            total_weight += w
+        confidence = weighted_sum / total_weight if total_weight > 0 else 0.0
+
         is_valid = len(issues) == 0
-
         reason = "All checks passed." if is_valid else " | ".join(issues)
 
         return ValidationResult(
@@ -191,6 +291,7 @@ class PositiveValidator:
             confidence=round(confidence, 4),
             reason=reason,
             task_match=round(task_match, 4),
+            technique_ids=technique_ids,
         )
 
     # ---- coherence --------------------------------------------------------
@@ -447,6 +548,93 @@ class PositiveValidator:
             return round(score, 4)
 
         return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Output validation (P1)
+# ---------------------------------------------------------------------------
+
+def validate_output(output_text: str, original_prompt: str = "") -> ValidationResult:
+    """Validate LLM output for signs of prompt leakage, role break, or exfiltration.
+
+    Parameters
+    ----------
+    output_text : str
+        The LLM output to validate.
+    original_prompt : str
+        The original user prompt, used for context (optional).
+
+    Returns
+    -------
+    ValidationResult
+        Result indicating whether the output appears safe.
+    """
+    if not isinstance(output_text, str):
+        return ValidationResult(
+            is_valid=False,
+            confidence=1.0,
+            reason="Non-string output.",
+            task_match=0.0,
+            technique_ids=[],
+        )
+
+    if not output_text.strip():
+        return ValidationResult(
+            is_valid=True,
+            confidence=1.0,
+            reason="Empty output (safe).",
+            task_match=0.0,
+            technique_ids=[],
+        )
+
+    issues: List[str] = []
+    technique_ids: List[str] = []
+
+    # 1. System prompt leakage
+    for pat in _OUTPUT_SYSTEM_LEAK_MARKERS:
+        if pat.search(output_text):
+            issues.append("System prompt leakage detected.")
+            if "D3" not in technique_ids:
+                technique_ids.append("D3")
+            break
+
+    # Also check for raw system prompt markers in output
+    upper_out = output_text.upper()
+    for marker in _SYSTEM_PROMPT_MARKERS:
+        if marker.upper() in upper_out:
+            if "System prompt leakage detected." not in issues:
+                issues.append("System prompt leakage detected.")
+            if "D3" not in technique_ids:
+                technique_ids.append("D3")
+            break
+
+    # 2. Role break detection
+    for pat in _OUTPUT_ROLE_BREAK_PATTERNS:
+        if pat.search(output_text):
+            issues.append("Role break detected in output.")
+            if "D2" not in technique_ids:
+                technique_ids.append("D2")
+            break
+
+    # 3. Data exfiltration markers
+    for pat in _OUTPUT_EXFILTRATION_MARKERS:
+        if pat.search(output_text):
+            issues.append("Data exfiltration marker detected in output.")
+            if "D5" not in technique_ids:
+                technique_ids.append("D5")
+            break
+
+    is_valid = len(issues) == 0
+    confidence = 1.0 if is_valid else 0.2
+    reason = "Output validation passed." if is_valid else " | ".join(issues)
+
+    return ValidationResult(
+        is_valid=is_valid,
+        confidence=confidence,
+        reason=reason,
+        task_match=0.0,
+        technique_ids=technique_ids,
+    )
 
 
 # ---------------------------------------------------------------------------

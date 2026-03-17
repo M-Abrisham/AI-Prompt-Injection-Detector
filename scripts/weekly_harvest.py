@@ -650,6 +650,7 @@ def run_harvest(output_dir, since_days=7, sources=None, dry_run=False):
         "since_days": since_days,
         "sources_scanned": sorted(sources),
         "total_discovered": total,
+        "total_new": total,  # alias for backward compat with CI workflows
         "per_source_counts": source_counts,
         "errors": errors,
         "discoveries": all_discoveries,
@@ -661,6 +662,7 @@ def run_harvest(output_dir, since_days=7, sources=None, dry_run=False):
         "since_days": since_days,
         "sources_scanned": sorted(sources),
         "total_discovered": total,
+        "total_new": total,  # alias for backward compat with CI workflows
         "per_source_counts": source_counts,
         "errors": errors,
     }

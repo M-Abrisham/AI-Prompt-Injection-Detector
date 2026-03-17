@@ -1,5 +1,10 @@
 """LLM-based prompt injection checker (Groq backend).
 
+.. deprecated::
+    This module is deprecated.  Use :mod:`na0s.llm_judge` instead,
+    which supports multiple backends (OpenAI, Groq, local Ollama),
+    chain-of-thought reasoning, and circuit-breaker protection.
+
 Hardened version with:
 - Nonce verification to detect judge hijacking
 - Confidence clamping with NaN/Inf guard
@@ -7,6 +12,13 @@ Hardened version with:
 - Control character sanitization on rationale text
 - Error handling in classify_prompt() (no unhandled propagation)
 """
+
+import warnings
+warnings.warn(
+    "na0s.llm_checker is deprecated, use na0s.llm_judge instead",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 import json
 import math

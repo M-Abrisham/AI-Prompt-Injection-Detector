@@ -7,14 +7,22 @@ data/*
 data/holdout/*.jsonl
 !data/benchmark/
 data/benchmark/*.jsonl
+!data/canary/
+data/canary/*.json
 !data/aggregated/
 data/aggregated/*.jsonl
 data/aggregated/*.json
+!data/staging/
+data/staging/*.jsonl
+data/staging/*.json
+!data/harvest/
+data/harvest/known_datasets.txt
 !data/scraped/
-data/scraped/*.jsonl
-data/scraped/*.json
 data/scraped/*.txt
 data/scraped/static/
+!data/raw/
+data/raw/*.csv
+!data/raw/harvested_samples.csv
 __pycache__/
 .DS_Store
 *.egg-info/
@@ -32,7 +40,10 @@ htmlcov/
 
 # Environment
 .env
-.venv/
+.venv*/
+
+# Model backups (created by deploy_model.py)
+*.bak
 
 # Claude Code config
 .claude/

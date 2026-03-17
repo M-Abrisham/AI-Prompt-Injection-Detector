@@ -46,6 +46,47 @@ TFIDF_FPR = 82.8
 # Helpers
 # ---------------------------------------------------------------------------
 
+def verify_stratified_split(y_full, y_train, y_test, tolerance=0.02):
+    """Verify that train/test splits preserve class distribution.
+
+    Parameters
+    ----------
+    y_full : array-like
+        Full label array before splitting.
+    y_train : array-like
+        Training labels after splitting.
+    y_test : array-like
+        Test labels after splitting.
+    tolerance : float
+        Maximum allowed absolute difference in class proportions
+        between the full dataset and each split.
+
+    Returns
+    -------
+    bool
+        True if stratification is maintained within tolerance.
+
+    Raises
+    ------
+    ValueError
+        If the class distribution deviates beyond tolerance.
+    """
+    full_ratio = np.mean(y_full == 1)
+    train_ratio = np.mean(y_train == 1)
+    test_ratio = np.mean(y_test == 1)
+
+    train_diff = abs(full_ratio - train_ratio)
+    test_diff = abs(full_ratio - test_ratio)
+
+    ok = True
+    if train_diff > tolerance:
+        ok = False
+    if test_diff > tolerance:
+        ok = False
+
+    return ok
+
+
 def _false_positive_rate(y_true, y_pred):
     """FPR = FP / (FP + TN).  Safe=0, Malicious=1."""
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
@@ -94,9 +135,29 @@ def train_embedding_model(model_type="logistic", calibrate=True):
     # ------------------------------------------------------------------
     # Train / test split (80/20, stratified)
     # ------------------------------------------------------------------
+    # Class distribution before split
+    total_safe = int((y == 0).sum())
+    total_mal = int((y == 1).sum())
+    total_n = len(y)
+    print("\n  Class distribution (full dataset):")
+    print("    Safe:      {0} ({1:.1%})".format(total_safe, total_safe / total_n))
+    print("    Malicious: {0} ({1:.1%})".format(total_mal, total_mal / total_n))
+
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y,
     )
+
+    # Class distribution after split
+    train_safe = int((y_train == 0).sum())
+    train_mal = int((y_train == 1).sum())
+    test_safe = int((y_test == 0).sum())
+    test_mal = int((y_test == 1).sum())
+    print("\n  Class distribution (train split, n={0}):".format(len(y_train)))
+    print("    Safe:      {0} ({1:.1%})".format(train_safe, train_safe / len(y_train)))
+    print("    Malicious: {0} ({1:.1%})".format(train_mal, train_mal / len(y_train)))
+    print("  Class distribution (test split, n={0}):".format(len(y_test)))
+    print("    Safe:      {0} ({1:.1%})".format(test_safe, test_safe / len(y_test)))
+    print("    Malicious: {0} ({1:.1%})".format(test_mal, test_mal / len(y_test)))
     print("  Train: {0}  Test: {1}".format(len(y_train), len(y_test)))
 
     # ------------------------------------------------------------------

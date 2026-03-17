@@ -22,19 +22,23 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests kaggle
 
       - name: Run social scraper
         id: scrape
         env:
           TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
-        run: python scripts/social_scraper.py --verbose
+        run: |
+          if [ -z "$TWITTER_BEARER_TOKEN" ]; then
+            echo "::warning::TWITTER_BEARER_TOKEN not set -- Twitter scraping will be skipped"
+          fi
+          python scripts/social_scraper.py --verbose
 
       - name: Check for new records
         id: check
         run: |
-          if [ -f data/scraped/latest_scrape.json ]; then
-            count=$(python3 -c "import json; d=json.load(open('data/scraped/latest_scrape.json')); print(d.get('new_count', 0))")
+          if [ -f data/scraped/scrape_history.json ]; then
+            count=$(python3 -c "import json; h=json.load(open('data/scraped/scrape_history.json')); print(h[-1].get('new_count', 0) if h else 0)")
             echo "new_count=$count" >> $GITHUB_OUTPUT
             echo "Found $count new record(s)"
           else
@@ -59,7 +63,7 @@ jobs:
 
           Automated social media scrape found **${{ steps.check.outputs.new_count }}** new prompt injection content.
 
-          Review \`data/scraped/latest_scrape.json\` for details.
+          Review \`data/scraped/scrape_history.json\` for details.
 
           ---
           *Automated by social-scraper.yml*" \

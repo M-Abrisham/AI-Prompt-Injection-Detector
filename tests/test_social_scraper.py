@@ -189,8 +189,14 @@ class TestClassifyInjection(unittest.TestCase):
     def test_weak_signal_single(self):
         text = "Has anyone tried a jailbreak on the latest model version?"
         label, conf = _classify_injection(text)
+        self.assertEqual(label, 0)
+        self.assertLessEqual(conf, 0.20)
+
+    def test_weak_signals_double(self):
+        text = "Prompt injection jailbreak attempts are being discussed"
+        label, conf = _classify_injection(text)
         self.assertEqual(label, 1)
-        self.assertGreaterEqual(conf, 0.30)
+        self.assertGreaterEqual(conf, 0.40)
 
     def test_benign_text(self):
         text = "The weather is nice today and I love going for walks in the park"
@@ -669,7 +675,7 @@ class TestBuildParser(unittest.TestCase):
         parser = build_parser()
         args = parser.parse_args([])
         self.assertEqual(args.output_dir, "data/scraped")
-        self.assertEqual(args.since_hours, 3)
+        self.assertEqual(args.since_hours, 24)
         self.assertEqual(args.sources, "reddit,twitter,datasets")
         self.assertFalse(args.dry_run)
         self.assertFalse(args.verbose)

@@ -1,13 +1,33 @@
 """Base class for all taxonomy probes."""
 
+import functools
+import importlib.resources
 import os
 import re
-import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from scripts.safe_yaml import safe_load_yaml
+
+
+def _find_project_root():
+    """Locate the project root using importlib.resources with Path fallback.
+
+    Tries importlib.resources first (works in zipped/installed packages),
+    then falls back to __file__-based resolution for script-mode execution.
+    """
+    try:
+        # importlib.resources can resolve package location even in zipped installs
+        pkg_dir = importlib.resources.files("scripts.taxonomy")
+        # scripts/taxonomy -> scripts -> project root
+        root = Path(str(pkg_dir)).resolve().parent.parent
+        if (root / "data" / "taxonomy.yaml").exists():
+            return root
+    except (TypeError, FileNotFoundError, ModuleNotFoundError, Exception):
+        pass
+    # Fallback for script-mode execution
+    return Path(__file__).resolve().parent.parent.parent
 
 
 @dataclass
@@ -40,7 +60,7 @@ class ClassifierOutput:
             anomaly_flags=list(getattr(l0, "anomaly_flags", [])) if l0 is not None else [],
         )
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_PROJECT_ROOT = _find_project_root()
 _TAXONOMY_PATH = Path(
     os.environ.get("TAXONOMY_YAML_PATH", _PROJECT_ROOT / "data" / "taxonomy.yaml")
 )
@@ -72,68 +92,54 @@ def _is_detected_label(label):
     return bool(words & DETECTION_LABELS)
 
 
-_taxonomy_cache = None
-_taxonomy_lock = threading.Lock()
-
-
+@functools.lru_cache(maxsize=1)
 def _load_taxonomy():
-    """Load and cache taxonomy YAML (thread-safe, double-checked locking)."""
-    global _taxonomy_cache
-    # Fast path — no lock needed when already cached
-    if _taxonomy_cache is not None:
-        return _taxonomy_cache
-    # Slow path — only the first thread parses YAML
-    with _taxonomy_lock:
-        if _taxonomy_cache is not None:
-            return _taxonomy_cache
-        path = _TAXONOMY_PATH
+    """Load and cache taxonomy YAML (thread-safe via lru_cache)."""
+    path = _TAXONOMY_PATH
 
-        # Path-containment check — prevent path traversal via env var
-        resolved = path.resolve()
-        allowed = (_PROJECT_ROOT / "data").resolve()
-        if not str(resolved).startswith(str(allowed) + os.sep) and resolved != allowed:
-            raise ValueError(
-                "TAXONOMY_YAML_PATH must be within data/ directory, "
-                "got: {}".format(resolved)
+    # Path-containment check — prevent path traversal via env var
+    resolved = path.resolve()
+    allowed = (_PROJECT_ROOT / "data").resolve()
+    if not str(resolved).startswith(str(allowed) + os.sep) and resolved != allowed:
+        raise ValueError(
+            "TAXONOMY_YAML_PATH must be within data/ directory, "
+            "got: {}".format(resolved)
+        )
+
+    data = safe_load_yaml(path)
+    if not isinstance(data, dict) or "categories" not in data:
+        raise ValueError(
+            "Taxonomy YAML missing 'categories' key: {}".format(path)
+        )
+
+    # Schema validation — each category must be a dict with a 'name' key
+    categories = data["categories"]
+    if not isinstance(categories, dict):
+        raise ValueError(
+            "Taxonomy 'categories' must be a dict, got {}: {}".format(
+                type(categories).__name__, path
             )
-
-        data = safe_load_yaml(path)
-        if not isinstance(data, dict) or "categories" not in data:
+        )
+    for cat_id, cat in categories.items():
+        if not isinstance(cat, dict):
             raise ValueError(
-                "Taxonomy YAML missing 'categories' key: {}".format(path)
-            )
-
-        # Schema validation — each category must be a dict with a 'name' key
-        categories = data["categories"]
-        if not isinstance(categories, dict):
-            raise ValueError(
-                "Taxonomy 'categories' must be a dict, got {}: {}".format(
-                    type(categories).__name__, path
+                "Category '{}' must be a dict, got {}: {}".format(
+                    cat_id, type(cat).__name__, path
                 )
             )
-        for cat_id, cat in categories.items():
-            if not isinstance(cat, dict):
-                raise ValueError(
-                    "Category '{}' must be a dict, got {}: {}".format(
-                        cat_id, type(cat).__name__, path
-                    )
+        if "name" not in cat:
+            raise ValueError(
+                "Category '{}' missing required 'name' field: {}".format(
+                    cat_id, path
                 )
-            if "name" not in cat:
-                raise ValueError(
-                    "Category '{}' missing required 'name' field: {}".format(
-                        cat_id, path
-                    )
-                )
+            )
 
-        _taxonomy_cache = data
-    return _taxonomy_cache
+    return data
 
 
 def clear_taxonomy_cache():
     """Reset cached taxonomy data (for tests and live-reload)."""
-    global _taxonomy_cache
-    with _taxonomy_lock:
-        _taxonomy_cache = None
+    _load_taxonomy.cache_clear()
 
 
 class Probe:
