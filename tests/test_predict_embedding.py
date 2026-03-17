@@ -6,6 +6,7 @@ embedding classification in the cascade).  These tests are retained to guard
 the legacy module which is still imported by cascade.py (Path B) and
 ensemble.py.  New tests should target ensemble.py or embedding_classifier.py.
 
+
 Covers all three public functions and their edge cases:
 1. load_models() -- model loading
 2. predict_embedding() -- ML-only prediction (3-tuple)

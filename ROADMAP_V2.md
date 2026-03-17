@@ -1211,12 +1211,12 @@ Layer 13 manages the full data lifecycle: discovery → download → integration
 ## Layer 14: Red-Team Harness & CI/CD — Tasks: 21/21 (COMPLETE)
 
 **Files**: `scripts/evaluate_probes.py` (231 lines), `scripts/evaluate_llm_judge.py` (179 lines)
-**Infrastructure**: GitHub Actions CI (`ci.yml`, `pr-check.yml`), `requirements-dev.txt` (no pre-commit hooks, no Makefile, no pyproject.toml)
+**Infrastructure**: GitHub Actions CI (`ci.yml`, `pr-check.yml`), `requirements-dev.txt`, `pyproject.toml` (console script entry point, optional extras), `MANIFEST.in`, CLI (`na0s` command) (no pre-commit hooks, no Makefile)
 **Tests**: `python -m unittest discover tests/` (automated via GitHub Actions), `tests/test_ci_smoke.py` (13 smoke tests)
 **Status**: CI/CD pipeline **implemented** (2026-02-14) — evaluation scripts + GitHub Actions CI
 
 ### Updated Description
-Layer 14 covers testing infrastructure and automation. Two evaluation scripts exist: `evaluate_probes.py` runs all 19 probes through the detector with per-probe recall and taxonomy grouping (OWASP/AVID/LMRC), and `evaluate_llm_judge.py` evaluates the LLM judge with TP/FP/TN/FN and latency stats. **GitHub Actions CI pipeline was added 2026-02-14** (`ci.yml` with Python 3.9-3.12 matrix, flake8 linting, coverage; `pr-check.yml` with syntax checks, test summary). No pre-commit hooks, no Makefile, no tox.ini, no pyproject.toml yet. The project is not packaged (no PyPI). No fuzzing, no adversarial generation against the live detector, no regression tracking.
+Layer 14 covers testing infrastructure and automation. Two evaluation scripts exist: `evaluate_probes.py` runs all 19 probes through the detector with per-probe recall and taxonomy grouping (OWASP/AVID/LMRC), and `evaluate_llm_judge.py` evaluates the LLM judge with TP/FP/TN/FN and latency stats. **GitHub Actions CI pipeline was added 2026-02-14** (`ci.yml` with Python 3.9-3.12 matrix, flake8 linting, coverage; `pr-check.yml` with syntax checks, test summary). No pre-commit hooks, no Makefile, no tox.ini yet. **Packaging completed 2026-02-24**: `pyproject.toml` with console script, `MANIFEST.in`, CLI (`na0s scan/scan-output/version`), XDG-compliant data paths. `pip install na0s` fully functional. No fuzzing, no adversarial generation against the live detector, no regression tracking.
 
 ### TODO List
 

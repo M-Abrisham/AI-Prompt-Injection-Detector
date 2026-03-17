@@ -205,5 +205,6 @@ class TestFixL4_9_SeverityWeightsShared(unittest.TestCase):
         self.assertEqual(voting_threshold, 0.55)
 
 
+
 if __name__ == "__main__":
     unittest.main()

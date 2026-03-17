@@ -542,7 +542,8 @@ def _layer0_sanitize_inner(raw_input):
         if vs_decoded:
             source_metadata["vs_stego_decoded"] = vs_decoded
 
-    # Post-normalization empty check
+    # Post-normalization empty check — all-invisible input passes validate_input()
+    # but becomes empty after stripping. Reject it here.
     if not text or not text.strip():
         return Layer0Result(
             sanitized_text="",

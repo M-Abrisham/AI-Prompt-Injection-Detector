@@ -566,13 +566,7 @@ def strip_invisible_chars(text):
                 break
 
         # Insert space only if both sides have 3+ word chars.
-        # Groups of 1-2 chars indicate per-letter splitting or intra-word
-        # breaks (e.g. soft hyphen in "ig\u00adnore") where we want plain
-        # concatenation to reconstruct the word.  Groups of 3+ chars are
-        # likely complete words (e.g. "ignore\u200ball") where invisible
-        # chars replaced word boundaries.
         if prev_word_len >= 3 and cur_word_len >= 3:
-            # Also check the previous segment doesn't already end with space
             if prev_seg and prev_seg[-1] not in (" ", "\n", "\r", "\t"):
                 result_parts.append(" ")
         result_parts.append(seg_text)
@@ -584,29 +578,8 @@ def strip_invisible_chars_concat(text):
     """Remove invisible/control characters by simple concatenation.
 
     Unlike ``strip_invisible_chars()`` which attempts word-boundary
-    restoration (inserting spaces between multi-char groups), this
-    function simply removes all invisible characters and concatenates
-    the remaining visible characters.
-
-    This produces the correct result for mid-word ZWS splitting
-    (e.g. "Ign<ZWS>ore" -> "Ignore") and real spaces are preserved
-    since they are visible characters (not category Cf/Cc/Cn/Cs).
-
-    Used as a complementary view for rule matching: when the heuristic
-    space-insertion in ``strip_invisible_chars()`` incorrectly splits
-    words at syllable boundaries, this concatenated view recovers the
-    original word for keyword matching.
-
-    Parameters
-    ----------
-    text : str
-        Input text potentially containing invisible characters.
-
-    Returns
-    -------
-    str
-        Text with all invisible/control characters removed, no space
-        insertion at removal points.
+    restoration, this function simply removes all invisible characters
+    and concatenates the remaining visible characters.
     """
     result = []
     for char in text:
@@ -820,18 +793,6 @@ def normalize_text(text, _idempotency_pass=False):
         flags.append("mixed_script_homoglyphs")
 
     # Step 1.7: Combining diacritical mark detection (D5.6)
-    # Combining marks (U+0300-U+036F) compose with base characters under
-    # NFKC into precomposed accented characters (e.g. o + combining grave
-    # -> ò).  These accented characters differ from their base letters,
-    # so rules matching "ignore" will NOT match "ignòre".
-    #
-    # NOTE: We do NOT strip combining marks in the primary pipeline because
-    # that would destroy legitimate accented characters (e.g. French é, ñ).
-    # Instead, combining mark stripping happens in quick_normalize_concat()
-    # which is used as an additional rule-matching surface in classify_prompt().
-    #
-    # Here we only DETECT the presence of combining marks for the anomaly
-    # flag, which serves as an obfuscation signal for score boosting.
     _pre_diacritics = text
     _check_text, diacritics_count = _strip_combining_diacriticals(text)
     if diacritics_count > 0:

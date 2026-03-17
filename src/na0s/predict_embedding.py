@@ -175,6 +175,7 @@ def _concat_structural_features(embedding, text):
         return embedding
 
 
+
 # ---------------------------------------------------------------------------
 # Model loading
 # ---------------------------------------------------------------------------
@@ -250,6 +251,7 @@ def predict_embedding(text, embedding_model=None, classifier=None,
     # Concatenate structural features (Layer 3) if scaler is available
     embedding = _concat_structural_features(embedding, clean)
 
+
     prediction = classifier.predict(embedding)[0]
     proba = classifier.predict_proba(embedding)[0]
     confidence = proba[prediction]
@@ -323,6 +325,7 @@ def classify_prompt_embedding(text, embedding_model=None, classifier=None,
     # Concatenate structural features (Layer 3) if scaler is available
     embedding = _concat_structural_features(embedding, clean)
 
+
     prediction = classifier.predict(embedding)[0]
     proba = classifier.predict_proba(embedding)[0]
     p_malicious = float(proba[1])
@@ -374,6 +377,7 @@ def classify_prompt_embedding(text, embedding_model=None, classifier=None,
 
         # Concatenate structural features for decoded view too
         dec_emb = _concat_structural_features(dec_emb, decoded)
+
 
         if classifier.predict(dec_emb)[0] == 1:
             dec_p_mal = float(classifier.predict_proba(dec_emb)[0][1])

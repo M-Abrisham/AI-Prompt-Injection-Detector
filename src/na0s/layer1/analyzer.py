@@ -9,9 +9,9 @@ Pre-processing pipeline:
   2. Strip combining marks (Zalgo defense)
   3. Decode plus-signs as spaces (URL-encoded evasion)
   4. Refang defanged IOCs (hXXp://, [.], [@], etc.)
-  5. De-hyphenate syllable-split words (ig-nore → ignore)
-  6. Morse code decoding (dot-dash sequences → plaintext)
-  7. Numeric ASCII decoding (binary/octal/decimal → plaintext)
+  5. De-hyphenate syllable-split words (ig-nore -> ignore)
+  6. Morse code decoding (dot-dash sequences -> plaintext)
+  7. Numeric ASCII decoding (binary/octal/decimal -> plaintext)
 
 Single-pass evaluation with context-aware suppression and paranoia filtering.
 """

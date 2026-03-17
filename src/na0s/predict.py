@@ -189,6 +189,9 @@ DECISION_THRESHOLD = _get_decision_threshold()
 # Canonical SEVERITY_WEIGHTS imported from rules.py (DRY)
 _SEVERITY_WEIGHTS = SEVERITY_WEIGHTS
 
+# Canonical SEVERITY_WEIGHTS imported from rules.py (DRY)
+_SEVERITY_WEIGHTS = SEVERITY_WEIGHTS
+
 # ---------------------------------------------------------------------------
 # Thread-safe model cache — avoids re-reading ~420KB from disk + SHA-256
 # verification on every scan() call.  Uses double-checked locking so that
@@ -961,6 +964,11 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         composite = composite - safe_score
         if composite < threshold:
             label = "SAFE"
+
+    # Now add obfuscation flags to hits for downstream consumers
+    # (technique_tags mapping, ScanResult.rule_hits, etc.)
+    if obs_flags:
+        hits.extend(obs_flags)
 
     # Now add obfuscation flags to hits for downstream consumers
     # (technique_tags mapping, ScanResult.rule_hits, etc.)

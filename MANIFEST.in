@@ -1,0 +1,24 @@
+# Source package tree (includes models, layer0, layer1, py.typed)
+graft src
+
+# Tests (for sdist consumers who want to verify)
+graft tests
+
+# Data files used by development/evaluation scripts
+graft data
+
+# Project metadata
+include pyproject.toml
+include README.md
+include LICENSE
+include MANIFEST.in
+
+# Exclude build artifacts, caches, and user-data databases
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.so
+global-exclude *.dylib
+global-exclude .DS_Store
+global-exclude *.db
+global-exclude *.db-shm
+global-exclude *.db-wal

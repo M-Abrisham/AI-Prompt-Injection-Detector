@@ -350,6 +350,23 @@ class OutputScanner:
                             flags=re.IGNORECASE,
                         )
 
+        # BUG-L9-2 fix: comprehensive redaction pass.
+        # _check_secret_patterns() already handled secrets in `redacted`.
+        # Now also redact role-break phrases and system prompt leak fragments.
+        if role_flags:
+            for pat in _ROLE_BREAK_PATTERNS:
+                redacted = pat.sub("[REDACTED]", redacted)
+        if leak_flags:
+            for flag in leak_flags:
+                # Flag format: "System prompt leak: matched 'the trigram text'"
+                if "matched '" in flag:
+                    fragment = flag.split("matched '", 1)[1].rstrip("'")
+                    if fragment:
+                        redacted = re.sub(
+                            re.escape(fragment), "[REDACTED]", redacted,
+                            flags=re.IGNORECASE,
+                        )
+
         risk_score = min(1.0, raw_score)
         threshold = self._THRESHOLD[self.sensitivity]
         is_suspicious = risk_score >= threshold or len(flags) > 0

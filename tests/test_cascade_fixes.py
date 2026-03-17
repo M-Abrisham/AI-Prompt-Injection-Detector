@@ -417,6 +417,7 @@ class TestBugL6_5_JudgeBlending(unittest.TestCase):
         self.assertEqual(label, "SAFE")
         expected_stage2_composite = 0.698  # includes agreement boost
         expected_blended_p_mal = 0.3 * expected_stage2_composite + 0.7 * 0.15
+
         expected_confidence = round(1.0 - expected_blended_p_mal, 4)
         self.assertAlmostEqual(confidence, expected_confidence, places=3)
 

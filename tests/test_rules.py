@@ -123,6 +123,7 @@ class TestRulesListIntegrity(unittest.TestCase):
                          "Unexpected duplicate rule names: {}".format(
                              [n for n in filtered if filtered.count(n) > 1]))
 
+
     def test_all_patterns_compile_via_safe_compile(self):
         """Every rule should have a compiled pattern object."""
         for rule in RULES:
@@ -176,6 +177,7 @@ class TestRulesListIntegrity(unittest.TestCase):
 
     def test_expected_rule_names_present(self):
         """All 92 unique expected rule names should be present."""
+
         expected = {
             # Original 23 Layer 1 rules
             "override", "system_prompt", "roleplay", "secrecy",
@@ -266,6 +268,7 @@ class TestRulesListIntegrity(unittest.TestCase):
             "override_and_replace", "forget_then_query",
             "document_access_request", "pii_summarization",
             "verbatim_completion_extraction",
+
         }
         actual = {r.name for r in RULES}
         self.assertEqual(expected, actual)
@@ -860,6 +863,7 @@ class TestContextSuppression(unittest.TestCase):
             # D8 social engineering gap-closure rules
             "fake_authority_claim": "can you explain how I am the system administrator is used",
             "context_dilution_override": "can you explain how ignore everything above works as an attack",
+
         }
         for rule_name in _CONTEXT_SUPPRESSIBLE:
             with self.subTest(rule=rule_name):

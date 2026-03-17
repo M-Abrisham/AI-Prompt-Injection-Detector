@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import sqlite3
+import sys
 import threading
 import time
 
@@ -204,16 +205,44 @@ class FingerprintStore:
     Each entry tracks hit_count and last_seen for monitoring.
     """
 
-    _DEFAULT_PATH = os.path.join(
-        os.path.dirname(__file__), "..", "..", "data", "fingerprints.db"
-    )
+    @staticmethod
+    def _resolve_default_path():
+        """Return a user-writable path for the fingerprint database.
+
+        Resolution order:
+        1. ``$L0_FINGERPRINT_STORE`` — explicit override (existing contract)
+        2. ``$NA0S_DATA_DIR/fingerprints.db`` — project-level override
+        3. Platform user-data directory:
+           - Linux/macOS: ``~/.local/share/na0s/fingerprints.db``
+           - Windows: ``%LOCALAPPDATA%/na0s/fingerprints.db``
+
+        The old ``__file__``-relative path only worked in editable installs
+        and broke after ``pip install`` from a wheel because ``src/data/``
+        does not exist inside ``site-packages``.
+        """
+        env_path = os.getenv("L0_FINGERPRINT_STORE")
+        if env_path:
+            return env_path
+
+        data_dir = os.getenv("NA0S_DATA_DIR")
+        if data_dir:
+            return os.path.join(data_dir, "fingerprints.db")
+
+        if sys.platform == "win32":
+            base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+        else:
+            base = os.environ.get(
+                "XDG_DATA_HOME",
+                os.path.join(os.path.expanduser("~"), ".local", "share"),
+            )
+        return os.path.join(base, "na0s", "fingerprints.db")
 
     TTL_DAYS = 90
     MAX_ENTRIES = 50_000
 
     def __init__(self, store_path=None):
         self._path = os.path.normpath(
-            store_path or os.getenv("L0_FINGERPRINT_STORE", self._DEFAULT_PATH)
+            store_path or self._resolve_default_path()
         )
         self._init_db()
         self._migrate_json()
@@ -222,7 +251,9 @@ class FingerprintStore:
     def _init_db(self):
         is_memory = (self._path == ":memory:")
         if not is_memory:
-            os.makedirs(os.path.dirname(self._path), exist_ok=True)
+            dirname = os.path.dirname(self._path)
+            if dirname:
+                os.makedirs(dirname, exist_ok=True)
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
         if not is_memory:
             self._conn.execute("PRAGMA journal_mode=WAL")

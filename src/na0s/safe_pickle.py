@@ -32,6 +32,7 @@ import os
 import pickle
 import stat
 import tempfile
+
 import warnings
 
 from .models import KNOWN_HASHES
@@ -46,6 +47,7 @@ _PROTO0_OPCODES = frozenset(b"(]})\x89\x88IX\x80")
 # Maps path -> (mtime, digest) for both SHA-256 and HMAC-SHA256.
 _sha256_cache: dict = {}  # path -> (mtime, hex_digest)
 _hmac_cache: dict = {}    # path -> (mtime, hex_digest)
+
 
 
 def _hash_path(pkl_path):
@@ -69,6 +71,7 @@ def _cached_sha256(path):
     digest = _sha256(path)
     _sha256_cache[path] = (mtime, digest)
     return digest
+
 
 
 def _hmac_path(pkl_path):
@@ -207,6 +210,7 @@ def _check_permissions(path, label="file"):
         )
 
 
+
 def _resolve_expected_hash(path):
     """Return ``(expected_hex_digest, source)`` for *path*.
 
@@ -224,11 +228,13 @@ def _resolve_expected_hash(path):
             raw = f.read().strip()
         return _parse_sidecar(raw), "sidecar_hmac"
 
+
     hash_file = _hash_path(path)
     if os.path.exists(hash_file):
         with open(hash_file, "r") as f:
             raw = f.read().strip()
         return _parse_sidecar(raw), "sidecar_sha256"
+
 
     raise FileNotFoundError(
         "No integrity hash available for {}.  "
@@ -257,6 +263,7 @@ def safe_dump(obj, path):
         sidecar_path = _hmac_path(path)
         _atomic_write_text(sidecar_path, sidecar_content)
         algorithm = "hmac-sha256"
+
     else:
         warnings.warn(
             "NA0S_PICKLE_KEY is not set. Writing plain SHA-256 sidecar. "
@@ -284,6 +291,7 @@ def safe_dump(obj, path):
     _check_permissions(sidecar_path, label="sidecar")
 
 
+
 def safe_load(path):
     """Load a pickle after verifying its integrity digest.
 
@@ -300,6 +308,7 @@ def safe_load(path):
 
     if source == "hardcoded":
         actual = _cached_sha256(path)
+
     elif source == "sidecar_hmac":
         if not key:
             raise ValueError(
@@ -316,6 +325,7 @@ def safe_load(path):
                     "issue": "sha256_sidecar_with_key_set",
                 })
             )
+
             _logger.warning(
                 "NA0S_PICKLE_KEY is set but %s uses a plain SHA-256 sidecar. "
                 "Re-run safe_dump() to upgrade to HMAC protection.", path
@@ -331,6 +341,7 @@ def safe_load(path):
                 "expected_prefix": expected[:16],
                 "actual_prefix": actual[:16],
             })
+
         )
         raise ValueError(
             "Integrity check failed for {} (source: {}). "

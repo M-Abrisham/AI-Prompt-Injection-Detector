@@ -95,6 +95,7 @@ _SCRIPT_RANGES = [
     ("hebrew", re.compile(r"[\u0590-\u05FF]")),
 ]
 
+
 # Common abbreviations that should NOT trigger sentence splits.
 _ABBREVIATIONS = frozenset({
     "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "ave", "blvd",
@@ -247,6 +248,7 @@ class StructuralFeatures:
     template_marker_count: int = 0
     language_mixing_score: float = 0.0
     repetition_score: float = 0.0
+
 
     # ---- dict-like interface for backward compatibility ----
 
@@ -537,6 +539,7 @@ def extract_structural_features(text):
         template_marker_count=template_marker_count,
         language_mixing_score=language_mixing_score,
         repetition_score=repetition_score,
+
     )
 
 
@@ -564,6 +567,7 @@ UNBOUNDED_FEATURE_CAPS = {
     "many_shot_count": 50.0,
     "delimiter_density": 10.0,
     "template_marker_count": 20.0,
+
 }
 
 

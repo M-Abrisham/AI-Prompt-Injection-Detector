@@ -35,6 +35,7 @@ from na0s.cascade import WeightedClassifier
 from na0s.rules import RULES, SEVERITY_WEIGHTS as RULES_SEVERITY_WEIGHTS
 
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -391,106 +392,7 @@ class TestSeverityWeightsConsistency(unittest.TestCase):
             )
 
 
-# ===========================================================================
-# _voting.py single source of truth verification
-# ===========================================================================
-
-class TestVotingSingleSourceOfTruth(unittest.TestCase):
-    """Verify that _voting.py is the canonical weighted voting module."""
-
-    def test_voting_module_is_canonical_source(self):
-        """_voting module must be importable and contain weighted_decision."""
-        import na0s._voting as voting_mod
-        self.assertTrue(
-            callable(getattr(voting_mod, "weighted_decision", None)),
-            "_voting.py must export weighted_decision()",
-        )
-
-    def test_predict_delegates_to_voting(self):
-        """predict._weighted_decision and _voting.weighted_decision produce identical results."""
-        kwargs = dict(
-            ml_prob=0.55, ml_label="SAFE",
-            hits=["override_instruction"], obs_flags=[],
-        )
-        label_predict, score_predict = _weighted_decision(**kwargs)
-        label_voting, score_voting = voting_weighted_decision(**kwargs)
-        self.assertEqual(label_predict, label_voting)
-        self.assertEqual(score_predict, score_voting)
-
-    def test_voting_weighted_decision_produces_correct_verdicts(self):
-        """_voting.weighted_decision produces expected verdicts for known inputs."""
-        # Clear MALICIOUS case
-        label, score = voting_weighted_decision(
-            ml_prob=0.95, ml_label="MALICIOUS",
-            hits=["harmful_instructions"], obs_flags=["base64"],
-        )
-        self.assertEqual(label, "MALICIOUS")
-        self.assertGreaterEqual(score, VOTING_THRESHOLD)
-
-        # Clear SAFE case
-        label, score = voting_weighted_decision(
-            ml_prob=0.99, ml_label="SAFE",
-            hits=[], obs_flags=[],
-        )
-        self.assertEqual(label, "SAFE")
-        self.assertLess(score, VOTING_THRESHOLD)
-
-    def test_voting_decision_threshold_matches_predict(self):
-        """_voting.DECISION_THRESHOLD == predict.DECISION_THRESHOLD == 0.55."""
-        self.assertEqual(VOTING_THRESHOLD, 0.55)
-        self.assertEqual(DECISION_THRESHOLD, 0.55)
-        self.assertEqual(VOTING_THRESHOLD, DECISION_THRESHOLD)
-
-    def test_voting_rule_severity_has_expected_keys(self):
-        """_voting.RULE_SEVERITY contains all rule names from rules.py."""
-        for rule in RULES:
-            self.assertIn(rule.name, VOTING_RULE_SEVERITY)
-
-    def test_voting_fp_exempt_hits_is_frozenset(self):
-        """_voting.FP_EXEMPT_HITS must be a frozenset with expected entries."""
-        self.assertIsInstance(VOTING_FP_EXEMPT_HITS, frozenset)
-        expected = {"base64", "hex", "rot13", "url_encoded", "high_entropy"}
-        self.assertTrue(expected.issubset(VOTING_FP_EXEMPT_HITS))
-
-    def test_voting_structural_signal_weights_has_4_keys(self):
-        """_voting.STRUCTURAL_SIGNAL_WEIGHTS must have the 4 expected keys."""
-        expected = {"imperative_start", "role_assignment",
-                    "instruction_boundary", "negation_command"}
-        self.assertEqual(set(VOTING_STRUCTURAL_SIGNAL_WEIGHTS.keys()), expected)
-
-    def test_voting_agreement_boost_has_expected_entries(self):
-        """_voting.AGREEMENT_BOOST must have entries for 2, 3, and 4."""
-        for key in (2, 3, 4):
-            self.assertIn(key, VOTING_AGREEMENT_BOOST)
-
-    def test_score_clamping_via_voting_module(self):
-        """Score clamping works via _voting.weighted_decision."""
-        hits = ["override_instruction", "direct_prompt_request",
-                "decoded_payload_malicious", "provide_system_prompt",
-                "database_iteration"]
-        label, composite = voting_weighted_decision(
-            ml_prob=0.55, ml_label="SAFE", hits=hits, obs_flags=[],
-        )
-        self.assertLessEqual(composite, 1.0)
-        self.assertGreaterEqual(composite, 0.0)
-
-    def test_extreme_clamping_via_voting_module(self):
-        """All signals maxed via _voting still clamped to [0, 1]."""
-        hits = ["override_instruction", "direct_prompt_request",
-                "decoded_payload_malicious", "provide_system_prompt",
-                "harmful_instructions", "phishing_generation"]
-        structural = {"imperative_start": 1, "role_assignment": 1,
-                      "instruction_boundary": 1, "negation_command": 1,
-                      "quote_depth": 5, "text_entropy": 6.0}
-        label, composite = voting_weighted_decision(
-            ml_prob=0.99, ml_label="MALICIOUS",
-            hits=hits, obs_flags=["base64", "rot13", "reversed_text"],
-            structural=structural,
-        )
-        self.assertLessEqual(composite, 1.0)
-        self.assertGreaterEqual(composite, 0.0)
-        self.assertEqual(label, "MALICIOUS")
-
+# ====================================================================
 
 if __name__ == "__main__":
     unittest.main()

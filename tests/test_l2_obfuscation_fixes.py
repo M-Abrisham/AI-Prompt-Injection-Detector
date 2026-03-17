@@ -14,6 +14,7 @@ import random
 import unittest
 from unittest.mock import patch
 
+
 from na0s.obfuscation import (
     obfuscation_scan,
     shannon_entropy,
@@ -247,6 +248,7 @@ class TestCompressionRatio(unittest.TestCase):
         """Random-looking data (base64) should have low compression ratio."""
         rng = random.Random(42)
         payload = base64.b64encode(rng.randbytes(200)).decode()
+
         ratio = _compression_ratio(payload)
         self.assertLess(
             ratio, 1.3,
@@ -432,6 +434,7 @@ class TestNoDoubleWeighting(unittest.TestCase):
     """
 
     @patch.dict(os.environ, {"SCAN_TIMEOUT_SEC": "0"})
+
     def test_weighted_decision_no_double_count(self):
         """obs_flags should NOT be double-counted as both rules and obfuscation.
 
@@ -443,6 +446,7 @@ class TestNoDoubleWeighting(unittest.TestCase):
         """
         # Import _weighted_decision to test it directly
         # predict._weighted_decision delegates to _voting.weighted_decision (Issue #2)
+
         try:
             from na0s.predict import _weighted_decision, SEVERITY_WEIGHTS
         except ImportError:
@@ -477,6 +481,7 @@ class TestNoDoubleWeighting(unittest.TestCase):
     def test_obs_flags_only_in_obf_weight(self):
         """With obs_flags=['base64'], rule_weight should NOT include base64."""
         # predict._weighted_decision delegates to _voting.weighted_decision (Issue #2)
+
         try:
             from na0s.predict import _weighted_decision
         except ImportError:
@@ -674,6 +679,7 @@ class TestCompositeEntropyCheckObfuscated(unittest.TestCase):
         """Base64 of random bytes -- FLAGGED."""
         rng = random.Random(42)
         payload = base64.b64encode(rng.randbytes(75)).decode()
+
         self.assertTrue(
             _composite_entropy_check(payload),
             "Base64 random bytes not caught: len={}".format(len(payload)),
@@ -688,6 +694,7 @@ class TestCompositeEntropyCheckObfuscated(unittest.TestCase):
         # Local RNG instance avoids cross-test coupling from global seed.
         rng = random.Random(2026)
         payload = base64.b64encode(rng.randbytes(200)).decode()
+
         self.assertGreater(len(payload), 200)
         self.assertTrue(
             _composite_entropy_check(payload),
@@ -931,6 +938,7 @@ class TestThresholdBoundaries(unittest.TestCase):
                 _composite_entropy_check(payload),
                 "High entropy + high KL should be flagged (ent={:.2f}, kl={:.2f})".format(ent, kl),
             )
+
 
 
 if __name__ == "__main__":
