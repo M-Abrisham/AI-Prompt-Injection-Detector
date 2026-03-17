@@ -13,10 +13,13 @@ genuinely malicious inputs.
 """
 
 import re
+from typing import Dict, List, Optional, Tuple
 
 from .safe_pickle import safe_load
 from .predict import _get_cached_models
 from .rules import rule_score, rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
+from .config import THRESHOLDS
+from ._voting import _weighted_composite
 from .layer2 import obfuscation_scan
 from .layer0 import layer0_sanitize
 from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
@@ -73,6 +76,28 @@ VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 # Stage 1: Fast Whitelist Filter
 # ---------------------------------------------------------------------------
 
+def _blend_verdicts(stage2_label: str, stage2_conf: float,
+                    judge_label: str, judge_conf: float) -> Tuple[str, float]:
+    """Blend Stage 2 and LLM judge verdicts into a single (label, confidence).
+
+    Both inputs use P(label correct) semantics.  Internally converts to
+    P(malicious) axis, blends with configured weights, then converts back.
+
+    Returns (label, confidence) where confidence is P(label correct).
+    """
+    stage2_p_mal = stage2_conf if stage2_label == "MALICIOUS" else 1.0 - stage2_conf
+    judge_p_mal = judge_conf if judge_label == "MALICIOUS" else 1.0 - judge_conf
+    blended_p_mal = (
+        THRESHOLDS.STAGE2_BLEND_WEIGHT * stage2_p_mal
+        + THRESHOLDS.JUDGE_BLEND_WEIGHT * judge_p_mal
+    )
+    label = judge_label
+    confidence = round(
+        blended_p_mal if label == "MALICIOUS" else 1.0 - blended_p_mal, 4
+    )
+    return label, confidence
+
+
 class WhitelistFilter:
     """Quickly identifies clearly-safe prompts so they can skip ML classification.
 
@@ -126,18 +151,18 @@ class WhitelistFilter:
         re.IGNORECASE,
     )
 
-    MAX_LENGTH = 1000  # BUG-L6-6 fix: 500 was too restrictive
-    MAX_SENTENCES = 3
+    MAX_LENGTH = THRESHOLDS.WHITELIST_MAX_LENGTH
+    MAX_SENTENCES = THRESHOLDS.WHITELIST_MAX_SENTENCES
 
     @staticmethod
-    def _count_sentences(text):
+    def _count_sentences(text: str) -> int:
         """Rough sentence count based on terminal punctuation."""
         # Split on .!? followed by whitespace or end-of-string
         parts = re.split(r"[.!?]+(?:\s|$)", text.strip())
         # Filter out empty fragments
         return len([p for p in parts if p.strip()])
 
-    def is_whitelisted(self, text):
+    def is_whitelisted(self, text: str) -> Tuple[bool, str]:
         """Return (is_safe: bool, reason: str).
 
         When is_safe is True, the prompt can skip classification.
@@ -151,7 +176,7 @@ class WhitelistFilter:
         except RegexTimeoutError:
             return False, "regex timeout during whitelist check"
 
-    def _is_whitelisted_inner(self, text):
+    def _is_whitelisted_inner(self, text: str) -> Tuple[bool, str]:
         """Core whitelist logic -- extracted for timeout wrapping."""
         # 1. Question pattern
         has_question_word = bool(safe_search(self.QUESTION_WORDS, text, timeout_ms=50))
@@ -201,15 +226,16 @@ class WeightedClassifier:
     contributes a weighted score that must exceed a configurable threshold.
     """
 
-    ML_WEIGHT = 0.6
-    OBFUSCATION_WEIGHT_PER_FLAG = 0.15
-    OBFUSCATION_WEIGHT_CAP = 0.3
-    DEFAULT_THRESHOLD = 0.55
+    ML_WEIGHT = THRESHOLDS.ML_WEIGHT
+    OBFUSCATION_WEIGHT_PER_FLAG = THRESHOLDS.OBFUSCATION_WEIGHT_PER_FLAG
+    OBFUSCATION_WEIGHT_CAP = THRESHOLDS.OBFUSCATION_WEIGHT_CAP
+    DEFAULT_THRESHOLD = THRESHOLDS.DEFAULT_THRESHOLD
 
     def __init__(self, threshold=None):
         self.threshold = threshold if threshold is not None else self.DEFAULT_THRESHOLD
 
-    def classify(self, text, vectorizer, model, raw_text=None):
+    def classify(self, text: str, vectorizer, model,
+                 raw_text: Optional[str] = None) -> Tuple[str, float, List[str]]:
         """Return (label, confidence, hits).
 
         label: 'SAFE' or 'MALICIOUS'
@@ -271,8 +297,19 @@ class WeightedClassifier:
             self.OBFUSCATION_WEIGHT_CAP,
         )
 
-        # --- Composite score ---
-        final_score = (self.ML_WEIGHT * ml_prob) + rule_weight + obf_weight
+        # --- Composite score (Phase A: shared helper) ---
+        final_score = _weighted_composite(
+            ml_prob, self.ML_WEIGHT, rule_weight, obf_weight,
+        )
+
+        # --- Combined signal boosting ---
+        # When persona hijack AND encoded payload signals co-occur in the
+        # same message, apply an extra boost.  See predict.py for rationale.
+        _COMBINED_SIGNAL_BOOST = THRESHOLDS.COMBINED_SIGNAL_BOOST
+        has_persona_signal = "roleplay" in hit_names_seen
+        has_encoding_signal = bool(obfuscation_flags)
+        if has_persona_signal and has_encoding_signal:
+            final_score += _COMBINED_SIGNAL_BOOST
 
         # Clamp to [0, 1]
         final_score = max(0.0, min(1.0, final_score))
@@ -340,8 +377,8 @@ class CascadeClassifier:
     """
 
     # Confidence thresholds for routing to the LLM judge
-    JUDGE_LOWER_THRESHOLD = 0.25   # below -> confident SAFE, skip judge
-    JUDGE_UPPER_THRESHOLD = 0.85   # above -> confident MALICIOUS, skip judge
+    JUDGE_LOWER_THRESHOLD = THRESHOLDS.JUDGE_LOWER_THRESHOLD
+    JUDGE_UPPER_THRESHOLD = THRESHOLDS.JUDGE_UPPER_THRESHOLD
 
     def __init__(self, vectorizer=None, model=None, llm_judge=None,
                  enable_embedding=False, enable_positive_validation=True,
@@ -407,7 +444,7 @@ class CascadeClassifier:
         self._positive_validation_overrides = 0
         self._canary_checks = 0
 
-    def _ensure_model(self):
+    def _ensure_model(self) -> None:
         """Lazy-load model and vectorizer on first use.
 
         Delegates to the shared thread-safe cache in predict.py so that
@@ -417,7 +454,7 @@ class CascadeClassifier:
         if self._vectorizer is None or self._model is None:
             self._vectorizer, self._model = _get_cached_models()
 
-    def _ensure_embedding_model(self):
+    def _ensure_embedding_model(self) -> bool:
         """Lazy-load embedding model and classifier on first use."""
         if not self._enable_embedding:
             return False
@@ -429,7 +466,7 @@ class CascadeClassifier:
                 return False
         return True
 
-    def _ensure_llm_checker(self):
+    def _ensure_llm_checker(self) -> Optional[object]:
         """Lazy-initialise the LLM checker if possible.
 
         Returns the checker instance or None.
@@ -449,7 +486,7 @@ class CascadeClassifier:
         except Exception:
             return None
 
-    def classify(self, text):
+    def classify(self, text: str) -> Tuple[str, float, List[str], str]:
         """Run the multi-stage cascade.
 
         Returns:
@@ -575,19 +612,8 @@ class CascadeClassifier:
                         self._judged += 1
                         if result.label in ("SAFE", "MALICIOUS"):
                             original_label = label
-                            # BUG-L6-5 fix: align metrics before blending.
-                            # Convert both signals to P(malicious) axis:
-                            # - Stage 2: confidence is P(label correct), so
-                            #   P(mal) = confidence if MALICIOUS, else 1-confidence
-                            # - Judge: result.confidence is P(verdict correct), so
-                            #   P(mal) = result.confidence if MALICIOUS, else 1-result.confidence
-                            stage2_p_mal = confidence if label == "MALICIOUS" else 1.0 - confidence
-                            judge_p_mal = result.confidence if result.label == "MALICIOUS" else 1.0 - result.confidence
-                            blended_p_mal = 0.3 * stage2_p_mal + 0.7 * judge_p_mal
-                            label = result.label
-                            # Convert back to P(label correct) semantics
-                            confidence = round(
-                                blended_p_mal if label == "MALICIOUS" else 1.0 - blended_p_mal, 4
+                            label, confidence = _blend_verdicts(
+                                label, confidence, result.label, result.confidence,
                             )
                             if label != original_label:
                                 self._judge_overrides += 1
@@ -600,13 +626,8 @@ class CascadeClassifier:
                                 and hasattr(verdict, "verdict")
                                 and verdict.verdict != "UNKNOWN"):
                             original_label = label
-                            # BUG-L6-5 fix: align metrics before blending.
-                            stage2_p_mal = confidence if label == "MALICIOUS" else 1.0 - confidence
-                            judge_p_mal = verdict.confidence if verdict.verdict == "MALICIOUS" else 1.0 - verdict.confidence
-                            blended_p_mal = 0.3 * stage2_p_mal + 0.7 * judge_p_mal
-                            label = verdict.verdict
-                            confidence = round(
-                                blended_p_mal if label == "MALICIOUS" else 1.0 - blended_p_mal, 4
+                            label, confidence = _blend_verdicts(
+                                label, confidence, verdict.verdict, verdict.confidence,
                             )
                             if label != original_label:
                                 self._judge_overrides += 1
@@ -648,7 +669,7 @@ class CascadeClassifier:
     # Unified scan() — returns ScanResult (same shape as predict.scan())
     # ------------------------------------------------------------------
 
-    def scan(self, text):
+    def scan(self, text: str) -> ScanResult:
         """Run the cascade and return a structured :class:`ScanResult`.
 
         This mirrors the :func:`na0s.predict.scan` API so that users can
@@ -735,7 +756,8 @@ class CascadeClassifier:
     # Layer 9: Output scanner — scan LLM output (post-processing)
     # ------------------------------------------------------------------
 
-    def scan_output(self, output_text, original_prompt=None, system_prompt=None):
+    def scan_output(self, output_text: str, original_prompt: Optional[str] = None,
+                    system_prompt: Optional[str] = None) -> Optional[object]:
         """Scan LLM output for signs that a prompt injection succeeded.
 
         This is a separate step from input classification.  Call it
@@ -771,7 +793,8 @@ class CascadeClassifier:
     # Layer 10: Canary token management
     # ------------------------------------------------------------------
 
-    def inject_canary(self, system_prompt, prefix="CANARY", length=16):
+    def inject_canary(self, system_prompt: str, prefix: str = "CANARY",
+                      length: int = 16) -> Tuple:
         """Inject a canary token into a system prompt.
 
         Parameters
@@ -799,7 +822,7 @@ class CascadeClassifier:
         except Exception:
             return system_prompt, None
 
-    def check_canary(self, output_text):
+    def check_canary(self, output_text: str) -> List:
         """Check if any registered canary tokens appear in LLM output.
 
         Parameters
@@ -821,7 +844,7 @@ class CascadeClassifier:
         except Exception:
             return []
 
-    def canary_report(self):
+    def canary_report(self) -> Optional[Dict]:
         """Return a summary of all canary tokens and their status.
 
         Returns
@@ -836,7 +859,7 @@ class CascadeClassifier:
         except Exception:
             return None
 
-    def classify_for_evaluate(self, text):
+    def classify_for_evaluate(self, text: str) -> Tuple:
         """Return a 4-tuple compatible with ClassifierOutput.from_tuple().
 
         Signature: (label, prob, hits, l0)
@@ -851,7 +874,7 @@ class CascadeClassifier:
 
     # --- Stats API ---
 
-    def stats(self):
+    def stats(self) -> Dict[str, int]:
         """Return a dict summarising how prompts flowed through the cascade."""
         return {
             "total": self._total,
@@ -867,7 +890,7 @@ class CascadeClassifier:
             "canary_checks": self._canary_checks,
         }
 
-    def reset_stats(self):
+    def reset_stats(self) -> None:
         """Zero all counters."""
         self._total = 0
         self._whitelisted = 0

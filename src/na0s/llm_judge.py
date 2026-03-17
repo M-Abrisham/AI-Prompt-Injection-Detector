@@ -242,7 +242,7 @@ class LLMJudge:
 
     # ---- public API ----
 
-    def classify(self, user_input):
+    def classify(self, user_input: str) -> JudgeVerdict:
         """Classify a single input.  Returns a JudgeVerdict."""
         nonce = secrets.token_hex(8)
         messages = self._build_messages(user_input, nonce=nonce)
@@ -286,7 +286,8 @@ class LLMJudge:
                 error=_safe_error(exc),
             )
 
-    def classify_with_consistency(self, user_input, n=3, temperature=0.5):
+    def classify_with_consistency(self, user_input: str, n: int = 3,
+                                   temperature: float = 0.5) -> JudgeVerdict:
         """Self-consistency: run *n* classifications and take majority vote.
 
         Use for borderline cases (confidence 0.4-0.7) where a single call
@@ -477,7 +478,7 @@ class LLMJudgeWithCircuitBreaker:
     def model(self):
         return self._judge.model
 
-    def classify(self, text):
+    def classify(self, text: str) -> JudgeVerdict:
         # Check circuit state under lock
         with self._lock:
             if self._circuit_open_since is not None:
@@ -509,7 +510,8 @@ class LLMJudgeWithCircuitBreaker:
 
         return verdict
 
-    def classify_with_consistency(self, user_input, n=3, temperature=0.5):
+    def classify_with_consistency(self, user_input: str, n: int = 3,
+                                   temperature: float = 0.5) -> JudgeVerdict:
         """Circuit-breaker-wrapped version of classify_with_consistency."""
         # Check circuit state under lock
         with self._lock:

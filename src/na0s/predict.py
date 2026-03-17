@@ -63,6 +63,7 @@ import logging
 import sqlite3
 import threading
 import time
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,7 @@ from .rules import rule_score_detailed, RULES, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
 from .safe_pickle import safe_load
 from .models import get_model_path
+from ._voting import _weighted_composite
 
 # Layer 3: Structural Features — optional import
 try:
@@ -138,7 +140,7 @@ _cached_model = None
 _model_cache_lock = threading.Lock()
 
 
-def _get_cached_models():
+def _get_cached_models() -> Tuple:
     """Return (vectorizer, model), loading from disk only on first call.
 
     Thread-safe via double-checked locking (check-lock-check pattern).
@@ -213,7 +215,7 @@ def _head_tail_extract(text, head_tokens=_HEAD_TOKENS, tail_tokens=_TAIL_TOKENS)
     return " ".join(head + tail)
 
 
-def predict_prompt():
+def predict_prompt() -> Tuple:
     """Return (vectorizer, model) — cached after first load.
 
     Previous behaviour loaded both .pkl files from disk (with SHA-256
@@ -224,7 +226,7 @@ def predict_prompt():
     return _get_cached_models()
 
 
-def predict(text, vectorizer, model):
+def predict(text, vectorizer, model) -> Tuple:
     # Layer 0 gate — sanitize before anything else touches the input
     l0 = layer0_sanitize(text)
     if l0.rejected:
@@ -244,8 +246,9 @@ def predict(text, vectorizer, model):
     return label, prob, l0
 
 
-def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
-                       threshold=DECISION_THRESHOLD):
+def _weighted_decision(ml_prob: float, ml_label: str, hits: List[str],
+                       obs_flags: List[str], structural: Optional[Dict] = None,
+                       threshold: float = DECISION_THRESHOLD) -> Tuple[str, float]:
     """Combine ML confidence, rule severity, obfuscation, and structural
     features into a composite score.
 
@@ -273,8 +276,6 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
         ml_prob_malicious = ml_prob
     else:
         ml_prob_malicious = 1.0 - ml_prob  # low value when ML is confident-safe
-
-    ml_weight = 0.6 * ml_prob_malicious
 
     # --- Rule severity signal ---
     rule_weight = 0.0
@@ -331,7 +332,10 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
         if structural.get("repetition_score", 0) > 0.3:
             structural_weight += 0.05
 
-    composite = ml_weight + rule_weight + obf_weight + structural_weight
+    # --- Shared composite (Phase A: ML + rules + obfuscation) ---
+    composite = _weighted_composite(
+        ml_prob_malicious, 0.6, rule_weight, obf_weight,
+    ) + structural_weight
 
     # --- Critical-content rule floor ---
     # When a critical_content severity rule fires, the rule pattern
@@ -425,6 +429,27 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
         boost = _AGREEMENT_BOOST.get(signal_layers, 0.15)
         composite = min(composite + boost, 1.0)
 
+    # --- Combined signal boosting ---
+    # When persona hijack AND encoded payload signals co-occur in the same
+    # message, the combination is far more likely to be a genuine attack
+    # than either signal alone.  An attacker who both assumes a persona
+    # ("you are now DAN") AND hides instructions behind encoding is almost
+    # certainly attempting injection, not asking an innocent question.
+    #
+    # Previously these two signal families were scored independently —
+    # their weights simply added up.  This explicit cross-family boost
+    # ensures the composite score reflects the compounded threat.
+    _COMBINED_SIGNAL_BOOST = 0.15
+
+    has_persona_signal = (
+        "roleplay" in hits
+        or (structural is not None and structural.get("role_assignment", 0))
+    )
+    has_encoding_signal = bool(obs_flags) or "decoded_payload_malicious" in hits
+
+    if has_persona_signal and has_encoding_signal:
+        composite = min(composite + _COMBINED_SIGNAL_BOOST, 1.0)
+
     # Clamp composite to [0, 1] — the raw sum of ml_weight + rule_weight +
     # obf_weight + structural_weight can exceed 1.0 when multiple high/critical
     # rules fire simultaneously.  Downstream consumers (ScanResult.risk_score,
@@ -436,7 +461,7 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
     return "SAFE", composite
 
 
-def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
+def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tuple:
     label, prob, l0 = predict(text, vectorizer, model)
 
     if l0.rejected:
@@ -642,7 +667,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     return label, composite, hits, l0, detailed_hits
 
 
-def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
+def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None) -> ScanResult:
     """Unified entry point returning a structured ScanResult.
 
     Parameters
