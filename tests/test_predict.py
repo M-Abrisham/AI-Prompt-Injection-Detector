@@ -4,8 +4,8 @@ import unittest
 
 sys.path.append(os.path.join(os.path.dirname(__file__),"..","src"))
 
-from predict import classify_prompt
-from rules import rule_score
+from na0s.predict import classify_prompt
+from na0s.rules import rule_score
 
 
 class DummyVectorizer:

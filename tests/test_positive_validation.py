@@ -99,6 +99,8 @@ class TestPositiveValidatorSanitizedText(unittest.TestCase):
 
 
 # ====================================================================
+class TestContradictionDetectionCloseWindow(unittest.TestCase):
+    """BUG-L8-4: Contradiction detection within a close token window."""
 
     def setUp(self):
         self.v = PositiveValidator(task_type="general")

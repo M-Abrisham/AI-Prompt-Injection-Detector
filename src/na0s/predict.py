@@ -789,6 +789,16 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
             embedding_score = 0.0
             embedding_technique_matches = []
 
+    # --- Weighted voting: combine ML + rules + obfuscation + structural + embedding ---
+    label, composite = _weighted_decision(
+        ml_prob=prob,
+        ml_label=label,
+        hits=hits,
+        obs_flags=obs_flags,
+        structural=structural,
+        embedding_score=embedding_score,
+        threshold=threshold,
+    )
 
     # --- Multilingual injection detection (D6) ---
     # Run when language_detector flags non-English content.

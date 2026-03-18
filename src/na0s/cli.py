@@ -1,3 +1,4 @@
+"""
 After ``pip install na0s``, the ``na0s`` command is available::
 
     na0s scan "Ignore all previous instructions"
