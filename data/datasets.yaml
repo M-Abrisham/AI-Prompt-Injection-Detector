@@ -277,3 +277,406 @@ sources:
       1: 1
     trust_tier: 2
     output: "hf_qualifire_benchmark.csv"
+
+  # ── Jailbreak / Adversarial datasets ─────────────────────────────
+
+  wildjailbreak:
+    type: huggingface
+    repo: "allenai/wildjailbreak"
+    split: "train"
+    text_column: "vanilla"
+    label: 1
+    max_samples: 50000
+    license: "CC-BY-4.0"
+    category: "jailbreak"
+    enabled: true
+    output: "hf_wildjailbreak.csv"
+
+  prompt_injection_mixed_techniques:
+    type: huggingface
+    repo: "Harelix/Prompt-Injection-Mixed-Techniques-2024"
+    split: "train"
+    text_column: "text"
+    label_column: "label"
+    label_map:
+      0: 0
+      1: 1
+    license: "unknown"
+    category: "jailbreak"
+    enabled: true
+    output: "hf_prompt_injection_mixed_techniques.csv"
+
+  decodingtrust:
+    type: huggingface
+    repo: "AI-Secure/DecodingTrust"
+    split: "train"
+    text_column: "prompt"
+    label: 1
+    max_samples: 50000
+    license: "CC-BY-SA-4.0"
+    category: "jailbreak"
+    enabled: true
+    output: "hf_decodingtrust.csv"
+
+  advbench:
+    type: huggingface
+    repo: "walledai/AdvBench"
+    split: "train"
+    text_column: "prompt"
+    label: 1
+    license: "MIT"
+    category: "jailbreak"
+    enabled: true
+    output: "hf_advbench.csv"
+
+  chatgpt_jailbreak_prompts:
+    type: huggingface
+    repo: "rubend18/ChatGPT-Jailbreak-Prompts"
+    split: "train"
+    text_column: "Prompt"
+    label: 1
+    license: "unknown"
+    category: "jailbreak"
+    enabled: true
+    output: "hf_chatgpt_jailbreak_prompts.csv"
+
+  refuse_to_answer:
+    type: huggingface
+    repo: "notrichardren/refuse-to-answer-prompts"
+    split: "train"
+    text_column: "prompt"
+    label: 1
+    license: "unknown"
+    category: "jailbreak"
+    enabled: true
+    output: "hf_refuse_to_answer.csv"
+
+  in_the_wild_jailbreak:
+    type: huggingface
+    repo: "TrustAIRLab/in-the-wild-jailbreak"
+    split: "train"
+    text_column: "prompt"
+    label: 1
+    max_samples: 50000
+    license: "unknown"
+    category: "jailbreak"
+    enabled: true
+    output: "hf_in_the_wild_jailbreak.csv"
+
+  # ── Trust / Safety datasets ──────────────────────────────────────
+
+  tensor_trust:
+    type: huggingface
+    repo: "ethz-spylab/tensor-trust"
+    split: "train"
+    text_column: "prompt"
+    label_column: "label"
+    label_map:
+      0: 0
+      1: 1
+    max_samples: 50000
+    license: "researcher-access"
+    category: "mixed"
+    gated: true
+    enabled: false
+    output: "hf_tensor_trust.csv"
+
+  toxic_chat:
+    type: huggingface
+    repo: "lmsys/toxic-chat"
+    config: "toxicchat0124"
+    split: "train"
+    text_column: "user_input"
+    label_column: "toxicity"
+    label_map:
+      0: 0
+      1: 1
+    max_samples: 50000
+    license: "CC-BY-NC-4.0"
+    category: "mixed"
+    enabled: true
+    output: "hf_toxic_chat.csv"
+
+  beavertails:
+    type: huggingface
+    repo: "PKU-Alignment/BeaverTails"
+    split: "train"
+    text_column: "prompt"
+    label_column: "is_safe"
+    label_map:
+      true: 0
+      false: 1
+      True: 0
+      False: 1
+    max_samples: 50000
+    license: "CC-BY-NC-4.0"
+    category: "mixed"
+    enabled: true
+    output: "hf_beavertails.csv"
+
+  hh_rlhf:
+    type: huggingface
+    repo: "Anthropic/hh-rlhf"
+    split: "train"
+    text_column: "chosen"
+    label: 0
+    max_samples: 50000
+    license: "MIT"
+    category: "safe_baseline"
+    enabled: true
+    output: "hf_hh_rlhf.csv"
+
+  # ── Prompt Injection Specific datasets ───────────────────────────
+
+  jasper_prompt_injections:
+    type: huggingface
+    repo: "JasperLS/prompt-injections"
+    split: "train"
+    text_column: "text"
+    label_column: "label"
+    label_map:
+      0: 0
+      1: 1
+    license: "unknown"
+    category: "mixed"
+    enabled: true
+    output: "hf_jasper_prompt_injections.csv"
+
+  gandalf_ignore_instructions:
+    type: huggingface
+    repo: "Lakera/gandalf_ignore_instructions"
+    split: "train"
+    text_column: "text"
+    label: 1
+    license: "unknown"
+    category: "jailbreak"
+    enabled: true
+    output: "hf_gandalf_ignore_instructions.csv"
+
+  awesome_chatgpt_prompts_hf:
+    type: huggingface
+    repo: "fka/awesome-chatgpt-prompts"
+    split: "train"
+    text_column: "prompt"
+    label: 0
+    license: "CC0-1.0"
+    category: "safe_baseline"
+    enabled: true
+    output: "hf_awesome_chatgpt_prompts_hf.csv"
+
+  openorca:
+    type: huggingface
+    repo: "Open-Orca/OpenOrca"
+    split: "train"
+    text_column: "question"
+    label: 0
+    max_samples: 50000
+    license: "MIT"
+    category: "safe_baseline"
+    enabled: true
+    output: "hf_openorca.csv"
+
+  # ── Multilingual datasets ────────────────────────────────────────
+
+  xnli:
+    type: huggingface
+    repo: "xnli"
+    config: "all_languages"
+    split: "test"
+    text_column: "premise"
+    label: 0
+    max_samples: 50000
+    license: "CC-BY-NC-4.0"
+    category: "multilingual"
+    enabled: true
+    output: "hf_xnli.csv"
+
+  xp3:
+    type: huggingface
+    repo: "bigscience/xP3"
+    split: "train"
+    text_column: "inputs"
+    label: 0
+    max_samples: 50000
+    license: "Apache-2.0"
+    category: "multilingual"
+    enabled: true
+    output: "hf_xp3.csv"
+
+  # ── Red-teaming datasets ─────────────────────────────────────────
+
+  red_team_attempts:
+    type: huggingface
+    repo: "Anthropic/red-team-attempts"
+    split: "train"
+    text_column: "transcript"
+    label: 1
+    max_samples: 50000
+    license: "MIT"
+    category: "red_team"
+    enabled: true
+    output: "hf_red_team_attempts.csv"
+
+  harmbench:
+    type: huggingface
+    repo: "HarmBench/harmbench"
+    split: "train"
+    text_column: "prompt"
+    label: 1
+    max_samples: 50000
+    license: "MIT"
+    category: "red_team"
+    enabled: true
+    output: "hf_harmbench.csv"
+
+  pile_safe_subset:
+    type: huggingface
+    repo: "EleutherAI/pile"
+    split: "train"
+    text_column: "text"
+    label: 0
+    max_samples: 50000
+    license: "MIT"
+    category: "safe_baseline"
+    enabled: true
+    output: "hf_pile_safe_subset.csv"
+
+  dolly_15k:
+    type: huggingface
+    repo: "databricks/dolly-15k"
+    split: "train"
+    text_column: "instruction"
+    label: 0
+    max_samples: 50000
+    license: "CC-BY-SA-3.0"
+    category: "safe_baseline"
+    enabled: true
+    output: "hf_dolly_15k.csv"
+
+  # ── Additional jailbreak / adversarial datasets ──────────────────
+
+  do_not_answer:
+    type: huggingface
+    repo: "LibrAI/do-not-answer"
+    split: "train"
+    text_column: "question"
+    label: 1
+    license: "CC-BY-NC-SA-4.0"
+    category: "jailbreak"
+    enabled: true
+    output: "hf_do_not_answer.csv"
+
+  xstest:
+    type: huggingface
+    repo: "natolambert/xstest-v2-copy"
+    split: "train"
+    text_column: "prompt"
+    label_column: "label"
+    label_map:
+      safe: 0
+      unsafe: 1
+    license: "MIT"
+    category: "mixed"
+    enabled: true
+    output: "hf_xstest.csv"
+
+  safe_rlhf:
+    type: huggingface
+    repo: "PKU-Alignment/PKU-SafeRLHF"
+    split: "train"
+    text_column: "prompt"
+    label_column: "is_response_0_safe"
+    label_map:
+      true: 0
+      false: 1
+      True: 0
+      False: 1
+    max_samples: 50000
+    license: "CC-BY-NC-4.0"
+    category: "mixed"
+    enabled: true
+    output: "hf_safe_rlhf.csv"
+
+  strongreject:
+    type: huggingface
+    repo: "alexandrasouly/strongreject"
+    split: "train"
+    text_column: "forbidden_prompt"
+    label: 1
+    license: "MIT"
+    category: "red_team"
+    enabled: true
+    output: "hf_strongreject.csv"
+
+  toxigen:
+    type: huggingface
+    repo: "skg/toxigen-data"
+    split: "train"
+    text_column: "text"
+    label_column: "toxicity_label"
+    label_map:
+      0: 0
+      1: 1
+    max_samples: 50000
+    license: "MIT"
+    category: "mixed"
+    enabled: true
+    output: "hf_toxigen.csv"
+
+  harmful_qa:
+    type: huggingface
+    repo: "declare-lab/HarmfulQA"
+    split: "train"
+    text_column: "question"
+    label: 1
+    license: "MIT"
+    category: "red_team"
+    enabled: true
+    output: "hf_harmful_qa.csv"
+
+  real_toxicity_prompts:
+    type: huggingface
+    repo: "allenai/real-toxicity-prompts"
+    split: "train"
+    text_column: "text"
+    label: 0
+    max_samples: 50000
+    license: "Apache-2.0"
+    category: "mixed"
+    enabled: true
+    output: "hf_real_toxicity_prompts.csv"
+
+  malicious_instruct:
+    type: huggingface
+    repo: "Polyglot-or-Not/malicious-instructions"
+    split: "train"
+    text_column: "prompt"
+    label: 1
+    license: "unknown"
+    category: "jailbreak"
+    enabled: true
+    output: "hf_malicious_instruct.csv"
+
+  safe_conversations:
+    type: huggingface
+    repo: "Hello-SimpleAI/chatgpt-detector-roberta"
+    split: "train"
+    text_column: "text"
+    label: 0
+    max_samples: 50000
+    license: "CC-BY-4.0"
+    category: "safe_baseline"
+    enabled: true
+    output: "hf_safe_conversations.csv"
+
+  lima:
+    type: huggingface
+    repo: "GAIR/lima"
+    split: "train"
+    text_column: "conversations"
+    label: 0
+    license: "CC-BY-NC-SA-4.0"
+    category: "safe_baseline"
+    gated: true
+    enabled: false
+    output: "hf_lima.csv"

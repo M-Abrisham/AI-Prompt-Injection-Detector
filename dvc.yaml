@@ -1,0 +1,85 @@
+stages:
+  download:
+    cmd: python scripts/download_datasets.py --output-dir data/benchmark
+    deps:
+      - scripts/download_datasets.py
+    outs:
+      - data/benchmark/deepset_pi.jsonl
+      - data/benchmark/benign_alpaca.jsonl
+      - data/benchmark/benign_dolly.jsonl
+
+  aggregate:
+    cmd: python scripts/aggregate_datasets.py --output-dir data/aggregated
+    deps:
+      - scripts/aggregate_datasets.py
+      - data/benchmark/deepset_pi.jsonl
+      - data/benchmark/benign_alpaca.jsonl
+      - data/benchmark/benign_dolly.jsonl
+    outs:
+      - data/aggregated/all_datasets.jsonl
+
+  deduplicate:
+    cmd: python scripts/near_duplicate.py --input data/processed/combined_data.csv --output data/processed/combined_data_deduped.csv
+    deps:
+      - scripts/near_duplicate.py
+      - data/aggregated/all_datasets.jsonl
+    outs:
+      - data/processed/combined_data_deduped.csv
+    metrics:
+      - data/staging/near_duplicates_report.csv:
+          cache: false
+
+  validate:
+    cmd: python scripts/validate_data.py --input data/processed/combined_data_deduped.csv
+    deps:
+      - scripts/validate_data.py
+      - data/processed/combined_data_deduped.csv
+
+  train:
+    cmd: python scripts/model.py
+    deps:
+      - scripts/model.py
+      - scripts/features.py
+      - data/processed/combined_data_deduped.csv
+    outs:
+      - data/processed/model.pkl
+    metrics:
+      - data/processed/training_metrics.json:
+          cache: false
+
+  evaluate:
+    cmd: python scripts/benchmark.py
+    deps:
+      - scripts/benchmark.py
+      - data/processed/model.pkl
+      - data/benchmark/deepset_pi.jsonl
+    metrics:
+      - data/evaluation/benchmark_results.json:
+          cache: false
+
+  generate_taxonomy:
+    cmd: python scripts/generate_taxonomy.py --output data/staging/taxonomy_samples.jsonl
+    deps:
+      - scripts/generate_taxonomy.py
+      - scripts/taxonomy/
+      - data/taxonomy.yaml
+      - src/na0s/data_schema.py
+    outs:
+      - data/staging/taxonomy_samples.jsonl
+
+  merge_taxonomy:
+    cmd: >-
+      python scripts/merge_taxonomy.py
+      --taxonomy data/staging/taxonomy_samples.jsonl
+      --existing data/processed/combined_data_deduped.csv
+      --output-dir data/processed/splits
+      --split-ratio 0.8,0.1,0.1
+    deps:
+      - scripts/merge_taxonomy.py
+      - data/staging/taxonomy_samples.jsonl
+      - data/processed/combined_data_deduped.csv
+      - src/na0s/data_schema.py
+    outs:
+      - data/processed/splits/train.jsonl
+      - data/processed/splits/val.jsonl
+      - data/processed/splits/test.jsonl

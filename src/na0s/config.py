@@ -4,7 +4,11 @@ All tunable numeric thresholds and weights live here.
 Downstream modules import from this file instead of hardcoding values.
 """
 
+import os
 from dataclasses import dataclass
+
+# -- Input length guard (defense-in-depth, checked at scan/classify entry) --
+MAX_INPUT_LENGTH: int = int(os.getenv("NA0S_MAX_INPUT_LENGTH", 50_000))
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,7 @@
 {
   "source_id": "reddit/r/ChatGPT",
   "tier": "tier4",
-  "ingested_at": "2026-03-17T16:39:49.621755+00:00",
+  "ingested_at": "2026-03-18T22:57:57.830756+00:00",
   "file_sha256": "7caa8fa86e20742b85cdaf2b4c214c28603c336f7580fefaaa0c7a4dd48c03a0",
   "row_count": 1,
   "validation_status": "staged",
@@ -23,6 +23,6 @@
     "provenance": 0.0
   },
   "trust_gate": "quarantine_hold",
-  "validated_at": "2026-03-17T16:39:49.632109+00:00",
-  "staged_at": "2026-03-17T16:39:49.635218+00:00"
+  "validated_at": "2026-03-18T22:57:57.841067+00:00",
+  "staged_at": "2026-03-18T22:57:57.845140+00:00"
 }
