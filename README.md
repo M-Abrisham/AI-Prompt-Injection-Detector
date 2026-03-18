@@ -88,10 +88,6 @@ Na0s is a **defense-in-depth prompt injection detector** — 17 independent laye
 </div>
 
 <summary>Disclaimer</summary>
-
-Na0S is under active development and cannot guarantee 100% protection against prompt
-injection attacks. Use as one layer in your security strategy, not as a silver bullet.
-
 ---
 
 ## How It Works
