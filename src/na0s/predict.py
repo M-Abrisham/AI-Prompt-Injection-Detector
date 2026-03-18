@@ -79,6 +79,7 @@ from .layer1.context import _is_legitimate_roleplay, _has_contextual_framing
 from .layer2 import obfuscation_scan
 from .rules import rule_score_detailed, RULES, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
+from .config import MAX_INPUT_LENGTH
 from .safe_pickle import safe_load
 from .models import get_model_path, KNOWN_HASHES
 from ._voting import _weighted_composite
@@ -142,6 +143,43 @@ try:
     _HAS_HARMFUL_INTENT = True
 except ImportError:
     _HAS_HARMFUL_INTENT = False
+
+# Intent-analysis detector (N1) — optional import
+try:
+    from .intent_guard import analyze_intent, get_intent_guard_weight
+    _HAS_INTENT_GUARD = True
+except ImportError:
+    _HAS_INTENT_GUARD = False
+
+# RAG poisoning detector (I1.x / IM.x) — optional import
+try:
+    from .rag_poison_detector import detect_rag_poisoning, get_rag_poison_weight
+    _HAS_RAG_POISON = True
+except ImportError:
+    _HAS_RAG_POISON = False
+
+# MCP tool shadowing detector (T1) — optional import
+try:
+    from .mcp_tool_detector import (
+        detect_tool_shadowing as _detect_tool_shadowing,
+        scan_tool_manifest as _scan_tool_manifest,
+        get_mcp_tool_weight,
+        McpToolResult,
+    )
+    _HAS_MCP_TOOL_DETECTOR = True
+except ImportError:
+    _HAS_MCP_TOOL_DETECTOR = False
+
+# N5: PromptGuard classifier — transformer-based injection/jailbreak detection.
+# Opt-in via NA0S_ENABLE_PROMPTGUARD=1 (requires downloading a model).
+try:
+    from .promptguard_classifier import (
+        get_promptguard_score as _get_pg_classifier_score,
+        PromptGuardClassifier as _PromptGuardClassifier,
+    )
+    _HAS_PROMPTGUARD_CLASSIFIER = True
+except ImportError:
+    _HAS_PROMPTGUARD_CLASSIFIER = False
 
 # Layer 5: Centroid-based Embedding Classifier — optional import
 # Uses semantic similarity to pre-computed attack pattern centroids.
@@ -852,6 +890,70 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         except Exception:
             pass  # Harmful intent detection failure is non-fatal
 
+    # --- RAG poisoning detection (I1.x / IM.x) ---
+    # Detect poisoned RAG context: instruction injection in retrieved docs,
+    # fake document boundaries, authority spoofing, relevance manipulation,
+    # consistency anomalies, and hidden instructions in structured data.
+    rag_poison_weight = 0.0
+    if _HAS_RAG_POISON:
+        try:
+            rag_result = detect_rag_poisoning(clean)
+            if rag_result.poison_indicators:
+                rag_poison_weight = get_rag_poison_weight(rag_result)
+                for indicator in rag_result.poison_indicators:
+                    hit_name = "rag_poison:" + indicator
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        # Map severity: multi-category = high, single = medium
+                        _sev = "high" if rag_result.details.get("category_count", 0) >= 2 else "medium"
+                        _RULE_SEVERITY[hit_name] = _sev
+        except Exception:
+            pass  # RAG poisoning detection failure is non-fatal
+
+    # --- Intent-analysis detection (N1) ---
+    # Detect prompts that try to make the LLM follow malicious instructions
+    # through action directives, compliance manipulation, goal hijacking,
+    # output weaponization, or authority escalation.
+    intent_weight = 0.0
+    if _HAS_INTENT_GUARD:
+        try:
+            intent_result = analyze_intent(clean)
+            if intent_result.intent_categories:
+                intent_weight = get_intent_guard_weight(intent_result)
+                for cat in intent_result.intent_categories:
+                    hit_name = "intent:" + cat
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        _sev = "high" if len(intent_result.intent_categories) >= 2 else "medium"
+                        _RULE_SEVERITY[hit_name] = _sev
+        except Exception:
+            pass  # Intent analysis failure is non-fatal
+
+    # --- N5: PromptGuard transformer classifier signal ---
+    # When enabled (NA0S_ENABLE_PROMPTGUARD=1), run the mDeBERTa-based
+    # classifier and blend its signal into the composite score.
+    # Weight 0.35: strong enough to influence the decision but not
+    # enough to single-handedly override multi-layer consensus.
+    _pg_score = 0.0
+    if _HAS_PROMPTGUARD_CLASSIFIER:
+        try:
+            _pg_score = _get_pg_classifier_score(clean)
+            if _pg_score > 0:
+                _pg_weight = 0.35 * _pg_score
+                composite = min(composite + _pg_weight, 1.0)
+                if _pg_score > 0.5:
+                    hits.append("promptguard:high")
+                    hit_names_seen.add("promptguard:high")
+                elif _pg_score > 0.2:
+                    hits.append("promptguard:medium")
+                    hit_names_seen.add("promptguard:medium")
+                if composite >= threshold and "SAFE" in label:
+                    label = "MALICIOUS"
+        except Exception:
+            pass  # PromptGuard failure is non-fatal
+
     # --- Layer 2 extra boost (ascii art / whitespace stego) ---
     # Applied after _weighted_decision so it doesn't interfere with the
     # ML-uncertain-zone cap or override protection logic inside that function.
@@ -1013,6 +1115,26 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None) -> Sca
     this budget, returns a rejected ScanResult.
     """
     _t0 = time.perf_counter()
+
+    # Defense-in-depth: reject oversized input before any expensive processing
+    if isinstance(text, str) and len(text) > MAX_INPUT_LENGTH:
+        result = ScanResult(
+            sanitized_text="",
+            is_malicious=True,
+            risk_score=1.0,
+            label="malicious",
+            ml_confidence=1.0,
+            ml_label="blocked",
+            rejected=True,
+            rejection_reason="Input exceeds maximum length ({} chars)".format(
+                MAX_INPUT_LENGTH
+            ),
+            rule_hits=["input_length_exceeded"],
+            anomaly_flags=["input_length_exceeded"],
+        )
+        result.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
+        return result
+
     if vectorizer is None or model is None:
         vectorizer, model = predict_prompt()
 
@@ -1327,6 +1449,9 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None) -> Sca
         elif hit_name.startswith("harmful:"):
             if "O1" not in technique_tags:
                 technique_tags.append("O1")
+        elif hit_name.startswith("intent:"):
+            if "N1" not in technique_tags:
+                technique_tags.append("N1")
 
     # Layer 3: Append structural injection signals to rule_hits for visibility
     # and map them to technique_ids for taxonomy attribution.
@@ -1387,6 +1512,38 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None) -> Sca
         if structural.get("repetition_score", 0) > 0.3 and "D8.1" not in technique_tags:
             technique_tags.append("D8.1")      # Resource Exhaustion / Crescendo
 
+    # --- N6: Visual injection routing ---
+    # When L0 detects embedded image data, route through the visual
+    # injection detector for multimodal injection analysis (M1).
+    _IMAGE_FLAGS = frozenset({
+        "embedded_image", "embedded_png", "embedded_jpeg", "embedded_gif",
+        "embedded_bmp", "embedded_tiff", "embedded_webp",
+        "base64_hidden_image", "image_metadata_text",
+    })
+    if _IMAGE_FLAGS & set(l0.anomaly_flags):
+        try:
+            from .visual_injection_detector import scan_image as _visual_scan
+
+            # If L0 extracted OCR or metadata text, scan it via the visual
+            # detector pattern-based analysis.  We pass the extracted text
+            # through _scan_text_for_injection for injection indicators.
+            from .visual_injection_detector import _scan_text_for_injection
+
+            _visual_score, _visual_inds, _visual_tids = _scan_text_for_injection(
+                l0.sanitized_text
+            )
+            if _visual_inds:
+                risk = max(risk, _visual_score)
+                for tid in _visual_tids:
+                    if tid not in technique_tags:
+                        technique_tags.append(tid)
+                for ind in _visual_inds:
+                    hit_name = "visual:" + ind.indicator_type
+                    if hit_name not in hits:
+                        hits.append(hit_name)
+        except Exception:
+            logger.debug("Visual injection detector not available", exc_info=True)
+
     # Re-evaluate malicious verdict after chunked analysis and structural
     # features may have boosted the risk score above the threshold.
     # The initial is_mal was set from classify_prompt()'s composite score,
@@ -1413,6 +1570,48 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None) -> Sca
     result.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
     return result
 
+
+
+# ---------------------------------------------------------------------------
+# MCP tool scanning convenience API
+# ---------------------------------------------------------------------------
+
+def scan_tools(tools, known_tools=None):
+    """Scan MCP tool definitions for shadowing and injection indicators.
+
+    Parameters
+    ----------
+    tools : list[dict]
+        List of tool definitions.  Each dict should have at minimum
+        ``"name"`` and ``"description"`` keys.
+    known_tools : list[str] or None
+        List of legitimate tool names for cross-referencing.
+
+    Returns
+    -------
+    list[McpToolResult]
+        One result per tool.  Returns an empty list if the MCP tool
+        detector is not available.
+
+    Technique IDs
+    -------------
+    T1   — Agent/Tool Abuse (parent)
+    T1.1 — Instruction injection in tool descriptions
+    T1.2 — Hidden directives (invisible chars, encoded payloads)
+    T1.3 — Capability escalation claims
+    T1.4 — Tool name shadowing / typosquatting
+    T1.5 — Data exfiltration channels
+    T1.6 — Description length anomaly
+    """
+    if not _HAS_MCP_TOOL_DETECTOR:
+        logger.warning("MCP tool detector not available; returning empty results")
+        return []
+    return _scan_tool_manifest(tools, known_tools=known_tools)
+
+
+# ---------------------------------------------------------------------------
+# Demo / __main__
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")

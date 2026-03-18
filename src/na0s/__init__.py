@@ -25,6 +25,13 @@ Cascade with ScanResult (same return type as scan())::
     clf = CascadeClassifier()
     result = clf.scan("some input")
     print(result.cascade_stage)  # "whitelist", "weighted", "judge", ...
+
+Image / visual injection scanning::
+
+    from na0s import scan_image
+    result = scan_image(open("suspect.png", "rb").read())
+    print(result.is_suspicious)  # True
+    print(result.technique_ids)  # ["M1", "M1.1"]
 """
 
 from na0s._version import __version__
@@ -41,14 +48,28 @@ from na0s.streaming_scanner import StreamingOutputScanner
 from na0s.positive_validation import TrustBoundary
 from na0s.canary import CanaryManager, CanaryToken
 
+try:
+    from na0s.visual_injection_detector import (
+        scan_image,
+        scan_image_file,
+        scan_document_visual,
+        VisualInjectionResult,
+    )
+except ImportError:
+    pass  # Image/document deps may not be installed
+
 __all__ = [
     "__version__",
     "scan",
     "ensemble_scan",
     "EnsembleClassifier",
     "scan_output",
+    "scan_image",
+    "scan_image_file",
+    "scan_document_visual",
     "CascadeClassifier",
     "ScanResult",
+    "VisualInjectionResult",
     "OutputScanner",
     "OutputScanResult",
     "StreamingOutputScanner",

@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Tuple
 from .safe_pickle import safe_load
 from .predict import _get_cached_models, _get_cached_scaler, _transform, _get_model_version
 from .rules import rule_score, rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
-from .config import THRESHOLDS
+from .config import THRESHOLDS, MAX_INPUT_LENGTH
 from ._voting import _weighted_composite
 from .layer2 import obfuscation_scan
 from .layer0 import layer0_sanitize
@@ -63,6 +63,15 @@ from .performance_slo import SLOTracker
 
 # Layer 6: Evidence grading
 from .evidence_grading import filter_graded_hits
+
+# N5: PromptGuard transformer classifier — optional
+try:
+    from .promptguard_classifier import (
+        get_promptguard_score as _get_pg_classifier_score,
+    )
+    _HAS_PROMPTGUARD_CLASSIFIER = True
+except ImportError:
+    _HAS_PROMPTGUARD_CLASSIFIER = False
 
 # ---------------------------------------------------------------------------
 # Valid cascade stage names and dependency ordering
@@ -404,6 +413,23 @@ class WeightedClassifier:
                 threshold=self.threshold,
             )
 
+        # --- N5: PromptGuard transformer classifier signal ---
+        # When enabled, blend the mDeBERTa signal with weight 0.35.
+        if _HAS_PROMPTGUARD_CLASSIFIER:
+            try:
+                _pg_score = _get_pg_classifier_score(text)
+                if _pg_score > 0:
+                    _pg_weight = 0.35 * _pg_score
+                    composite = min(composite + _pg_weight, 1.0)
+                    if _pg_score > 0.5:
+                        hit_names.append("promptguard:high")
+                    elif _pg_score > 0.2:
+                        hit_names.append("promptguard:medium")
+                    if composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                pass  # PromptGuard failure is non-fatal
+
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
         hit_names.extend(obfuscation_flags)
@@ -643,6 +669,17 @@ class CascadeClassifier:
         """
         self._total += 1
         self._last_judge_reasoning = ""  # BUG-L7-5: reset per call
+
+        # Defense-in-depth: reject oversized input before any expensive processing
+        if isinstance(text, str) and len(text) > MAX_INPUT_LENGTH:
+            self._blocked += 1
+            self._last_l0 = None  # no L0 result — guard fired first
+            return (
+                "BLOCKED",
+                1.0,
+                ["input_length_exceeded"],
+                "blocked",
+            )
 
         # Layer 0: sanitize input before anything else
         l0 = layer0_sanitize(text)

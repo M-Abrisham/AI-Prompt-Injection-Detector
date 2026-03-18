@@ -232,6 +232,20 @@ def predict_embedding(text, embedding_model=None, classifier=None,
 
     clean = l0.sanitized_text
 
+    # ------------------------------------------------------------------
+    # DiffuseDef: apply text denoising before embedding (adversarial defense)
+    # ------------------------------------------------------------------
+    try:
+        from .diffuse_defense import get_denoised_text, _is_enabled as _dd_enabled
+
+        if _dd_enabled():
+            clean = get_denoised_text(clean)
+            _log.debug("DiffuseDef denoised text for predict_embedding")
+    except ImportError:
+        pass
+    except Exception as exc:
+        _log.debug("DiffuseDef text denoising skipped: %s", exc)
+
     # BUG-L5-7 TODO: The training pipeline may preprocess text differently
     # (e.g., lowercasing, stripping punctuation) before computing embeddings.
     # Ensure that inference preprocessing matches training preprocessing
@@ -306,6 +320,26 @@ def classify_prompt_embedding(text, embedding_model=None, classifier=None,
     clean = l0.sanitized_text
 
     # ------------------------------------------------------------------
+    # DiffuseDef: apply text denoising before embedding (adversarial defense)
+    # ------------------------------------------------------------------
+    _dd_active = False
+    try:
+        from .diffuse_defense import (
+            get_denoised_text as _dd_denoise_text,
+            get_denoised_embedding as _dd_denoise_emb,
+            _is_enabled as _dd_enabled,
+        )
+
+        if _dd_enabled():
+            clean = _dd_denoise_text(clean)
+            _dd_active = True
+            _log.debug("DiffuseDef denoised text for classify_prompt_embedding")
+    except ImportError:
+        pass
+    except Exception as exc:
+        _log.debug("DiffuseDef text denoising skipped: %s", exc)
+
+    # ------------------------------------------------------------------
     # Step 1 -- ML prediction via embeddings (on sanitized text)
     # ------------------------------------------------------------------
     # BUG-L5-7 TODO: Ensure training preprocessing matches this inference
@@ -314,10 +348,21 @@ def classify_prompt_embedding(text, embedding_model=None, classifier=None,
 
     # BUG-L5-8: Wrap encode() in try-except for graceful fallback
     try:
-        embedding = embedding_model.encode(
-            [clean], show_progress_bar=False, convert_to_numpy=True,
-            batch_size=batch_size,
-        )
+        if _dd_active:
+            # Use semantic denoising: embed multiple perturbed variants
+            # and average to get a denoised centroid embedding.
+            def _embed_batch(texts):
+                return embedding_model.encode(
+                    texts, show_progress_bar=False, convert_to_numpy=True,
+                    batch_size=batch_size,
+                )
+
+            embedding = _dd_denoise_emb(clean, _embed_batch)
+        else:
+            embedding = embedding_model.encode(
+                [clean], show_progress_bar=False, convert_to_numpy=True,
+                batch_size=batch_size,
+            )
     except Exception as exc:
         _log.warning("embedding_model.encode() failed: %s", exc)
         return "SAFE", 0.0, ["encoding_error"], l0
