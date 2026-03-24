@@ -36,9 +36,10 @@ class DataSplit(str, Enum):
     TEST = "test"
 
 
-# Technique-ID pattern: letter(s) followed by digits, optionally dot-separated sub-IDs
-# e.g. D1, D1.3, I2.1, M1.1, A3.2.1
-_TECHNIQUE_ID_RE = re.compile(r"^[A-Z]+\d+(\.\d+)*$")
+# Technique-ID pattern: letter(s) followed by digits, optionally dot-separated sub-IDs,
+# with optional _suffix (e.g. _benign for counterexamples).
+# e.g. D1, D1.3, C1MT.1, I2.1, D1.1_benign, A3.2.1
+_TECHNIQUE_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*(\.\d+)*(_[a-z]+)?$")
 
 # Label aliases — maps normalised lower-case strings to DataLabel
 _LABEL_MAP: dict[str, DataLabel] = {

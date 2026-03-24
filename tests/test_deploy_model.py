@@ -495,5 +495,102 @@ class TestRollback(unittest.TestCase):
             self.assertEqual(ctx.exception.code, 0)
 
 
+# ---------------------------------------------------------------------------
+# Char-level TF-IDF vectorizer (conditionally required)
+# ---------------------------------------------------------------------------
+
+class TestCharVectorizerRequired(unittest.TestCase):
+    """char_tfidf_vectorizer.pkl must be deployed when it exists alongside model.pkl."""
+
+    def _setup_dirs(self, td):
+        src_dir = os.path.join(td, "processed")
+        dst_dir = os.path.join(td, "models")
+        os.makedirs(src_dir)
+        os.makedirs(dst_dir)
+        init_path = os.path.join(dst_dir, "__init__.py")
+        _write_file(init_path, _INIT_TEMPLATE.encode())
+        return src_dir, dst_dir, init_path
+
+    def test_char_vectorizer_copied_when_present(self):
+        """If char_tfidf_vectorizer.pkl exists in source, it must be copied."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl", "char_tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"data_" + fname.encode())
+
+            with self.assertRaises(SystemExit) as ctx:
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            self.assertEqual(ctx.exception.code, 0)
+            self.assertTrue(
+                os.path.exists(os.path.join(dst_dir, "char_tfidf_vectorizer.pkl")),
+                "char_tfidf_vectorizer.pkl must be deployed when present in source",
+            )
+
+    def test_char_vectorizer_hash_in_init(self):
+        """char_tfidf_vectorizer.pkl must appear in KNOWN_HASHES after deploy."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl", "char_tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"payload_" + fname.encode())
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            with open(init_path) as f:
+                content = f.read()
+            self.assertRegex(
+                content,
+                r'"char_tfidf_vectorizer\.pkl":\s*"[0-9a-f]{64}"',
+                "char_tfidf_vectorizer.pkl must have a SHA-256 entry in KNOWN_HASHES",
+            )
+
+    def test_deploy_succeeds_without_char_vectorizer(self):
+        """When char_tfidf_vectorizer.pkl is absent, deploy must still work."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"data_" + fname.encode())
+
+            with self.assertRaises(SystemExit) as ctx:
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            self.assertEqual(ctx.exception.code, 0)
+
+    def test_char_vectorizer_not_in_hash_when_absent(self):
+        """When char_tfidf_vectorizer.pkl is absent, it must NOT appear in KNOWN_HASHES."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"data_" + fname.encode())
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            with open(init_path) as f:
+                content = f.read()
+            self.assertNotIn("char_tfidf_vectorizer.pkl", content)
+
+    def test_rollback_restores_char_vectorizer_bak(self):
+        """Rollback must restore char_tfidf_vectorizer.pkl if its .bak exists."""
+        from scripts.deploy_model import rollback
+        bak_content = b"old char vectorizer"
+        with tempfile.TemporaryDirectory() as td:
+            dst_dir = os.path.join(td, "models")
+            os.makedirs(dst_dir)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl", "char_tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(dst_dir, fname), b"new")
+                _write_file(os.path.join(dst_dir, fname + ".bak"), bak_content)
+
+            with self.assertRaises(SystemExit) as ctx:
+                rollback(dest_dir=dst_dir)
+            self.assertEqual(ctx.exception.code, 0)
+
+            with open(os.path.join(dst_dir, "char_tfidf_vectorizer.pkl"), "rb") as f:
+                self.assertEqual(f.read(), bak_content)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -26,7 +26,12 @@ DEST_DIR = os.path.join(ROOT, "src", "na0s", "models")
 INIT_PATH = os.path.join(DEST_DIR, "__init__.py")
 
 MODEL_FILES = ["model.pkl", "tfidf_vectorizer.pkl"]
-OPTIONAL_MODEL_FILES = ["structural_scaler.pkl", "char_tfidf_vectorizer.pkl"]
+# char_tfidf_vectorizer.pkl is conditionally required: if the model was
+# trained with character-level features (i.e. char_tfidf_vectorizer.pkl
+# exists alongside model.pkl in source_dir), deployment MUST include it
+# to avoid a feature-dimension mismatch at inference time.
+OPTIONAL_MODEL_FILES = ["structural_scaler.pkl"]
+CHAR_VECTORIZER = "char_tfidf_vectorizer.pkl"
 
 
 def _sha256(path):
@@ -94,9 +99,21 @@ def deploy(source_dir=None, dest_dir=None, init_path=None):
     if init_path is None:
         init_path = INIT_PATH
 
-    # 1. Copy model files (required + optional)
+    # 1. Copy model files (required + conditionally-required + optional)
     new_hashes = {}
-    all_files = MODEL_FILES + [
+
+    # If the model was trained with char-level features, the char vectorizer
+    # is required for correct inference (15,029 dims vs 10,029 without it).
+    char_vec_src = os.path.join(source_dir, CHAR_VECTORIZER)
+    model_src = os.path.join(source_dir, "model.pkl")
+    char_features_required = (
+        os.path.exists(char_vec_src) and os.path.exists(model_src)
+    )
+
+    all_files = MODEL_FILES[:]
+    if char_features_required:
+        all_files.append(CHAR_VECTORIZER)
+    all_files += [
         f for f in OPTIONAL_MODEL_FILES
         if os.path.exists(os.path.join(source_dir, f))
     ]
@@ -184,13 +201,14 @@ def rollback(dest_dir=None):
         dest_dir = DEST_DIR
 
     all_ok = True
-    for fname in MODEL_FILES + OPTIONAL_MODEL_FILES:
+    all_rollback_files = MODEL_FILES + OPTIONAL_MODEL_FILES + [CHAR_VECTORIZER]
+    for fname in all_rollback_files:
         live = os.path.join(dest_dir, fname)
         bak = live + ".bak"
 
         if not os.path.exists(bak):
-            if fname in OPTIONAL_MODEL_FILES:
-                continue  # Optional files may not have backups
+            if fname in OPTIONAL_MODEL_FILES or fname == CHAR_VECTORIZER:
+                continue  # Optional / conditionally-required files may not have backups
             print(f"ERROR: rollback backup not found: {bak}")
             all_ok = False
             continue

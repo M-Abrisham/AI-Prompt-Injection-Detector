@@ -317,6 +317,23 @@ class TestPromptGuardSignal:
             with mock.patch.dict(os.environ, {"NA0S_PROMPTGUARD_ENABLED": val}):
                 assert sig._is_enabled() is False, "Failed for value: {}".format(val)
 
+    def test_auto_detect_when_env_unset(self):
+        """When NA0S_PROMPTGUARD_ENABLED is unset, auto-detect via transformers."""
+        import na0s.promptguard_signal as sig
+
+        env = os.environ.copy()
+        env.pop("NA0S_PROMPTGUARD_ENABLED", None)
+
+        # Case 1: transformers IS importable → auto-enabled
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch("importlib.util.find_spec", return_value=mock.MagicMock()):
+                assert sig._is_enabled() is True
+
+        # Case 2: transformers is NOT importable → auto-disabled
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch("importlib.util.find_spec", return_value=None):
+                assert sig._is_enabled() is False
+
     def test_score_with_mock_classifier(self):
         """When enabled with a working mock classifier, score should reflect probs."""
         import na0s.promptguard_signal as sig

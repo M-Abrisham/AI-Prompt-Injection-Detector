@@ -5,9 +5,10 @@ the injection probability in [0.0, 1.0].  It is designed to be called from
 the cascade/ensemble pipeline as a lightweight scoring function.
 
 Behaviour:
+  - If ``NA0S_PROMPTGUARD_ENABLED`` is set to ``0``/``false``/``no`` → disabled.
+  - If set to ``1``/``true``/``yes`` → enabled.
+  - If **unset** → auto-detect (enabled when ``transformers`` is importable).
   - Returns 0.0 if ``transformers`` is not installed (graceful degradation).
-  - Returns 0.0 if disabled via ``NA0S_PROMPTGUARD_ENABLED`` env var
-    (default: ``"0"`` — disabled, since transformers is an optional dep).
   - Uses a module-level singleton to avoid reloading the model on every call.
   - The score is ``P(INJECTION) + P(JAILBREAK)``, i.e. the probability that
     the input is NOT benign according to Prompt Guard 2.
@@ -15,6 +16,7 @@ Behaviour:
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 import threading
@@ -23,14 +25,25 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Environment toggle — disabled by default (requires extra deps)
+# Environment toggle — auto-detects when unset
 # ---------------------------------------------------------------------------
 _ENV_KEY = "NA0S_PROMPTGUARD_ENABLED"
 
 
 def _is_enabled() -> bool:
-    """Return True if the Prompt Guard signal is enabled via env var."""
-    return os.environ.get(_ENV_KEY, "0").lower() in ("1", "true", "yes")
+    """Return True if the Prompt Guard signal should be active.
+
+    Priority:
+      1. Env var explicitly set to a falsy value (0/false/no) → False
+      2. Env var explicitly set to a truthy value (1/true/yes) → True
+      3. Env var **unset** → auto-detect (True when ``transformers``
+         is importable, False otherwise)
+    """
+    raw = os.environ.get(_ENV_KEY)
+    if raw is None:
+        # Auto-detect: enable when transformers is available
+        return importlib.util.find_spec("transformers") is not None
+    return raw.lower() in ("1", "true", "yes")
 
 
 # ---------------------------------------------------------------------------

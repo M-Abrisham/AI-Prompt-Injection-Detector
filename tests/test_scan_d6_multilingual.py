@@ -544,7 +544,7 @@ class TestD6_6_MixedLanguage(unittest.TestCase):
                         "Mixed EN+JA roleplay not detected "
                         "(risk={:.3f})".format(result.risk_score))
 
-    @unittest.expectedFailure
+
     def test_mixed_french_chinese_no_english(self):
         """French + Chinese code-switching -- no English at all.
         DETECTED: French 'instructions' cognate + high_entropy from CJK +

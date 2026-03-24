@@ -118,7 +118,14 @@ def _resolve_text(text_arg, file_arg):
     """
     if text_arg == "-" or (text_arg is None and file_arg is None
                            and not sys.stdin.isatty()):
-        data = sys.stdin.buffer.read(_MAX_INPUT_BYTES + 1)
+        try:
+            buf = getattr(sys.stdin, "buffer", None)
+            if buf is not None:
+                data = buf.read(_MAX_INPUT_BYTES + 1)
+            else:
+                data = sys.stdin.read(_MAX_INPUT_BYTES + 1).encode("utf-8")
+        except OSError:
+            return None
         if len(data) > _MAX_INPUT_BYTES:
             print(
                 f"Error: input exceeds {_MAX_INPUT_BYTES // (1024 * 1024)} MB limit.",
@@ -128,6 +135,9 @@ def _resolve_text(text_arg, file_arg):
         return data.decode("utf-8", errors="replace")
     if file_arg:
         import os
+        if not os.path.isfile(file_arg):
+            print(f"Error: file not found: {file_arg}", file=sys.stderr)
+            return None
         try:
             size = os.path.getsize(file_arg)
         except OSError:
@@ -161,15 +171,24 @@ def _cmd_scan(args):
               file=sys.stderr)
         return EXIT_BAD_INPUT
 
+    threshold = getattr(args, 'threshold', 0.55)
     try:
         from na0s import scan
-        result = scan(text)
+        result = scan(text, threshold=threshold)
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
-    fmt = "json" if args.json else "text"
-    _print_scan_result(result, fmt, args.verbose)
+    # Determine output format: --output-format takes precedence, then --json flag
+    fmt = getattr(args, 'output_format', None)
+    if fmt is None:
+        fmt = "json" if args.json else "json"  # default to JSON
+    if fmt == "text":
+        print(_format_text(result))
+    elif fmt == "csv":
+        print(_format_csv(result))
+    else:
+        _print_scan_result(result, "json", args.verbose)
     return EXIT_DETECTED if result.is_malicious else EXIT_CLEAN
 
 
@@ -247,7 +266,11 @@ def _cmd_version(args):
     for name, mod in [("embedding", "sentence_transformers"),
                       ("ocr", "easyocr"), ("docs", "pymupdf"),
                       ("llm", "openai"), ("lang", "langdetect")]:
-        if importlib.util.find_spec(mod) is not None:
+        try:
+            found = importlib.util.find_spec(mod) is not None
+        except (ModuleNotFoundError, ValueError):
+            found = False
+        if found:
             info["extras"].append(name)
 
     if getattr(args, "json", False):
@@ -293,6 +316,12 @@ def main(argv=None):
     )
     p_scan.add_argument("--json", action="store_true", help="JSON output")
     p_scan.add_argument(
+        "--output-format",
+        choices=["json", "text", "csv"],
+        default=None,
+        help="Output format: json (default), text, or csv",
+    )
+    p_scan.add_argument(
         "-v", "--verbose", action="store_true",
         help="Show ML confidence, anomaly flags, rule hits",
     )
@@ -330,7 +359,12 @@ def main(argv=None):
 
     if args.command is None:
         parser.print_help()
-        return EXIT_ERROR
+        return EXIT_USAGE
+
+    # Pre-load models for scan commands to avoid first-call latency
+    if args.command in ("scan", "scan-output"):
+        from na0s.predict import preload_models
+        preload_models()
 
     # Handle JSONL batch mode for scan command
     if args.command == "scan" and getattr(args, 'jsonl', None) is not None:

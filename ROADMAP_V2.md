@@ -48,7 +48,8 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L18**| `░░░░░░░░░░░░░░░░░░░░` | **0/18**   | NOT STARTED |
 | **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
 | **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
-|        |                        | **563/743** | **76%** |
+| **Hardening** | `░░░░░░░░░░░░░░░░░░░░` | **0/14** | NEW |
+|        |                        | **563/757** | **74%** |
 
 ---
 
@@ -1983,6 +1984,39 @@ Compiled from 9 research documents + 3 specialized agent audits (2026-03-03): da
 - [ ] **Self-Hardening Pipeline** — Offline adversarial loop: generator (8 mutation strategies) → evaluator → auto-patcher → reporter. Human-in-the-loop. **Effort**: 3-4w. **Source**: `na0s-self-hardening-design.md`
 - [ ] **Full Threat Intel RAG** — Complete L15: feed ingestion + embedding store + semantic detector + auto-updater + dashboard. **Effort**: 3-4w. **Source**: `na0s-threat-intel-rag-design.md`
 - [ ] **DFIR detector suite (L21-L27)** — Full SEC504-inspired 7-layer expansion: ExfilChannel, ContextForensics, PersistenceDetect, SprayDetector, PromptSandbox, TokenForensics, SignatureDB. **Effort**: 4-6w. **Source**: `sec504-to-na0s-design.md`
+
+---
+
+## Test-Gap Hardening Pass (2026-03-18)
+
+48 tests fail against detectors marked DONE — the detectors exist but miss harder attack variants. Identified during Phase 2 Final Sync verification.
+
+### P1 — False Positive Tuning (NEW, not previously in roadmap)
+
+4 safe inputs incorrectly flagged as malicious. No dedicated FP tuning task existed.
+
+- [ ] **FP: Educational context** — "Explain injection for research" and "What is DAN jailbreak" flagged as attacks. Detector should recognize informational/educational framing. **Tests**: `test_false_positives.py::TestFP_Educational`. **Effort**: 1d.
+- [ ] **FP: Quoted attack text** — User-reported message containing quoted attack text flagged. Need quoted-content awareness. **Test**: `test_false_positives.py::TestFP_QuotedText::test_user_reported_message`. **Effort**: 0.5d.
+- [ ] **FP: Benign trigger words** — "Reveal answer" (benign) triggers detection. Need context-aware trigger word evaluation. **Test**: `test_false_positives.py::TestFP_TriggerWords::test_reveal_answer`. **Effort**: 0.5d.
+
+### P1 — Detector Coverage Gaps (existing detectors, missing edge cases)
+
+20 tests for attack variants that bypass existing detectors.
+
+- [ ] **E1 extraction hardening** — 7 tests fail: copy-paste initial prompt, "beginning of conversation was", completion tricks, translation tricks (Japanese rewrite), summarization tricks. Tighten `extraction_detector.py` patterns. **Effort**: 1.5d.
+- [ ] **P1 privacy leakage hardening** — 4 tests fail: internal validator trick, echoleak reference, summarize personal info, training data recitation, roleplay admin session. Tighten `privacy_probe_detector.py` patterns. **Effort**: 1d.
+- [ ] **D8 context manipulation hardening** — 4 tests fail: document overflow with soft instruction, long code block trailing override, input size limit enforcement, 512-word edge case. Tighten `structural_features.py` + L0 size gating. **Effort**: 1d.
+- [ ] **D4 encoding combo hardening** — 3 tests fail: hex escape sequences, pig latin override, leet+pig latin combos. Tighten obfuscation decoders + cross-decoder signal boosting. **Effort**: 1d.
+- [ ] **C1 compliance evasion hardening** — 2 tests fail: academic framing with injection keywords, urgency/emotional manipulation. Tighten `fictional_frame_detector.py`. **Effort**: 0.5d.
+- [ ] **D6 multilingual hardening** — 1 test fails: mixed French+Chinese with no English. Tighten `multilingual_handler.py` non-English detection. **Effort**: 0.5d.
+- [ ] **D7 payload delivery hardening** — 1 test fails: SQL comment injection hiding. Tighten `payload_assembly_detector.py` comment patterns. **Effort**: 0.5d.
+
+### P1 — Infrastructure Gaps (NEW, not previously in roadmap)
+
+- [ ] **L6 thread safety** — `test_l6_advanced.py::TestBatchClassification::test_batch_thread_safety` fails intermittently. Race condition in CascadeClassifier batch mode. Add lock or thread-local state. **Effort**: 0.5d.
+- [ ] **L13 quarantine promotion gate** — `test_layer13_pipeline_fixes.py::TestQuarantinePromotionGate::test_quarantined_data_not_in_combined_until_promoted` fails. Quarantine pipeline exists but gate logic not fully wired. **Effort**: 0.5d.
+
+---
 
 ### Design Documents (in `.claude/memory/research/`)
 

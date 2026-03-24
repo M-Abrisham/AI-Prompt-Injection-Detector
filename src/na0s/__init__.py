@@ -36,7 +36,7 @@ Image / visual injection scanning::
 
 from na0s._version import __version__
 from na0s.scan_result import ScanResult
-from na0s.predict import scan
+from na0s.predict import scan, preload_models
 from na0s.cascade import CascadeClassifier
 
 try:
@@ -61,6 +61,7 @@ except ImportError:
 __all__ = [
     "__version__",
     "scan",
+    "preload_models",
     "ensemble_scan",
     "EnsembleClassifier",
     "scan_output",

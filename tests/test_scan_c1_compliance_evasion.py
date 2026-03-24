@@ -520,7 +520,7 @@ class TestC1_3_AcademicFraming(unittest.TestCase):
             "Expected: legitimate security education evades detection. " + _fmt(result)
         )
 
-    @unittest.expectedFailure
+
     def test_academic_framing_with_injection_keywords(self):
         """Academic framing combined with injection vocabulary.
 
@@ -629,7 +629,7 @@ class TestC1_4_EmotionalManipulation(unittest.TestCase):
     messages (see TestC1_SafePrompts), creating false positives.
     """
 
-    @unittest.expectedFailure
+
     def test_urgency_appeal(self):
         """Urgency-based emotional manipulation, detected via heuristics.
 

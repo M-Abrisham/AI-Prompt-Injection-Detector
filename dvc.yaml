@@ -8,6 +8,14 @@ stages:
       - data/benchmark/benign_alpaca.jsonl
       - data/benchmark/benign_dolly.jsonl
 
+  download_hf:
+    cmd: python scripts/data/download_hf_datasets.py --registry --output-dir data/harvest
+    deps:
+      - scripts/data/download_hf_datasets.py
+      - scripts/data/hf_dataset_registry.py
+    outs:
+      - data/harvest/
+
   aggregate:
     cmd: python scripts/aggregate_datasets.py --output-dir data/aggregated
     deps:
@@ -22,7 +30,7 @@ stages:
     cmd: python scripts/near_duplicate.py --input data/processed/combined_data.csv --output data/processed/combined_data_deduped.csv
     deps:
       - scripts/near_duplicate.py
-      - data/aggregated/all_datasets.jsonl
+      - data/processed/combined_data.csv
     outs:
       - data/processed/combined_data_deduped.csv
     metrics:

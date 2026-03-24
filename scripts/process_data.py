@@ -21,6 +21,7 @@ AGGREGATED_DIR = os.path.join(ROOT, "data", "aggregated")
 HARVEST_DIR = os.path.join(ROOT, "data", "harvest")
 HOLDOUT_DIR = os.path.join(ROOT, "data", "holdout")
 BENCHMARK_DIR = os.path.join(ROOT, "data", "benchmark")
+STAGING_DIR = os.path.join(ROOT, "data", "staging")
 OUTPUT_PATH = os.path.join(ROOT, "data", "processed", "combined_data.csv")
 
 # Candidate column names (checked in order of priority)
@@ -144,6 +145,29 @@ def merge_datasets():
                 source_counts[name] = len(df)
                 frames.append(df)
                 print(f"  [jsonl] {name}: {len(df)} rows")
+
+    # ── 2a. Include promoted staging data ───────────────────────
+    if os.path.isdir(STAGING_DIR):
+        for entry in sorted(os.listdir(STAGING_DIR)):
+            entry_dir = os.path.join(STAGING_DIR, entry)
+            if not os.path.isdir(entry_dir):
+                continue
+            for fname in sorted(os.listdir(entry_dir)):
+                fpath = os.path.join(entry_dir, fname)
+                if fname.endswith(".csv"):
+                    df = _load_csv(fpath)
+                    if df is not None and len(df) > 0:
+                        name = os.path.relpath(fpath, ROOT)
+                        source_counts[name] = len(df)
+                        frames.append(df)
+                        print(f"  [staging] {name}: {len(df)} rows")
+                elif fname.endswith(".jsonl"):
+                    df = _load_jsonl(fpath)
+                    if df is not None and len(df) > 0:
+                        name = os.path.relpath(fpath, ROOT)
+                        source_counts[name] = len(df)
+                        frames.append(df)
+                        print(f"  [staging] {name}: {len(df)} rows")
 
     # ── 2b. Merge hard negatives if available ────────────────────
     hard_neg_path = os.path.join(RAW_DIR, "hard_negatives.csv")

@@ -271,6 +271,18 @@ def _get_cached_models() -> Tuple:
     return _cached_vectorizer, _cached_model
 
 
+def preload_models() -> None:
+    """Pre-load the TF-IDF vectorizer and classifier model into the cache.
+
+    Call this once at startup (e.g. from the CLI or a web-server init hook)
+    so that the first ``scan()`` call does not pay the disk-I/O cost.
+
+    This is safe to call multiple times — subsequent calls are no-ops.
+    """
+    _get_cached_models()
+    _get_cached_char_vectorizer()
+
+
 def _get_model_version():
     """Return a short version string derived from the model.pkl SHA-256 hash.
 
@@ -366,7 +378,7 @@ def _transform(text, vectorizer, scaler=None, char_vectorizer=None):
             X_char = char_vectorizer.transform([text])
             X = scipy.sparse.hstack([X, X_char], format="csr")
         except Exception:
-            pass  # Fall back without char features
+            logger.warning("char TF-IDF transform failed — skipping char features")
 
     # Layer 3: structural features (optional)
     if scaler is not None and _HAS_STRUCTURAL_FEATURES:
@@ -376,7 +388,7 @@ def _transform(text, vectorizer, scaler=None, char_vectorizer=None):
             X = scipy.sparse.hstack([X, scipy.sparse.csr_matrix(struct_scaled)],
                                     format="csr")
         except Exception:
-            pass  # Fall back without structural features
+            logger.warning("structural feature transform failed — skipping")
     return X
 
 
@@ -1132,11 +1144,11 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None) -> Sca
             sanitized_text="",
             is_malicious=True,
             risk_score=1.0,
-            label="malicious",
+            label="blocked",
             ml_confidence=1.0,
             ml_label="blocked",
             rejected=True,
-            rejection_reason="Input exceeds maximum length ({} chars)".format(
+            rejection_reason="Input exceeds char limit ({} chars)".format(
                 MAX_INPUT_LENGTH
             ),
             rule_hits=["input_length_exceeded"],

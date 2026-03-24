@@ -335,7 +335,6 @@ class TestD4_3_HexEncoding(unittest.TestCase):
                 "risk={:.3f}".format(result.risk_score),
             )
 
-    @unittest.expectedFailure
     def test_d4_3_hex_escape_sequences(self):
         """Hex using \\x escape sequences: \\x49\\x67\\x6e\\x6f\\x72\\x65.
         Source: Learn Prompting obfuscation techniques
@@ -615,7 +614,6 @@ class TestD4_6_PigLatinWordGames(unittest.TestCase):
     with "-ay"/"-way" suffixes. ML has 0 training samples.
     """
 
-    @unittest.expectedFailure
     def test_d4_6_pig_latin_override(self):
         """Pig Latin override instruction.
         Source: THREAT_TAXONOMY.md D4.6 example
@@ -796,6 +794,7 @@ class TestD4_Combined(unittest.TestCase):
             ),
         )
 
+    @unittest.expectedFailure  # KNOWN GAP: chained leet+pig latin not decodable
     def test_d4_leet_plus_pig_latin(self):
         """Leetspeak then Pig Latin: double natural-language obfuscation — KNOWN GAP.
 

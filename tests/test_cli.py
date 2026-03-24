@@ -49,7 +49,8 @@ class TestVersionCommand:
 
     def test_version_is_valid_semver_ish(self):
         code, out, _ = _run_cli(["version"])
-        version_part = out.strip().split(" ", 1)[1]
+        first_line = out.strip().splitlines()[0]
+        version_part = first_line.split(" ", 1)[1]
         parts = version_part.split(".")
         assert len(parts) >= 2
         assert all(p.isdigit() for p in parts)

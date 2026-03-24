@@ -243,10 +243,11 @@ class TestQuarantinePromotionGate(unittest.TestCase):
             benchmark = os.path.join(data_dir, "benchmark")
             processed = os.path.join(data_dir, "processed")
             quarantine_dir = os.path.join(data_dir, "quarantine")
+            staging = os.path.join(data_dir, "staging")
             incoming = os.path.join(tmp, "incoming")
             for d in (
                 raw, aggregated, harvest, holdout, benchmark,
-                processed, quarantine_dir, incoming,
+                processed, quarantine_dir, staging, incoming,
             ):
                 os.makedirs(d, exist_ok=True)
 
@@ -304,6 +305,7 @@ class TestQuarantinePromotionGate(unittest.TestCase):
                 QUARANTINE_LOG=os.path.join(quarantine_dir, "quarantine_log.json"),
                 RAW_DIR=raw,
                 AGGREGATED_DIR=aggregated,
+                STAGING_DIR=staging,
             ):
                 config = quarantine.load_trust_config()
                 ingest_result = quarantine.ingest(
@@ -322,6 +324,7 @@ class TestQuarantinePromotionGate(unittest.TestCase):
                     HARVEST_DIR=harvest,
                     HOLDOUT_DIR=holdout,
                     BENCHMARK_DIR=benchmark,
+                    STAGING_DIR=staging,
                     OUTPUT_PATH=combined_csv,
                 ):
                     before = process_data.merge_datasets()
@@ -347,6 +350,7 @@ class TestQuarantinePromotionGate(unittest.TestCase):
                     HARVEST_DIR=harvest,
                     HOLDOUT_DIR=holdout,
                     BENCHMARK_DIR=benchmark,
+                    STAGING_DIR=staging,
                     OUTPUT_PATH=combined_csv,
                 ):
                     after = process_data.merge_datasets()

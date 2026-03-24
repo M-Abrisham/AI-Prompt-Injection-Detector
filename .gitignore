@@ -46,7 +46,6 @@ htmlcov/
 *.bak
 
 # DVC
-/dvc.lock
 *.dvc
 
 # Claude Code config
