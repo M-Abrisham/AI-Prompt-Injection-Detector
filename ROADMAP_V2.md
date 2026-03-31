@@ -43,13 +43,13 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L13**| `████████████████████` | **41/41**  | COMPLETE |
 | **L14**| `████████████████████` | **21/21**  | COMPLETE |
 | **L15**| `█████░░░░░░░░░░░░░░░` | **4/14**   | 29% |
-| **L16**| `███░░░░░░░░░░░░░░░░░` | **3/17**   | 18% |
+| **L16**| `███░░░░░░░░░░░░░░░░░` | **3/25**   | 12% |
 | **L17**| `░░░░░░░░░░░░░░░░░░░░` | **0/20**   | NOT STARTED |
 | **L18**| `░░░░░░░░░░░░░░░░░░░░` | **0/18**   | NOT STARTED |
 | **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
 | **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
-| **Hardening** | `░░░░░░░░░░░░░░░░░░░░` | **0/14** | NEW |
-|        |                        | **563/757** | **74%** |
+| **Hardening** | `██████████████░░░░░░` | **10/14** | 71% |
+|        |                        | **573/772** | **74%** |
 
 ---
 
@@ -1011,7 +1011,7 @@ Layer 11 provides integrity checking for pickle serialization with a 3-tier trus
 
 ---
 
-## Layer 12: Probe Architecture & Taxonomy — Tasks: 30/55 (55%)
+## Layer 12: Probe Architecture & Taxonomy — Tasks: 55/55 (COMPLETE)
 
 **Files**: `scripts/taxonomy/` — `_base.py` (395 lines), `_core.py` (127 lines), `_tags.py` (132 lines), `_buffs.py` (126 lines), `__init__.py` (48 lines), 23 category probe files (incl. new `privacy_extraction.py`, `malicious_code_gen.py`, `inter_model_propagation.py`, `ingestion_manipulation.py`)
 **Tests**: `tests/test_taxonomy_base.py` (70 tests), `test_taxonomy_core.py` (33), `test_taxonomy_tags.py` (32), `test_taxonomy_init.py` (8) — **120 tests total, all passing**
@@ -1987,34 +1987,76 @@ Compiled from 9 research documents + 3 specialized agent audits (2026-03-03): da
 
 ---
 
-## Test-Gap Hardening Pass (2026-03-18)
+## Test-Gap Hardening Pass (2026-03-18 → 2026-03-31)
 
-48 tests fail against detectors marked DONE — the detectors exist but miss harder attack variants. Identified during Phase 2 Final Sync verification.
+48 tests failed against detectors marked DONE. Hardening sprint (2026-03-31) fixed 18 xfails and resolved all regressions. Remaining gaps require deeper architectural work (multi-turn L16, chained decoders, char-level reassembly).
 
-### P1 — False Positive Tuning (NEW, not previously in roadmap)
+### P1 — False Positive Tuning
 
-4 safe inputs incorrectly flagged as malicious. No dedicated FP tuning task existed.
+4 safe inputs incorrectly flagged as malicious. 3 fixed, 1 remaining.
 
-- [ ] **FP: Educational context** — "Explain injection for research" and "What is DAN jailbreak" flagged as attacks. Detector should recognize informational/educational framing. **Tests**: `test_false_positives.py::TestFP_Educational`. **Effort**: 1d.
-- [ ] **FP: Quoted attack text** — User-reported message containing quoted attack text flagged. Need quoted-content awareness. **Test**: `test_false_positives.py::TestFP_QuotedText::test_user_reported_message`. **Effort**: 0.5d.
-- [ ] **FP: Benign trigger words** — "Reveal answer" (benign) triggers detection. Need context-aware trigger word evaluation. **Test**: `test_false_positives.py::TestFP_TriggerWords::test_reveal_answer`. **Effort**: 0.5d.
+- [x] **FP: Fictional frame (possessive)** — "In my novel...free from constraints" flagged. Extended `_FICTIONAL_FRAME_PATTERNS` to match possessive forms (`in my/our/the novel`). Added `constraint_negation` to `_STRONG_CONTEXT_ONLY_SUPPRESSIBLE`. ✅ DONE (2026-03-31)
+- [x] **FP: Professional email** — "Dear team...new guidelines require..." flagged. Tightened `new_instruction` pattern: markdown emphasis markers now required for bare-word branch. ✅ DONE (2026-03-31)
+- [x] **FP: Empty string** — Empty input returned `is_malicious=True`. Special-cased `rejection_reason="empty input"` to return safe. ✅ DONE (2026-03-31)
+- [ ] **FP: Educational context** — "Explain injection for research" and "What is DAN jailbreak" flagged. 1 xfail remains. **Effort**: 1d.
 
 ### P1 — Detector Coverage Gaps (existing detectors, missing edge cases)
 
-20 tests for attack variants that bypass existing detectors.
+20 tests for attack variants. Partially fixed — 11 xfails resolved, 9 remaining.
 
-- [ ] **E1 extraction hardening** — 7 tests fail: copy-paste initial prompt, "beginning of conversation was", completion tricks, translation tricks (Japanese rewrite), summarization tricks. Tighten `extraction_detector.py` patterns. **Effort**: 1.5d.
-- [ ] **P1 privacy leakage hardening** — 4 tests fail: internal validator trick, echoleak reference, summarize personal info, training data recitation, roleplay admin session. Tighten `privacy_probe_detector.py` patterns. **Effort**: 1d.
-- [ ] **D8 context manipulation hardening** — 4 tests fail: document overflow with soft instruction, long code block trailing override, input size limit enforcement, 512-word edge case. Tighten `structural_features.py` + L0 size gating. **Effort**: 1d.
-- [ ] **D4 encoding combo hardening** — 3 tests fail: hex escape sequences, pig latin override, leet+pig latin combos. Tighten obfuscation decoders + cross-decoder signal boosting. **Effort**: 1d.
-- [ ] **C1 compliance evasion hardening** — 2 tests fail: academic framing with injection keywords, urgency/emotional manipulation. Tighten `fictional_frame_detector.py`. **Effort**: 0.5d.
-- [ ] **D6 multilingual hardening** — 1 test fails: mixed French+Chinese with no English. Tighten `multilingual_handler.py` non-English detection. **Effort**: 0.5d.
-- [ ] **D7 payload delivery hardening** — 1 test fails: SQL comment injection hiding. Tighten `payload_assembly_detector.py` comment patterns. **Effort**: 0.5d.
+- [x] **E1 extraction scoring** — `extraction_weight` was dead code (computed but never added to composite). Wired into scoring pipeline. Added `write_instructions_as_encoding` pattern for morse/rot13/etc. 5 xfails fixed (Japanese, rot13, morse, paraphrase, key_constraints). 9 xfails remain (ML 95-99% SAFE, single hit insufficient). ✅ DONE (2026-03-31)
+- [x] **P1 privacy scoring** — `privacy_weight` was dead code. Added `get_privacy_probe_weight()`, wired into composite. Escalated 4 patterns to `is_extraction=True`. 6 xfails fixed. 1 xfail remains (subtle_credential_probe). ✅ DONE (2026-03-31)
+- [x] **D6 multilingual hardening** — Added Chinese config-inquiry patterns (`zh_config_inquiry`, `zh_config_inquiry_verb`). Wired `multilingual_weight` into composite (was also dead code). 1 xfail fixed, 0 remain. ✅ DONE (2026-03-31)
+- [x] **D7 code-comment injection** — Added `_has_code_comment_injection()` to detect `# IMPORTANT: Ignore...` in code blocks. Added bare code block attack detection. Added JSON+chunked +0.20 boost. 3 xfails fixed. 5 xfails remain (char-split, chained encode). ✅ DONE (2026-03-31)
+- [x] **C1 inner attack vocabulary** — Expanded `_INNER_ATTACK_PATTERNS`: added `exploit/exploitation code/synthesis instructions`, extraction verbs `showing/demonstrating`, emotional `employees lose`, authority `consultant/professional/specialist/expert`. 21 xfails remain (multi-turn + analogical). ✅ DONE (2026-03-31)
+- [ ] **D8 context manipulation hardening** — 2 xfails remain: strategic middle placement, many-shot+flooding. Needs chunk overlap or middle scan. **Effort**: 1d.
+- [ ] **D4 encoding combo hardening** — 2 xfails remain: rot13+leet, leet+pig_latin. Needs chained decoder (see L2 below). **Effort**: see L2.
+- [ ] **C1 compliance evasion (multi-turn)** — 5 xfails: crescendo turns 1-5. Needs `ConversationSecurityMonitor` (see L16 below). **Effort**: see L16.
 
-### P1 — Infrastructure Gaps (NEW, not previously in roadmap)
+### P1 — Infrastructure Gaps
 
-- [ ] **L6 thread safety** — `test_l6_advanced.py::TestBatchClassification::test_batch_thread_safety` fails intermittently. Race condition in CascadeClassifier batch mode. Add lock or thread-local state. **Effort**: 0.5d.
-- [ ] **L13 quarantine promotion gate** — `test_layer13_pipeline_fixes.py::TestQuarantinePromotionGate::test_quarantined_data_not_in_combined_until_promoted` fails. Quarantine pipeline exists but gate logic not fully wired. **Effort**: 0.5d.
+- [x] **L6 thread safety** — Added `threading.Lock` to `FingerprintStore` (wraps `check`, `register`, `_prune`, `stats`). Wired `self._batch_lock` in `cascade.py:classify_batch`. ✅ DONE (2026-03-31)
+- [x] **L13 quarantine promotion gate** — Already passing. Gate logic fully wired in `process_data.py` + `quarantine.py`. ✅ VERIFIED (2026-03-31)
+
+### P1 — Scoring Pipeline Fixes (discovered during hardening)
+
+- [x] **"low" severity in SEVERITY_WEIGHTS** — Added `"low": 0.05` to canonical `SEVERITY_WEIGHTS` in `layer1/result.py`. Privacy rules with low severity were crashing the severity chain. ✅ DONE (2026-03-31)
+
+---
+
+## Architectural Features (identified during hardening, 2026-03-31)
+
+### L0 — Character-Level Reassembly (2.5d)
+
+Attacks split words into single characters: `"i g n o r e"` or `"i.g.n.o.r.e"`. L0 should reassemble before downstream scanning.
+
+- [ ] **`_reassemble_char_splits()` in `normalize_text()`** — Step 6.5 after whitespace canonicalization. Detect 3+ single-char tokens with consistent delimiter (space/dot/dash/underscore/comma). Reassemble, emit `char_level_reassembly` anomaly flag. False-positive allowlist for abbreviations (U.S.A., a.m., e.g.). **Files**: `normalization.py`. **Tests**: `test_char_reassembly.py`. **Effort**: 1.5d.
+- [ ] **Promote xfail tests + coverage** — Remove `@expectedFailure` from `test_word_splitting_with_spaces` and `test_word_splitting_with_dots`. Add dash/underscore/comma/mixed-case tests + FP tests. **Effort**: 0.5d.
+- [ ] **L2 defense-in-depth flag** — Mirror L0 reassembly with `char_split_evasion` flag in `obfuscation.py`. Add `DecodedView` with `encoding_type="char_split"`. **Effort**: 0.5d.
+
+### L2 — Chained Obfuscation Decoder (4d)
+
+Current decoders run independently. Attacks chain encodings (rot13 then leet, leet then pig_latin). Need cross-decoder chained decode.
+
+- [ ] **Cross-decoder chained decode loop** — After flat `_detect_and_decode()`, run second pass: for each decoded result, try other decoders. Max depth 2, budget 50 attempts, 200ms timeout. Use `_composite_entropy_check()` as "looks like English" gate. **Files**: `obfuscation.py`. **Tests**: `test_obfuscation_chaining.py`. **Effort**: 2d.
+- [ ] **English plausibility scorer** — Extract KL-divergence logic into `_is_plausible_english()`. Add 5000-word dictionary check (frozenset, no deps). Either KL < 0.8 OR dict hit rate > 0.4. **Effort**: 1d.
+- [ ] **Performance budget + timeout** — `NA0S_CHAIN_DECODE_TIMEOUT_MS` (200ms), `NA0S_MAX_CHAIN_DECODES` (50). Perf regression test: <500ms on 500-char input. **Effort**: 0.5d.
+- [ ] **Promote xfail tests** — Remove `@expectedFailure` from `test_d4_rot13_plus_leet` and `test_d4_leet_plus_pig_latin`. Add base64(rot13), url(leet), rot13(pig_latin) tests. **Effort**: 0.5d.
+
+### L16 — Multi-Turn Detection: `ConversationSecurityMonitor` (10d)
+
+Na0S is stateless — each `scan()` call has no memory. Crescendo attacks exploit this by spreading harmful requests across 4-6 individually-benign turns.
+
+- [ ] **ConversationState dataclass** — `turn_history`, `cumulative_risk`, `topic_embeddings`, `escalation_velocity`, `turn_count`. **Files**: `src/na0s/layer16/state.py`. **Effort**: 1d.
+- [ ] **SessionManager with pluggable backends** — `InMemoryBackend` (default), `SqliteBackend` (WAL), `RedisBackend` (optional). `NA0S_SESSION_BACKEND` env var. **Files**: `src/na0s/layer16/session_manager.py`, `backends.py`. **Effort**: 2d.
+- [ ] **Escalation velocity detector (C1.1)** — Linear regression slope over last N turns. Alert when velocity > 0.08/turn AND cumulative risk > 0.25. **Files**: `src/na0s/layer16/escalation.py`. **Effort**: 1.5d.
+- [ ] **Topic drift detector** — Cosine similarity between turn embeddings. Alert when similarity < 0.3. Fallback to TF-IDF jaccard when sentence-transformers not installed. **Files**: `src/na0s/layer16/topic_drift.py`. **Effort**: 1.5d.
+- [ ] **Cross-turn payload assembly (D7.2)** — Concatenate last N turns, re-scan. If concat is malicious but individuals are not, emit `multi_turn_assembly_detected`. **Files**: `src/na0s/layer16/assembly.py`. **Effort**: 1d.
+- [ ] **Session-aware ScanResult extension** — Add `session_risk`, `escalation_alert`, `turn_number`, `session_id` (all Optional, None by default). **Effort**: 0.5d.
+- [ ] **Public API: `na0s.Session`** — `Session(session_id=None, backend=None, ttl=1800)`. `session.scan(text) -> ScanResult`. Register in `__init__.py`. **Effort**: 1d.
+- [ ] **Multi-turn test framework** — `test_layer16_crescendo.py` with sequential turn harness. Promote 5 C1.1 `@expectedFailure` tests. **Effort**: 1.5d.
+
+**Recommended implementation order**: L0 char-reassembly (2.5d) → L2 chained decoder (4d) → L16 multi-turn (10d)
 
 ---
 
