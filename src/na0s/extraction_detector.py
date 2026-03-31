@@ -99,6 +99,12 @@ _add("encoding", "encode_your_instructions", "high", ["E1.5", "E1"],
      r"\b(?:encode|encrypt|convert|transform|cipher)\s+"
      r"(?:your|the)\s+(?:initial\s+)?(?:instructions?|rules?|prompt|config(?:uration)?|system\s+message)\s+"
      r"(?:using|with|into|to|in)\s+\w+")
+_add("encoding", "write_instructions_as_encoding", "high", ["E1.5", "E1"],
+     r"\b(?:write|express|output|render|display|format|put|give)\s+"
+     r"(?:your|the)\s+(?:initial\s+)?(?:instructions?|rules?|prompt|config(?:uration)?|system\s+(?:prompt|message))\s+"
+     r"(?:as|in|using)\s+"
+     r"(?:morse\s+code|pig\s+latin|rot.?13|braille|binary|semaphore|emoji|hieroglyphs"
+     r"|base64|hex(?:adecimal)?|an?\s+\w+\s+(?:code|cipher|script))")
 
 # ---- Category 4: Summarization Trick (E1.6) ----
 # Asks to summarize/paraphrase instructions.

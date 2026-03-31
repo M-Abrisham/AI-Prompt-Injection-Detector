@@ -202,10 +202,10 @@ RULES = [
          r"(?:instructions?|directives?|rules?|guidelines?)\s*[:;]"
          r"|"
          # Emphasis-wrapped variant: ***NEW INSTRUCTIONS***, **IMPORTANT NEW RULES**
-         r"(?:\*{2,3}|_{2,3})?"
+         r"(?:\*{2,3}|_{2,3})"
          r"(?:important\s+)?(?:new|updated|revised)\s+"
          r"(?:instructions?|directives?|rules?|guidelines?)"
-         r"(?:\*{2,3}|_{2,3})?"
+         r"(?:\*{2,3}|_{2,3})"
          r")",
          technique_ids=["D1.2"],
          severity="high",

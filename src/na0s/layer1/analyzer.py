@@ -23,6 +23,7 @@ from .unicode_defense import _fold_angle_homoglyphs, _strip_combining_marks
 from .context import (
     _has_contextual_framing,
     _has_strong_contextual_framing,
+    _has_code_comment_injection,
     _is_legitimate_roleplay,
     _CONTEXT_SUPPRESSIBLE,
     _STRONG_CONTEXT_ONLY_SUPPRESSIBLE,
@@ -119,8 +120,15 @@ def rule_score_detailed(text):
             if _has_contextual_framing(view):
                 has_context = True
                 break
+    # Override context suppression when code block comments contain
+    # high-confidence injection keywords (e.g. "# IMPORTANT: Ignore")
+    # or bare code blocks contain attack patterns (e.g. "no restrictions").
+    _code_attack_override = _has_code_comment_injection(folded)
+    if has_context and _code_attack_override:
+        has_context = False
     # Strong context excludes _QUESTION_FRAME (computed lazily below).
-    has_strong_context = None
+    # Pre-set to False when code attack override is active.
+    has_strong_context = False if _code_attack_override else None
     hits = []
     current_pl = _paranoia_mod.get_paranoia_level()
     for rule in RULES:

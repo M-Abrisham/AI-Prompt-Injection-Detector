@@ -256,7 +256,6 @@ class TestFP_Narrative(unittest.TestCase):
         )
         self.assertFalse(r.is_malicious, "Screenplay: " + _fmt(r))
 
-    @unittest.expectedFailure  # FP: roleplay rule + role_assignment + high_entropy; risk=1.172
     def test_novel_character_frees_ai(self):
         """Novel scene with 'you are now free from your constraints'."""
         r = _scan(
@@ -585,7 +584,6 @@ class TestFP_TechnicalDocs(unittest.TestCase):
         self.assertFalse(r.is_malicious,
                          "Markdown table: " + _fmt(r))
 
-    @unittest.expectedFailure  # FP: high_entropy + weird_casing + ML; risk=0.995
     def test_professional_email(self):
         """Professional email about AI safety policies."""
         r = _scan(
@@ -856,7 +854,6 @@ class TestFP_SanityChecks(unittest.TestCase):
         self.assertIsInstance(r.rule_hits, list)
         self.assertIsInstance(r.anomaly_flags, list)
 
-    @unittest.expectedFailure  # FP: empty string rejected by Layer 0 with risk=1.0
     def test_empty_string_is_safe(self):
         """Empty input should not be flagged as malicious."""
         r = _scan("")

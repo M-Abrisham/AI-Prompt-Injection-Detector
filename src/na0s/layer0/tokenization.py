@@ -244,6 +244,7 @@ class FingerprintStore:
         self._path = os.path.normpath(
             store_path or self._resolve_default_path()
         )
+        self._lock = threading.Lock()
         self._init_db()
         self._migrate_json()
         self._prune()
@@ -333,24 +334,25 @@ class FingerprintStore:
 
     def _prune(self):
         """Remove stale entries (TTL) and enforce max-size cap (LRU)."""
-        cutoff = time.time() - (self.TTL_DAYS * 86400)
-        self._conn.execute(
-            "DELETE FROM fingerprints WHERE last_seen < ?", (cutoff,)
-        )
-        count = self._conn.execute(
-            "SELECT COUNT(*) FROM fingerprints"
-        ).fetchone()[0]
-        if count > self.MAX_ENTRIES:
+        with self._lock:
+            cutoff = time.time() - (self.TTL_DAYS * 86400)
             self._conn.execute(
-                """DELETE FROM fingerprints
-                   WHERE content_hash NOT IN (
-                       SELECT content_hash FROM fingerprints
-                       ORDER BY hit_count DESC, last_seen DESC
-                       LIMIT ?
-                   )""",
-                (self.MAX_ENTRIES,),
+                "DELETE FROM fingerprints WHERE last_seen < ?", (cutoff,)
             )
-        self._conn.commit()
+            count = self._conn.execute(
+                "SELECT COUNT(*) FROM fingerprints"
+            ).fetchone()[0]
+            if count > self.MAX_ENTRIES:
+                self._conn.execute(
+                    """DELETE FROM fingerprints
+                       WHERE content_hash NOT IN (
+                           SELECT content_hash FROM fingerprints
+                           ORDER BY hit_count DESC, last_seen DESC
+                           LIMIT ?
+                       )""",
+                    (self.MAX_ENTRIES,),
+                )
+            self._conn.commit()
 
     def register(self, text, label="malicious"):
         """Add a confirmed-malicious input to the store.
@@ -361,24 +363,25 @@ class FingerprintStore:
         """
         fp = _compute_fingerprint(text)
         now = time.time()
-        self._conn.execute(
-            """INSERT INTO fingerprints
-               (content_hash, normalized_hash, token_hash,
-                label, ratio, preview, hit_count, first_seen, last_seen)
-               VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
-               ON CONFLICT(content_hash) DO NOTHING""",
-            (
-                fp["content_hash"],
-                fp["normalized_hash"],
-                fp["token_hash"],
-                label,
-                fp["ratio"],
-                text[:80],
-                now,
-                now,
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO fingerprints
+                   (content_hash, normalized_hash, token_hash,
+                    label, ratio, preview, hit_count, first_seen, last_seen)
+                   VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+                   ON CONFLICT(content_hash) DO NOTHING""",
+                (
+                    fp["content_hash"],
+                    fp["normalized_hash"],
+                    fp["token_hash"],
+                    label,
+                    fp["ratio"],
+                    text[:80],
+                    now,
+                    now,
+                ),
+            )
+            self._conn.commit()
         return fp
 
     def check(self, fingerprint):
@@ -387,50 +390,52 @@ class FingerprintStore:
         Returns a list of match flags. Increments hit_count and
         updates last_seen on every match.
         """
-        flags = []
-        now = time.time()
+        with self._lock:
+            flags = []
+            now = time.time()
 
-        checks = [
-            ("content_hash", "content_hash", "known_malicious_exact"),
-            ("normalized_hash", "normalized_hash", "known_malicious_normalized"),
-            ("token_hash", "token_hash", "known_malicious_token_pattern"),
-        ]
+            checks = [
+                ("content_hash", "content_hash", "known_malicious_exact"),
+                ("normalized_hash", "normalized_hash", "known_malicious_normalized"),
+                ("token_hash", "token_hash", "known_malicious_token_pattern"),
+            ]
 
-        _VALID_COLUMNS = {"content_hash", "normalized_hash", "token_hash"}
+            _VALID_COLUMNS = {"content_hash", "normalized_hash", "token_hash"}
 
-        for fp_key, col, flag_name in checks:
-            assert col in _VALID_COLUMNS, "Invalid column: {}".format(col)
-            hash_val = fingerprint.get(fp_key, "")
-            if not hash_val:
-                continue
-            row = self._conn.execute(
-                "SELECT 1 FROM fingerprints WHERE {} = ? LIMIT 1".format(col),
-                (hash_val,),
-            ).fetchone()
-            if row:
-                flags.append(flag_name)
-                self._conn.execute(
-                    """UPDATE fingerprints
-                       SET hit_count = hit_count + 1, last_seen = ?
-                       WHERE {} = ?""".format(col),
-                    (now, hash_val),
-                )
+            for fp_key, col, flag_name in checks:
+                assert col in _VALID_COLUMNS, "Invalid column: {}".format(col)
+                hash_val = fingerprint.get(fp_key, "")
+                if not hash_val:
+                    continue
+                row = self._conn.execute(
+                    "SELECT 1 FROM fingerprints WHERE {} = ? LIMIT 1".format(col),
+                    (hash_val,),
+                ).fetchone()
+                if row:
+                    flags.append(flag_name)
+                    self._conn.execute(
+                        """UPDATE fingerprints
+                           SET hit_count = hit_count + 1, last_seen = ?
+                           WHERE {} = ?""".format(col),
+                        (now, hash_val),
+                    )
 
-        if flags:
-            self._conn.commit()
+            if flags:
+                self._conn.commit()
 
-        return flags
+            return flags
 
     def stats(self):
         """Return summary stats for monitoring."""
-        row = self._conn.execute(
-            """SELECT COUNT(*), COALESCE(SUM(hit_count), 0)
-               FROM fingerprints"""
-        ).fetchone()
-        return {
-            "entries": row[0],
-            "total_hits": row[1],
-        }
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT COUNT(*), COALESCE(SUM(hit_count), 0)
+                   FROM fingerprints"""
+            ).fetchone()
+            return {
+                "entries": row[0],
+                "total_hits": row[1],
+            }
 
 
 # --- Module-level instance (used by sanitizer) ---

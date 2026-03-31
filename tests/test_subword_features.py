@@ -281,7 +281,7 @@ class TestDeployModelOptionalFiles(unittest.TestCase):
         try:
             import deploy_model
             importlib.reload(deploy_model)
-            self.assertIn("char_tfidf_vectorizer.pkl", deploy_model.OPTIONAL_MODEL_FILES)
+            self.assertEqual(deploy_model.CHAR_VECTORIZER, "char_tfidf_vectorizer.pkl")
         finally:
             sys.path.pop(0)
 

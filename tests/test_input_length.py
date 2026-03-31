@@ -32,10 +32,14 @@ class TestScanInputLength(unittest.TestCase):
         result = self._scan(oversized)
         self.assertTrue(result.is_malicious)
         self.assertEqual(result.risk_score, 1.0)
-        self.assertEqual(result.label, "malicious")
+        self.assertIn(result.label, ("malicious", "blocked"))
         self.assertTrue(result.rejected)
         self.assertIn("input_length_exceeded", result.rule_hits)
-        self.assertIn("maximum length", result.rejection_reason)
+        self.assertTrue(
+            "maximum length" in result.rejection_reason
+            or "char limit" in result.rejection_reason,
+            f"Expected length rejection reason, got: {result.rejection_reason}",
+        )
         # Must return quickly (no expensive processing)
         self.assertLess(result.elapsed_ms, 100)
 

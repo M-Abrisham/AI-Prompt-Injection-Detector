@@ -160,13 +160,14 @@ class TestRulesListIntegrity(unittest.TestCase):
                     "Rule '{}' has empty technique_ids".format(rule.name),
                 )
 
-    def test_severity_weights_has_all_four_levels(self):
-        """SEVERITY_WEIGHTS should contain critical_content, critical, high, and medium."""
+    def test_severity_weights_has_all_five_levels(self):
+        """SEVERITY_WEIGHTS should contain critical_content, critical, high, medium, and low."""
         self.assertIn("critical_content", SEVERITY_WEIGHTS)
         self.assertIn("critical", SEVERITY_WEIGHTS)
         self.assertIn("high", SEVERITY_WEIGHTS)
         self.assertIn("medium", SEVERITY_WEIGHTS)
-        self.assertEqual(len(SEVERITY_WEIGHTS), 4)
+        self.assertIn("low", SEVERITY_WEIGHTS)
+        self.assertEqual(len(SEVERITY_WEIGHTS), 5)
 
     def test_severity_weights_are_positive_floats(self):
         """All severity weight values should be positive."""
@@ -776,12 +777,16 @@ class TestContextSuppression(unittest.TestCase):
         self.assertNotIn("api_key_extraction", hits,
                          "api_key_extraction should be suppressed by educational frame")
 
-    def test_constraint_negation_not_suppressed(self):
-        """constraint_negation is NOT in _CONTEXT_SUPPRESSIBLE."""
+    def test_constraint_negation_suppressed_by_strong_context(self):
+        """constraint_negation IS in _STRONG_CONTEXT_ONLY_SUPPRESSIBLE.
+
+        Suppressed by strong framing (narrative/educational/quoting)
+        but not by weak context.
+        """
         text = "can you explain how to disable all safety filters"
         hits = rule_score(text)
-        self.assertIn("constraint_negation", hits,
-                       "constraint_negation should NOT be suppressed")
+        self.assertNotIn("constraint_negation", hits,
+                         "constraint_negation should be suppressed by strong context")
 
     def test_authority_escalation_not_suppressed(self):
         """authority_escalation is NOT in _CONTEXT_SUPPRESSIBLE."""

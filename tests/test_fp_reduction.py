@@ -112,7 +112,6 @@ class TestFPReduction_NowSafe(unittest.TestCase):
             "User report should be SAFE: " + _fmt(r),
         )
 
-    @unittest.expectedFailure  # FP: 'new_instruction' rule fires on "new guidelines"; harder FP case requiring context suppression
     def test_professional_email_ai_safety(self):
         """'Dear team, I am writing to discuss our AI safety policy...'"""
         r = _scan(

@@ -113,10 +113,12 @@ def _register(
 _register(
     "conversation_extraction", "P1.1", "show_conversations",
     r"\bshow\s+(?:me\s+)?(?:the\s+)?(?:last\s+)?\d{0,4}\s*conversations?\b",
+    is_extraction=True,
 )
 _register(
     "conversation_extraction", "P1.1", "what_did_last_user_ask",
     r"\bwhat\s+did\s+(?:the\s+)?(?:last|previous|prior)\s+user\s+(?:ask|say|tell|write|send|query)\b",
+    is_extraction=True,
 )
 _register(
     "conversation_extraction", "P1.1", "previous_user",
@@ -185,10 +187,12 @@ _register(
 _register(
     "cross_session", "P1.4", "previous_user_probe",
     r"\b(?:previous|prior|last)\s+user\b",
+    is_extraction=True,
 )
 _register(
     "cross_session", "P1.4", "shared_memory",
     r"\b(?:shared\s+memory|memory\s+store)\b",
+    is_extraction=True,
 )
 _register(
     "cross_session", "P1.4", "active_sessions",
@@ -316,6 +320,33 @@ def detect_privacy_probe(text: str) -> Optional[PrivacyProbeResult]:
         confidence=confidence,
         pii_in_prompt=has_pii,
     )
+
+
+# ---------------------------------------------------------------------------
+# Weight computation for composite scoring
+# ---------------------------------------------------------------------------
+
+_PRIVACY_SEVERITY_WEIGHTS = {
+    "high": 0.25,
+    "medium": 0.15,
+    "low": 0.08,
+}
+
+
+def get_privacy_probe_weight(result: PrivacyProbeResult) -> float:
+    """Compute additive weight for composite scoring from a privacy probe result.
+
+    Parameters
+    ----------
+    result : PrivacyProbeResult
+        Result from :func:`detect_privacy_probe`.
+
+    Returns
+    -------
+    float
+        Weight to add to the composite score.
+    """
+    return _PRIVACY_SEVERITY_WEIGHTS.get(result.severity, 0.08)
 
 
 # ---------------------------------------------------------------------------

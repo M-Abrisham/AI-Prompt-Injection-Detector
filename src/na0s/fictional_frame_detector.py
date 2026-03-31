@@ -49,7 +49,7 @@ _FICTIONAL_FRAME_PATTERNS = [
     # Story/novel/movie framing
     ("fictional", re.compile(
         r"\b(?:imagine|pretend|suppose|let'?s?\s+say|hypothetically|"
-        r"in\s+a\s+(?:story|novel|movie|game|scenario|world|fiction|simulation)|"
+        r"in\s+(?:my|our|the|a|this)\s+(?:novel|story|book|fiction|screenplay|script|fanfic|movie|game|scenario|world|simulation)|"
         r"write\s+a\s+(?:story|scene|script|novel|screenplay)|"
         r"if\s+you\s+were\s+(?:a\s+character|in\s+a\s+(?:movie|novel|book))|"
         r"for\s+(?:a|my)\s+(?:story|novel|book|screenplay|game|fiction)|"
@@ -85,14 +85,16 @@ _FICTIONAL_FRAME_PATTERNS = [
         r"this\s+is\s+(?:a\s+)?(?:life\s+or\s+death|emergency|urgent|critical)\s+(?:situation)?|"
         r"please\s+(?:i'?m\s+)?begging\s+you|"
         r"(?:if\s+you\s+don'?t|unless\s+you)\s+help.{0,20}(?:die|suffer|harm|hurt)|"
-        r"(?:nobody|no\s+one)\s+(?:will|can)\s+(?:get\s+hurt|be\s+harmed|know))\b",
+        r"(?:nobody|no\s+one)\s+(?:will|can)\s+(?:get\s+hurt|be\s+harmed|know)|"
+        r"employees.{0,30}(?:lose|suffer|fired)|"
+        r"ignore\s+restrictions.{0,10}(?:just|once|this\s+time))\b",
         re.IGNORECASE,
     )),
     # Authority impersonation
     ("authority", re.compile(
         r"\b(?:(?:as|i\s+am)\s+(?:the|a|an|your)\s+(?:system\s+)?(?:administrator|admin|developer|creator|owner|supervisor|manager|engineer|operator|root\s+user)|"
         r"(?:i\s+have|with)\s+(?:admin|root|sudo|elevated|full)\s+(?:access|privileges|permissions|rights)|"
-        r"(?:authorized|certified|licensed)\s+(?:personnel|user|operator|technician)|"
+        r"(?:authorized|certified|licensed)\s+(?:personnel|user|operator|technician|consultant|professional|specialist|expert)|"
         r"(?:maintenance|debug|developer|admin|diagnostic)\s+mode|"
         r"(?:emergency|override)\s+(?:code|protocol|access)|"
         r"(?:i'?m|i\s+am)\s+(?:from|with)\s+(?:the\s+)?(?:security|IT|tech|support)\s+(?:team|department|division))\b",
@@ -107,7 +109,7 @@ _FICTIONAL_FRAME_PATTERNS = [
 _INNER_ATTACK_PATTERNS = [
     # Extraction-related inner patterns
     ("extraction", re.compile(
-        r"(?:reveal|show|display|output|print|leak|expose|share|give\s+me|provide|tell\s+me)\s+"
+        r"(?:reveal|show|display|output|print|leak|expose|share|give\s+me|provide|tell\s+me|showing|demonstrating|demonstrate)\s+"
         r"(?:me\s+)?(?:your|the|all|hidden|secret|internal|private|confidential)\s+"
         r"(?:hidden\s+|secret\s+|internal\s+)?(?:system\s+prompt|instructions?|rules?|passwords?|secrets?|configuration|prompt|guidelines|constraints|data)",
         re.IGNORECASE,
@@ -121,9 +123,15 @@ _INNER_ATTACK_PATTERNS = [
     )),
     # Harmful content request inner patterns
     ("harmful", re.compile(
+        r"(?:"
         r"(?:how\s+to|teach\s+me|explain\s+how|steps?\s+(?:to|for)|guide\s+(?:to|for|on)|instructions?\s+(?:to|for|on))\s+"
-        r"(?:make|build|create|synthesize|produce|craft|forge|fabricate)\s+"
-        r"(?:a\s+)?(?:bomb|weapon|explosive|drug|poison|virus|malware|ransomware|phishing)",
+        r"(?:make|build|create|synthesize|exploit|produce|craft|forge|fabricate)\s+"
+        r"(?:a\s+)?(?:bomb|weapon|explosive|drug|poison|virus|malware|ransomware|phishing)"
+        r"|"
+        r"(?:provide|give|share|show)\s+(?:me\s+)?(?:the\s+)?(?:specific\s+)?(?:exploitation\s+code|synthesis\s+(?:instructions|information|pathway))"
+        r"|"
+        r"(?:exploitation\s+code|synthesis\s+(?:instructions|information|pathway))\s+(?:for|to|about)"
+        r")",
         re.IGNORECASE,
     )),
     # Disable safety framing

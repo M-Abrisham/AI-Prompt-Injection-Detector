@@ -130,6 +130,13 @@ try:
 except ImportError:
     _HAS_EXTRACTION = False
 
+# Privacy probe detector (P1) — optional import
+try:
+    from .privacy_probe_detector import detect_privacy_probe, get_privacy_probe_weight
+    _HAS_PRIVACY_PROBE = True
+except ImportError:
+    _HAS_PRIVACY_PROBE = False
+
 # Payload assembly detector (D7) — optional import
 try:
     from .payload_assembly_detector import detect_fragmented_payload, get_fragment_weight
@@ -834,6 +841,12 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         except Exception:
             pass  # Multilingual detection failure is non-fatal
 
+    # Wire multilingual signal into composite scoring
+    if multilingual_weight > 0.0:
+        composite = min(composite + multilingual_weight, 1.0)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
+
     # --- Fictional frame detection (C1) ---
     # Detect attacks wrapped in fictional/hypothetical/academic framing.
     fictional_weight = 0.0
@@ -872,6 +885,44 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                         _RULE_SEVERITY[hit_name] = eh.severity
         except Exception:
             pass  # Extraction detection failure is non-fatal
+
+    # Wire extraction signal into composite scoring
+    if extraction_weight > 0.0:
+        composite = min(composite + extraction_weight, 1.0)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
+
+    # --- Privacy probe detection (P1) ---
+    # Detect privacy extraction attempts: conversation extraction, PII
+    # exfiltration, training data extraction, cross-session leakage,
+    # serialization injection, membership inference.
+    privacy_weight = 0.0
+    if _HAS_PRIVACY_PROBE:
+        try:
+            privacy_result = detect_privacy_probe(clean)
+            if privacy_result is not None:
+                privacy_weight = get_privacy_probe_weight(privacy_result)
+                hit_name = "privacy:" + privacy_result.probe_type
+                if hit_name not in hit_names_seen:
+                    hits.append(hit_name)
+                    hit_names_seen.add(hit_name)
+                    _RULE_SEVERITY[hit_name] = privacy_result.severity
+        except Exception:
+            pass  # Privacy probe detection failure is non-fatal
+
+    # Wire privacy signal into composite scoring
+    if privacy_weight > 0.0:
+        composite = min(composite + privacy_weight, 1.0)
+        # Floor: high-severity privacy extraction (is_extraction=True matched)
+        # is strong evidence of a P1 attack.  When the ML model has zero P1
+        # training data the composite can still land below threshold despite
+        # rules firing, so apply a floor to ensure detection.
+        if (privacy_result is not None
+                and privacy_result.severity == "high"
+                and composite < threshold):
+            composite = threshold
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
 
     # --- Payload assembly detection (D7) ---
     # Detect fragmented payloads: token-split, code-block weaponization,
@@ -1185,16 +1236,17 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None) -> Sca
         return result
 
     if l0.rejected:
+        _empty = l0.rejection_reason == "empty input"
         result = ScanResult(
             sanitized_text="",
-            is_malicious=True,
-            risk_score=1.0,
-            label="blocked",
+            is_malicious=False if _empty else True,
+            risk_score=0.0 if _empty else 1.0,
+            label="safe" if _empty else "blocked",
             rejected=True,
             rejection_reason=l0.rejection_reason,
             anomaly_flags=l0.anomaly_flags,
             ml_confidence=prob,
-            ml_label="blocked",
+            ml_label="safe" if _empty else "blocked",
         )
         result.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
         return result
@@ -1298,6 +1350,17 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None) -> Sca
         hits.append("chunked_analysis")
         if input_truncated_chunks:
             hits.append("input_truncated_chunks")
+
+    # --- D7 boost: json_hidden_instruction + chunked_analysis ---
+    # When a JSON-structured hidden instruction fires inside a padded
+    # (long, chunked) input, the combination strongly indicates a real
+    # payload-delivery attack.  Add +0.20 to overcome safe-content
+    # code_fence deductions on long padded input.
+    if ("chunked_analysis" in hits
+            and "rag_poison:hidden_structured:json_hidden_instruction" in hits):
+        risk = min(risk + 0.20, 1.0)
+        if risk >= DECISION_THRESHOLD:
+            is_mal = True
 
     # Map L0 anomaly flags and obfuscation flags to technique_ids
     _L0_FLAG_MAP = {

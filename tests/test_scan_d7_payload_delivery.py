@@ -495,12 +495,11 @@ class TestD7_3_CodeBlockHiding(unittest.TestCase):
             "risk={}, hits={}".format(r.risk_score, r.rule_hits),
         )
 
-    @unittest.expectedFailure
     def test_python_code_block_with_injection_comments(self):
         """Injection payload hidden as Python comments inside code block.
 
-        Risk ~0.22. Context suppression treats code blocks as educational
-        framing, suppressing injection rules in comments.
+        Now detected: code comment injection override disables context
+        suppression when comments contain '# IMPORTANT: Ignore/Reveal'.
         """
         text = (
             "Review this Python code:\n"
@@ -1026,9 +1025,11 @@ class TestD7_Combined(unittest.TestCase):
             "risk={}, hits={}".format(r.risk_score, r.rule_hits),
         )
 
-    @unittest.expectedFailure
     def test_d7_1_padding_plus_d7_3_code_block(self):
-        """D7.1+D7.3: Long padding with injection in a code block at the end."""
+        """D7.1+D7.3: Long padding with injection in a code block at the end.
+
+        Now detected via json_hidden_instruction + chunked_analysis boost.
+        """
         padding = _generate_benign_padding(1500)
         code_attack = (
             "```json\n"

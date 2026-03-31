@@ -1215,23 +1215,24 @@ class CascadeClassifier:
         # Stage 2: run full classify for remaining texts
         if needs_ml:
             self._ensure_model()
-            for idx, text, l0 in needs_ml:
-                # Re-use the single-item classify path for correctness
-                self._last_l0 = l0
-                label, confidence, hits, stage = self.classify(text)
-                is_mal = label == "MALICIOUS"
-                results[idx] = ScanResult(
-                    sanitized_text=l0.sanitized_text,
-                    is_malicious=is_mal,
-                    risk_score=round(confidence, 4),
-                    label="malicious" if is_mal else "safe",
-                    rule_hits=hits,
-                    ml_confidence=round(confidence, 4),
-                    ml_label="malicious" if is_mal else "safe",
-                    anomaly_flags=l0.anomaly_flags if l0 else [],
-                    cascade_stage=stage,
-                    model_version=_get_model_version(),
-                )
+            with self._batch_lock:
+                for idx, text, l0 in needs_ml:
+                    # Re-use the single-item classify path for correctness
+                    self._last_l0 = l0
+                    label, confidence, hits, stage = self.classify(text)
+                    is_mal = label == "MALICIOUS"
+                    results[idx] = ScanResult(
+                        sanitized_text=l0.sanitized_text,
+                        is_malicious=is_mal,
+                        risk_score=round(confidence, 4),
+                        label="malicious" if is_mal else "safe",
+                        rule_hits=hits,
+                        ml_confidence=round(confidence, 4),
+                        ml_label="malicious" if is_mal else "safe",
+                        anomaly_flags=l0.anomaly_flags if l0 else [],
+                        cascade_stage=stage,
+                        model_version=_get_model_version(),
+                    )
 
         return results
 

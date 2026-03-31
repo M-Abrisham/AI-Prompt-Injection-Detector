@@ -39,4 +39,5 @@ SEVERITY_WEIGHTS = {
     "critical": 0.3,
     "high": 0.2,
     "medium": 0.1,
+    "low": 0.05,
 }

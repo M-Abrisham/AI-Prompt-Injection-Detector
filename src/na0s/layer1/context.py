@@ -131,6 +131,37 @@ def _has_contextual_framing(text):
             or bool(_TECHDOC_FRAME.search(text)))
 
 
+# High-confidence injection patterns inside code block comments.
+# When a code block contains comments like "# IMPORTANT: Ignore all
+# previous instructions", the code-frame suppression should be overridden.
+_CODE_COMMENT_INJECTION = re.compile(
+    r'#\s*(?:IMPORTANT|CRITICAL|NOTE|WARNING|URGENT)\s*:\s*'
+    r'(?:ignore|forget|disregard|override|reveal|bypass|disable)',
+    re.IGNORECASE,
+)
+
+# Bare code block with attack payload: code block without a language tag
+# containing constraint negation or roleplay content.  These are not
+# legitimate code blocks but attack payloads wrapped in fences.
+_BARE_CODE_BLOCK_ATTACK = re.compile(
+    r'```\s*\n'               # opening fence with no language tag
+    r'(?:(?!```).)*?'         # non-greedy match of content
+    r'(?:no\s+restrictions|no\s+limits|free\s+from\s+(?:your\s+)?constraints|unrestricted)'
+    r'(?:(?!```).)*?'         # rest of content
+    r'```',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _has_code_comment_injection(text):
+    """Return True if code blocks contain high-confidence injection patterns."""
+    if _CODE_COMMENT_INJECTION.search(text):
+        return True
+    if _BARE_CODE_BLOCK_ATTACK.search(text):
+        return True
+    return False
+
+
 def _has_strong_contextual_framing(text):
     """Return True if text has STRONG contextual framing (excludes question frame).
 
@@ -205,8 +236,9 @@ _CONTEXT_SUPPRESSIBLE = frozenset({
     "api_key_extraction",
     # authority_escalation: NOT suppressible -- "I am the admin" is always
     #   suspicious regardless of framing.
-    # constraint_negation: NOT suppressible -- "disable safety filters" is
-    #   always suspicious.
+    # constraint_negation: NOT suppressible via general context -- but
+    #   suppressible via strong context (narrative/educational/quoting frame).
+    #   See _STRONG_CONTEXT_ONLY_SUPPRESSIBLE below.
     # meta_referential: Suppressible -- "your training data" appears in
     #   legitimate AI research and educational discussions.
     "meta_referential",
@@ -303,4 +335,5 @@ _CONTEXT_SUPPRESSIBLE = frozenset({
 _STRONG_CONTEXT_ONLY_SUPPRESSIBLE = frozenset({
     "direct_prompt_request",
     "named_jailbreak_persona",
+    "constraint_negation",
 })

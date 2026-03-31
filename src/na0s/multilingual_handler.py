@@ -105,6 +105,10 @@ _add("zh", "zh_disable_protections", "critical", ["D6.3", "D1"],
      r"(?:关闭|禁用|移除|解除|取消)\s*(?:所有|全部)?\s*(?:安全|保护|限制|过滤|防护)")
 _add("zh", "zh_new_role", "high", ["D6.3", "D2"],
      r"(?:你现在是|从现在开始你是|你的新角色|你的新身份)")
+_add("zh", "zh_config_inquiry", "high", ["D6.1", "D6.3"],
+     r"(?:配置|设置|系统提示|指令).{0,20}(?:详情|内容|信息)")
+_add("zh", "zh_config_inquiry_verb", "high", ["D6.1", "D6.3"],
+     r"(?:了解|查看|获取|告诉).{0,10}(?:你的|您的).{0,20}(?:配置|设置|指令|提示)")
 
 # ---- Japanese (D6.4) ----
 _add("ja", "ja_instruction_override", "high", ["D6.4", "D1"],
