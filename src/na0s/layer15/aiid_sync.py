@@ -45,17 +45,34 @@ from na0s.layer15.diff_engine import TaxonomyDiffEngine
 logger = logging.getLogger(__name__)
 
 # GraphQL query to fetch recent incidents
-# TODO: VERIFY — schema assumed based on AIID documentation (last checked: 2026-03)
+# CORRECTED: was {filter: {date_gte: $after}, sort: DATE_DESC, limit: 100}
+# Actual schema uses pagination: {limit: N}, sort: {date: DESC},
+# filter: {date: {GTE: $after}}, and entity relations are objects (not scalars).
+# Requires Origin: https://incidentdatabase.ai header.
+# VERIFIED: 2026-03-24, HTTP 200 (with Origin header)
 INCIDENTS_QUERY = """\
-query RecentIncidents($after: DateTime) {
-  incidents(filter: { date_gte: $after }, sort: DATE_DESC, limit: 100) {
+query RecentIncidents($after: String) {
+  incidents(
+    filter: { date: { GTE: $after } }
+    sort: { date: DESC }
+    pagination: { limit: 100 }
+  ) {
     incident_id
     title
     description
     date
-    AllegedDeployerOfAISystem
-    AllegedDeveloperOfAISystem
-    AllegedHarmedOrNearlyHarmedParties
+    AllegedDeployerOfAISystem {
+      entity_id
+      name
+    }
+    AllegedDeveloperOfAISystem {
+      entity_id
+      name
+    }
+    AllegedHarmedOrNearlyHarmedParties {
+      entity_id
+      name
+    }
   }
 }
 """
@@ -75,6 +92,7 @@ def _graphql_request(
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "Na0S-Layer15-ThreatIntelSync",
+        "Origin": "https://incidentdatabase.ai",  # Required by AIID CORS policy
     }
     last_error: Optional[Exception] = None
 
@@ -159,6 +177,16 @@ class AiidSync(ThreatIntelSource):
             if not incident_id:
                 continue
 
+            # Entity fields are objects with entity_id/name (not plain strings)
+            deployers = [
+                e.get("name", "") for e in (inc.get("AllegedDeployerOfAISystem") or [])
+                if isinstance(e, dict)
+            ]
+            developers = [
+                e.get("name", "") for e in (inc.get("AllegedDeveloperOfAISystem") or [])
+                if isinstance(e, dict)
+            ]
+
             techniques.append(
                 TechniqueEntry(
                     id=f"AIID-{incident_id}",
@@ -166,8 +194,8 @@ class AiidSync(ThreatIntelSource):
                     description=str(inc.get("description", ""))[:500],
                     metadata={
                         "date": str(inc.get("date", "")),
-                        "deployer": inc.get("AllegedDeployerOfAISystem", []),
-                        "developer": inc.get("AllegedDeveloperOfAISystem", []),
+                        "deployer": deployers,
+                        "developer": developers,
                     },
                 )
             )

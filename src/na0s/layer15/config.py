@@ -32,12 +32,14 @@ HTTP_BACKOFF_FACTOR = 2  # Exponential backoff: 2, 4, 8 seconds
 
 # ---------------------------------------------------------------------------
 # MITRE ATLAS
-# TODO: VERIFY — endpoint assumed (last checked: 2026-03)
+# CORRECTED: was mitre/atlas (404), verified 2026-03-24 -> mitre-atlas/atlas-data
+# CORRECTED: was data/techniques (dir), verified 2026-03-24 -> data/techniques.yaml
+# VERIFIED: 2026-03-24, HTTP 200
 # ---------------------------------------------------------------------------
 
-ATLAS_GITHUB_OWNER = "mitre"
-ATLAS_GITHUB_REPO = "atlas"
-ATLAS_TECHNIQUES_PATH = "data/techniques"  # path within the repo
+ATLAS_GITHUB_OWNER = "mitre-atlas"
+ATLAS_GITHUB_REPO = "atlas-data"
+ATLAS_TECHNIQUES_PATH = "data/techniques.yaml"  # single YAML file (not a dir)
 ATLAS_API_URL = (
     f"https://api.github.com/repos/{ATLAS_GITHUB_OWNER}/{ATLAS_GITHUB_REPO}"
 )
@@ -48,7 +50,7 @@ ATLAS_MAPPING_FILE = SNAPSHOTS_DIR / "atlas_to_na0s_mapping.yaml"
 
 # ---------------------------------------------------------------------------
 # Garak
-# TODO: VERIFY — endpoint assumed (last checked: 2026-03)
+# VERIFIED: 2026-03-24, HTTP 200
 # ---------------------------------------------------------------------------
 
 GARAK_GITHUB_OWNER = "leondz"
@@ -60,14 +62,14 @@ GARAK_PROBES_PATH = "garak/probes"  # path within the repo
 
 # ---------------------------------------------------------------------------
 # AIID (AI Incident Database)
-# TODO: VERIFY — endpoint assumed (last checked: 2026-03)
+# VERIFIED: 2026-03-24, HTTP 200 (requires Origin: https://incidentdatabase.ai)
 # ---------------------------------------------------------------------------
 
 AIID_GRAPHQL_URL = "https://incidentdatabase.ai/api/graphql"
 
 # ---------------------------------------------------------------------------
 # JailbreakBench / HarmBench
-# TODO: VERIFY — endpoint assumed (last checked: 2026-03)
+# VERIFIED: 2026-03-24, HTTP 200
 # ---------------------------------------------------------------------------
 
 JAILBREAKBENCH_GITHUB_OWNER = "JailbreakBench"
@@ -77,7 +79,7 @@ HARMBENCH_GITHUB_REPO = "HarmBench"
 
 # ---------------------------------------------------------------------------
 # OWASP LLM Top 10
-# TODO: VERIFY — endpoint assumed (last checked: 2026-03)
+# VERIFIED: 2026-03-24, HTTP 200
 # ---------------------------------------------------------------------------
 
 OWASP_GITHUB_OWNER = "OWASP"
@@ -85,7 +87,7 @@ OWASP_GITHUB_REPO = "www-project-top-10-for-large-language-model-applications"
 
 # ---------------------------------------------------------------------------
 # SafetyPrompts / jailbreak_llms
-# TODO: VERIFY — endpoint assumed (last checked: 2026-03)
+# VERIFIED: 2026-03-24, HTTP 200
 # ---------------------------------------------------------------------------
 
 SAFETYPROMPTS_GITHUB_OWNER = "verazuo"

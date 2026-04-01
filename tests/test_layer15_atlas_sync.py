@@ -36,14 +36,9 @@ MOCK_BRANCH_INFO = {"commit": {"sha": "abc123"}}
 MOCK_TREE = {
     "tree": [
         {
-            "path": "data/techniques/AML.T0043.yaml",
+            "path": "data/techniques.yaml",
             "type": "blob",
             "sha": "x1",
-        },
-        {
-            "path": "data/techniques/AML.T0048.yaml",
-            "type": "blob",
-            "sha": "x2",
         },
         {
             "path": "data/other/readme.md",
@@ -53,6 +48,19 @@ MOCK_TREE = {
     ]
 }
 
+# In the real repo, all techniques live in a single data/techniques.yaml file
+TECHNIQUES_YAML_ALL = """\
+- id: AML.T0043
+  name: Craft Adversarial Data
+  description: Adversary crafts data to exploit ML model vulnerabilities.
+  severity: high
+- id: AML.T0048
+  name: Exfiltrate ML Model
+  description: Adversary extracts a copy of the private ML model.
+  severity: critical
+"""
+
+# Keep individual technique YAMLs for _parse_technique_yaml unit tests
 TECHNIQUE_YAML_0043 = """\
 id: AML.T0043
 name: Craft Adversarial Data
@@ -104,7 +112,7 @@ class TestAtlasFetchLatest:
     """Tests for AtlasSync.fetch_latest()."""
 
     def test_happy_path_fetches_techniques(self, atlas):
-        """Full fetch: repo info → branch → tree → technique files."""
+        """Full fetch: repo info -> branch -> tree -> technique file."""
         call_count = {"n": 0}
 
         def mock_fetch_json(url, headers=None, timeout=30):
@@ -117,10 +125,9 @@ class TestAtlasFetchLatest:
                 return MOCK_REPO_INFO, {}
 
         def mock_fetch_text(url, headers=None, timeout=30):
-            if "AML.T0043" in url:
-                return TECHNIQUE_YAML_0043
-            elif "AML.T0048" in url:
-                return TECHNIQUE_YAML_0048
+            # Single techniques.yaml file containing all techniques
+            if "techniques.yaml" in url:
+                return TECHNIQUES_YAML_ALL
             return ""
 
         with patch(
@@ -147,10 +154,8 @@ class TestAtlasFetchLatest:
             return MOCK_REPO_INFO, {}
 
         def mock_fetch_text(url, headers=None, timeout=30):
-            if "AML.T0043" in url:
-                return TECHNIQUE_YAML_0043
-            elif "AML.T0048" in url:
-                return TECHNIQUE_YAML_0048
+            if "techniques.yaml" in url:
+                return TECHNIQUES_YAML_ALL
             return ""
 
         with patch(

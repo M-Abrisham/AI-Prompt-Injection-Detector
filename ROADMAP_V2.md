@@ -1259,14 +1259,14 @@ Layer 14 covers testing infrastructure and automation. Two evaluation scripts ex
 
 ---
 
-## Layer 15: Threat Intelligence Sync — Tasks: 14/18 (78%)
+## Layer 15: Threat Intelligence Sync — Tasks: 18/18 (100%)
 
-**Files**: `src/na0s/layer15/` (13 modules), `.github/workflows/threat_intel_sync.yml`, `scripts/sync_datasets.py`, `data/datasets.yaml`, `data/taxonomy.yaml`, `data/tags.misp.tsv`
-**Tests**: 83 tests across 6 test files (`tests/test_layer15_*.py`)
-**Status**: **Implemented** — all P0/P1/P2 components built; P2 stubs need full algorithm implementation; upstream endpoints need live verification
+**Files**: `src/na0s/layer15/` (17 modules), `.github/workflows/threat_intel_sync.yml`, `scripts/sync_datasets.py`, `data/datasets.yaml`, `data/taxonomy.yaml`, `data/tags.misp.tsv`
+**Tests**: 171 tests across 9 test files (`tests/test_layer15_*.py`)
+**Status**: **Complete** — all P0/P1/P2 components fully implemented; endpoints verified live; LLM-assisted generation with fallback; TAP/PAIR red teaming with judge; cross-benchmark dashboard
 
 ### Updated Description
-Layer 15 provides automated synchronization with external threat intelligence sources to keep the detector current with evolving attack techniques. The layer monitors 7 upstream sources (MITRE ATLAS, Garak, AIID, JailbreakBench, HarmBench, OWASP LLM Top 10, SafetyPrompts) via a weekly GitHub Actions cron workflow. Each source implements a `ThreatIntelSource` interface (fetch → diff → apply) with idempotent sync, structured diffs (JSON + Markdown), and graceful partial failure. The taxonomy diff engine powers all sources and generates PR-ready changelogs. P2 stubs define the interface for incident-to-sample conversion (template-based generation working) and TAP/PAIR automated red teaming.
+Layer 15 provides automated synchronization with external threat intelligence sources to keep the detector current with evolving attack techniques. The layer monitors 7 upstream sources (MITRE ATLAS, Garak, AIID, JailbreakBench, HarmBench, OWASP LLM Top 10, SafetyPrompts) via a weekly GitHub Actions cron workflow. Each source implements a `ThreatIntelSource` interface (fetch → diff → apply) with idempotent sync, structured diffs (JSON + Markdown), and graceful partial failure. The taxonomy diff engine powers all sources and generates PR-ready changelogs. LLM-assisted incident-to-sample generation converts AIID reports into test samples (with template fallback). TAP/PAIR red teaming implements tree-search and iterative-refinement algorithms with LLM-powered and rule-based modes. A cross-benchmark dashboard visualizes overlap/gaps between Na0S's taxonomy and JailbreakBench/HarmBench via fuzzy Jaccard matching. An endpoint health checker verifies all upstream APIs (all 7 verified live, ATLAS and AIID schemas corrected).
 
 ### TODO List
 
@@ -1286,18 +1286,16 @@ Layer 15 provides automated synchronization with external threat intelligence so
 - [x] **Taxonomy diff detection** — Compare old vs new taxonomy versions, highlight new techniques, deprecated ones, reclassifications. **Priority**: P1. **Done**: `src/na0s/layer15/diff_engine.py` (18 tests). Outputs JSON + Markdown.
 - [x] **Incident-to-sample pipeline** — Convert real-world incident reports (AIID) into training samples. **Priority**: P2. **Done**: `src/na0s/layer15/incident_to_sample.py` — template-based generation implemented; LLM-assisted and NLP extraction marked as FUTURE.
 - [x] **Add SafetyPrompts.com monitoring** — Living catalogue of 144+ prompt injection datasets. Monitor for new dataset additions. Source: Automation gap #60. **Priority**: P1. **Done**: `src/na0s/layer15/safetyprompts_sync.py`.
-- [x] **Add TAP/PAIR automated red teaming** — Tree of Attacks with Pruning (TAP) and Prompt Automatic Iterative Refinement (PAIR) alongside Rainbow Teaming. Source: Automation gap #61. **Priority**: P2. **Done**: `src/na0s/layer15/red_teaming.py` — interface + evaluate() implemented; generate() stubbed for both TAP and PAIR.
-
-#### REMAINING
-- [ ] **Verify upstream API endpoints** — ATLAS repo tree path, AIID GraphQL schema, and OWASP README format need verification on first live `workflow_dispatch --dry-run`. See `# TODO: VERIFY` comments in `config.py`.
-- [ ] **LLM-assisted incident-to-sample generation** — Upgrade `incident_to_sample.py` to use LLM reformulation for higher-quality test samples (FUTURE comment in code).
-- [ ] **Full TAP/PAIR implementation** — Implement `generate()` methods with attacker LLM + judge LLM (FUTURE comment in `red_teaming.py`).
-- [ ] **Cross-benchmark validation dashboard** — Visualization of overlap/gaps between Na0S test corpus and JailbreakBench/HarmBench datasets.
+- [x] **Add TAP/PAIR automated red teaming** — Tree of Attacks with Pruning (TAP) and Prompt Automatic Iterative Refinement (PAIR) alongside Rainbow Teaming. Source: Automation gap #61. **Priority**: P2. **Done**: `src/na0s/layer15/red_teaming.py` — full `TAPRedTeamer` + `PAIRRedTeamer` with `RedTeamJudge`, LLM-powered + rule-based fallback.
+- [x] **Verify upstream API endpoints** — ATLAS corrected to `mitre-atlas/atlas-data`, AIID GraphQL schema corrected (entity relations, Origin header), all 7 endpoints verified live 2026-03-24. **Done**: `config.py` updated, `endpoint_health.py` (28 tests).
+- [x] **LLM-assisted incident-to-sample generation** — `incident_to_sample.py` upgraded with LLM extraction + generation pipeline, template fallback preserved. **Done**: `llm_client.py` shared LLM abstraction, 7 new LLM tests.
+- [x] **Full TAP/PAIR implementation** — TAP tree search (depth/branching/pruning) + PAIR iterative refinement, both with `RedTeamJudge` scoring, budget enforcement, rule-based mutations as LLM fallback. **Done**: 12 new red team tests.
+- [x] **Cross-benchmark validation dashboard** — `benchmark_analyzer.py` (fuzzy Jaccard matching) + `dashboard_generator.py` (standalone HTML). **Done**: 20 tests.
 
 ### Implementation Plan
 **Phase 1 (P0)**: ~~GitHub Actions weekly sync workflow, MITRE ATLAS monitoring, Garak probe tracking~~ ✅ Complete
 **Phase 2 (P1)**: ~~AIID polling, JailbreakBench sync, taxonomy diff detection, OWASP monitoring, SafetyPrompts.com monitoring~~ ✅ Complete
-**Phase 3 (P2)**: ~~Incident-to-sample pipeline, TAP/PAIR red teaming~~ ✅ Stubs complete — cross-benchmark validation dashboard remaining
+**Phase 3 (P2)**: ~~Incident-to-sample pipeline, TAP/PAIR red teaming, cross-benchmark validation dashboard~~ ✅ Complete
 
 ---
 
