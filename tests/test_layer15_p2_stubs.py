@@ -484,7 +484,7 @@ class TestRedTeamJudge:
 
     def test_llm_scoring_with_mock(self):
         """When LLM is available, judge should use it."""
-        mock_llm = MagicMock()
+        mock_llm = MagicMock(spec=Layer15LLMClient)
         mock_llm.chat.return_value = json.dumps({
             "effectiveness": 0.9,
             "stealth": 0.7,

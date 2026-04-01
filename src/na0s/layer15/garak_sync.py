@@ -23,7 +23,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from na0s.layer15.atlas_sync import _fetch_json, _fetch_text
 from na0s.layer15.base import (
     ApplyResult,
     SourceSnapshot,
@@ -37,33 +36,20 @@ from na0s.layer15.config import (
     GARAK_GITHUB_OWNER,
     GARAK_GITHUB_REPO,
     GARAK_PROBES_PATH,
-    HTTP_TIMEOUT_SECONDS,
 )
 from na0s.layer15.diff_engine import TaxonomyDiffEngine
+from na0s.layer15.http_utils import fetch_json, fetch_text, github_headers
 
 logger = logging.getLogger(__name__)
 
 # Regex to extract Python class definitions and their docstrings.
-# Matches: class ClassName(BaseClass):  and the optional triple-quoted docstring.
+# Matches: class ClassName(BaseClass):  or  class ClassName:
+# and the optional triple-quoted docstring.
 _CLASS_PATTERN = re.compile(
-    r'^class\s+(\w+)\s*\([^)]*\)\s*:\s*\n'
+    r'^class\s+(\w+)\s*(?:\([^)]*\))?\s*:\s*\n'
     r'(?:\s+"""(.*?)""")?',
     re.MULTILINE | re.DOTALL,
 )
-
-
-def _github_headers(token: Optional[str] = None) -> Dict[str, str]:
-    """Build GitHub API request headers."""
-    import os
-
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "Na0S-Layer15-ThreatIntelSync",
-    }
-    tok = token or os.environ.get("GITHUB_TOKEN", "")
-    if tok:
-        headers["Authorization"] = f"token {tok}"
-    return headers
 
 
 def _extract_probe_classes(source: str) -> List[Tuple[str, str]]:
@@ -113,7 +99,7 @@ class GarakSync(ThreatIntelSource):
         snapshots_dir: Optional[Path] = None,
     ):
         super().__init__(snapshots_dir=snapshots_dir)
-        self._headers = _github_headers(github_token)
+        self._headers = github_headers(github_token)
         self._diff_engine = TaxonomyDiffEngine()
 
     def _get_latest_release(self) -> Dict[str, Any]:
@@ -124,13 +110,13 @@ class GarakSync(ThreatIntelSource):
         """
         url = f"{GARAK_API_URL}/releases/latest"
         try:
-            data, _ = _fetch_json(url, headers=self._headers)
+            data, _ = fetch_json(url, headers=self._headers)
             return data
         except SourceUnavailableError:
             # No releases or 404 — try listing all releases
             url = f"{GARAK_API_URL}/releases"
             try:
-                releases, _ = _fetch_json(url, headers=self._headers)
+                releases, _ = fetch_json(url, headers=self._headers)
                 if releases and isinstance(releases, list):
                     return releases[0]
             except SourceUnavailableError:
@@ -143,7 +129,7 @@ class GarakSync(ThreatIntelSource):
         Uses the Git Trees API for efficiency (single request).
         """
         tree_url = f"{GARAK_API_URL}/git/trees/{ref}?recursive=1"
-        tree_data, _ = _fetch_json(tree_url, headers=self._headers)
+        tree_data, _ = fetch_json(tree_url, headers=self._headers)
 
         return [
             item
@@ -152,8 +138,8 @@ class GarakSync(ThreatIntelSource):
                 item["path"].startswith(GARAK_PROBES_PATH)
                 and item["path"].endswith(".py")
                 and item["type"] == "blob"
-                and "__init__" not in item["path"]
-                and "base" not in item["path"].lower()
+                and Path(item["path"]).name != "__init__.py"
+                and Path(item["path"]).name.lower() != "base.py"
             )
         ]
 
@@ -171,7 +157,7 @@ class GarakSync(ThreatIntelSource):
         if not tag:
             logger.info("No Garak releases found, using default branch")
             # Fall back to default branch
-            repo_info, _ = _fetch_json(GARAK_API_URL, headers=self._headers)
+            repo_info, _ = fetch_json(GARAK_API_URL, headers=self._headers)
             ref = repo_info.get("default_branch", "main")
             tag = ref
         else:
@@ -191,7 +177,7 @@ class GarakSync(ThreatIntelSource):
                 f"{GARAK_GITHUB_OWNER}/{GARAK_GITHUB_REPO}/{ref}/{file_path}"
             )
             try:
-                source = _fetch_text(raw_url, headers=self._headers)
+                source = fetch_text(raw_url, headers=self._headers)
                 classes = _extract_probe_classes(source)
 
                 # Derive module name from path: garak/probes/foo.py → foo

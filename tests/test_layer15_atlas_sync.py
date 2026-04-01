@@ -113,10 +113,8 @@ class TestAtlasFetchLatest:
 
     def test_happy_path_fetches_techniques(self, atlas):
         """Full fetch: repo info -> branch -> tree -> technique file."""
-        call_count = {"n": 0}
 
         def mock_fetch_json(url, headers=None, timeout=30):
-            call_count["n"] += 1
             if "branches/main" in url:
                 return MOCK_BRANCH_INFO, {}
             elif "git/trees" in url:

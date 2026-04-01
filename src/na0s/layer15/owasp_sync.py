@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from na0s.layer15.atlas_sync import _fetch_json, _fetch_text
 from na0s.layer15.base import (
     ApplyResult,
     SourceSnapshot,
@@ -28,11 +27,11 @@ from na0s.layer15.base import (
     ThreatIntelSource,
 )
 from na0s.layer15.config import (
-    HTTP_TIMEOUT_SECONDS,
     OWASP_GITHUB_OWNER,
     OWASP_GITHUB_REPO,
 )
 from na0s.layer15.diff_engine import TaxonomyDiffEngine
+from na0s.layer15.http_utils import fetch_json, fetch_text, github_headers
 
 logger = logging.getLogger(__name__)
 
@@ -56,20 +55,6 @@ OWASP_2025_ITEMS = {
 }
 
 
-def _github_headers(token: Optional[str] = None) -> Dict[str, str]:
-    """Build GitHub API headers."""
-    import os
-
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "Na0S-Layer15-ThreatIntelSync",
-    }
-    tok = token or os.environ.get("GITHUB_TOKEN", "")
-    if tok:
-        headers["Authorization"] = f"token {tok}"
-    return headers
-
-
 class OwaspSync(ThreatIntelSource):
     """Monitors OWASP LLM Top 10 for version changes.
 
@@ -89,7 +74,7 @@ class OwaspSync(ThreatIntelSource):
         snapshots_dir: Optional[Path] = None,
     ):
         super().__init__(snapshots_dir=snapshots_dir)
-        self._headers = _github_headers(github_token)
+        self._headers = github_headers(github_token)
         self._diff_engine = TaxonomyDiffEngine()
 
     def fetch_latest(self) -> SourceSnapshot:
@@ -100,11 +85,11 @@ class OwaspSync(ThreatIntelSource):
         if the repo structure is unexpected.
         """
         # Get latest commit SHA
-        repo_info, _ = _fetch_json(OWASP_API_URL, headers=self._headers)
+        repo_info, _ = fetch_json(OWASP_API_URL, headers=self._headers)
         default_branch = repo_info.get("default_branch", "main")
 
         branch_url = f"{OWASP_API_URL}/branches/{default_branch}"
-        branch_info, _ = _fetch_json(branch_url, headers=self._headers)
+        branch_info, _ = fetch_json(branch_url, headers=self._headers)
         commit_sha = branch_info["commit"]["sha"]
 
         # Try to find the items listing from the repo
@@ -150,7 +135,7 @@ class OwaspSync(ThreatIntelSource):
             f"{OWASP_GITHUB_OWNER}/{OWASP_GITHUB_REPO}/{branch}/README.md"
         )
         try:
-            readme = _fetch_text(readme_url, headers=self._headers)
+            readme = fetch_text(readme_url, headers=self._headers)
         except SourceUnavailableError:
             return None
 

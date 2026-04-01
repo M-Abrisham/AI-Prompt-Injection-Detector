@@ -19,7 +19,6 @@ attacks.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import random
@@ -581,12 +580,14 @@ class TAPRedTeamer(RedTeamAlgorithm):
         self._query_count = 0
         all_probes: List[RedTeamProbe] = []
 
-        # Step 1: Create seed prompts
+        # Step 1: Create seed prompts (judge calls count toward budget)
         current_leaves: List[RedTeamProbe] = []
         for template in _SEED_TEMPLATES:
             seed_text = template.format(target_behavior=target_behavior)
             probe_id = _generate_probe_id()
             score = self._judge.score(seed_text, target_behavior)
+            if self._llm is not None:
+                self._use_query()  # Count seed judge calls
             probe = RedTeamProbe(
                 text=seed_text,
                 algorithm="tap",
@@ -626,12 +627,13 @@ class TAPRedTeamer(RedTeamAlgorithm):
                 )
 
                 for var_text in variations:
-                    if not self._budget_remaining():
+                    # Pre-check budget BEFORE making the judge call
+                    if self._llm is not None:
+                        if not self._use_query():
+                            break
+                    elif not self._budget_remaining():
                         break
                     score = self._judge.score(var_text, target_behavior)
-                    # Count LLM judge calls toward budget if LLM is used
-                    if self._llm is not None:
-                        self._use_query()
 
                     var_id = _generate_probe_id()
                     var_probe = RedTeamProbe(
@@ -808,12 +810,15 @@ class PAIRRedTeamer(RedTeamAlgorithm):
             Generated attack probes (best found).
         """
         self._query_count = 0
-        iterations = min(max_iterations, self.max_iterations)
+        iterations = self.max_iterations
         all_probes: List[RedTeamProbe] = []
 
         # Step 1: Start with best seed prompt
+        # (seed scoring uses judge LLM calls — counted in _pick_best_seed)
         best_text = self._pick_best_seed(target_behavior)
         best_score_obj = self._judge.score(best_text, target_behavior)
+        if self._llm is not None:
+            self._use_query()
         best_score = best_score_obj.overall
 
         seed_probe = RedTeamProbe(
@@ -839,17 +844,14 @@ class PAIRRedTeamer(RedTeamAlgorithm):
         mutation_idx = 0
 
         current_text = best_text
+        current_score = best_score  # Reuse seed score, avoid double-scoring
 
         # Step 2: Iterative refinement
         for iteration in range(1, iterations + 1):
             if not self._budget_remaining():
                 break
 
-            # 2a: Score current attack
-            score_obj = self._judge.score(current_text, target_behavior)
-            current_score = score_obj.overall
-
-            # 2b: If score > threshold, stop
+            # 2b: If score > threshold, stop (uses score from previous iteration)
             if current_score >= self.success_threshold:
                 logger.info(
                     "PAIR reached success threshold (%.2f >= %.2f) at iteration %d",
@@ -885,10 +887,11 @@ class PAIRRedTeamer(RedTeamAlgorithm):
                         current_text, target_behavior
                     )
 
-            # Score the new version
-            new_score_obj = self._judge.score(current_text, target_behavior)
+            # Score the new version (count toward budget)
             if self._llm is not None:
                 self._use_query()
+            new_score_obj = self._judge.score(current_text, target_behavior)
+            current_score = new_score_obj.overall  # Carry forward for next iteration
 
             probe = RedTeamProbe(
                 text=current_text,
@@ -925,11 +928,16 @@ class PAIRRedTeamer(RedTeamAlgorithm):
         return all_probes
 
     def _pick_best_seed(self, target_behavior: str) -> str:
-        """Pick the highest-scoring seed template."""
+        """Pick the highest-scoring seed template.
+
+        Judge calls here count toward the query budget.
+        """
         best_text = _SEED_TEMPLATES[0].format(target_behavior=target_behavior)
         best_score = 0.0
         for template in _SEED_TEMPLATES:
             text = template.format(target_behavior=target_behavior)
+            if self._llm is not None:
+                self._use_query()  # Count seed judge calls
             score = self._judge.score(text, target_behavior)
             if score.overall > best_score:
                 best_score = score.overall

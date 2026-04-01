@@ -181,8 +181,8 @@ class EndpointHealthChecker:
             req = Request(url, data=body, headers=headers, method=method)
             with urlopen(req, timeout=timeout) as resp:
                 elapsed_ms = int((time.monotonic() - start) * 1000)
-                # Consume the body so the connection can be reused
-                resp.read()
+                # Consume body (capped at 64KB to avoid OOM on misconfig)
+                resp.read(65536)
                 status_code = resp.status
 
                 # Check for rate limiting even on 200 (GitHub sends headers)

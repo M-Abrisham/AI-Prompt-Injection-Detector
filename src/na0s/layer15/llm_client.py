@@ -76,7 +76,13 @@ class Layer15LLMClient:
 
     @classmethod
     def is_available(cls) -> bool:
-        """Return True if the LLM is configured (package + API key)."""
+        """Return True if the LLM is configured via env vars (package + API key).
+
+        Note: This only checks environment variables. An instance created
+        with an explicit api_key= argument may be functional even when
+        this returns False. Use ``client._client is not None`` for
+        instance-level checks.
+        """
         if not _HAS_OPENAI:
             return False
         key = os.getenv("NAOS_L15_LLM_API_KEY", "")
@@ -149,7 +155,11 @@ class Layer15LLMClient:
     # ------------------------------------------------------------------
 
     def _call_with_retry(self, *, messages, temperature, max_tokens):
-        """Call the API with exponential backoff on transient errors."""
+        """Call the API with exponential backoff on transient errors.
+
+        Only retries on HTTP 429/500/503. Other errors (auth, bad request,
+        programming errors) raise immediately.
+        """
         last_exc = None
         for attempt in range(self._max_retries + 1):
             try:
@@ -159,8 +169,14 @@ class Layer15LLMClient:
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
+            except (OSError, TimeoutError) as exc:
+                # Network-level errors are always retryable
+                last_exc = exc
+                if attempt >= self._max_retries:
+                    raise
             except Exception as exc:
                 last_exc = exc
+                # Extract HTTP status from openai-style exceptions
                 status_code = getattr(exc, "status_code", None)
                 if status_code is None:
                     resp = getattr(exc, "response", None)

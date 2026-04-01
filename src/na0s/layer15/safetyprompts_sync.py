@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from na0s.layer15.atlas_sync import _fetch_json
 from na0s.layer15.base import (
     ApplyResult,
     SourceSnapshot,
@@ -30,6 +29,7 @@ from na0s.layer15.config import (
     SAFETYPROMPTS_GITHUB_REPO,
 )
 from na0s.layer15.diff_engine import TaxonomyDiffEngine
+from na0s.layer15.http_utils import fetch_json, github_headers
 
 logger = logging.getLogger(__name__)
 
@@ -37,19 +37,6 @@ SAFETYPROMPTS_API_URL = (
     f"https://api.github.com/repos/"
     f"{SAFETYPROMPTS_GITHUB_OWNER}/{SAFETYPROMPTS_GITHUB_REPO}"
 )
-
-
-def _github_headers(token: Optional[str] = None) -> Dict[str, str]:
-    import os
-
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "Na0S-Layer15-ThreatIntelSync",
-    }
-    tok = token or os.environ.get("GITHUB_TOKEN", "")
-    if tok:
-        headers["Authorization"] = f"token {tok}"
-    return headers
 
 
 class SafetyPromptsSync(ThreatIntelSource):
@@ -71,7 +58,7 @@ class SafetyPromptsSync(ThreatIntelSource):
         snapshots_dir: Optional[Path] = None,
     ):
         super().__init__(snapshots_dir=snapshots_dir)
-        self._headers = _github_headers(github_token)
+        self._headers = github_headers(github_token)
         self._diff_engine = TaxonomyDiffEngine()
 
     def fetch_latest(self) -> SourceSnapshot:
@@ -80,18 +67,18 @@ class SafetyPromptsSync(ThreatIntelSource):
         Scans the repo tree for dataset directories/files and reports
         their names as techniques for diffing purposes.
         """
-        repo_info, _ = _fetch_json(
+        repo_info, _ = fetch_json(
             SAFETYPROMPTS_API_URL, headers=self._headers
         )
         default_branch = repo_info.get("default_branch", "main")
 
         branch_url = f"{SAFETYPROMPTS_API_URL}/branches/{default_branch}"
-        branch_info, _ = _fetch_json(branch_url, headers=self._headers)
+        branch_info, _ = fetch_json(branch_url, headers=self._headers)
         commit_sha = branch_info["commit"]["sha"]
 
         # Get the repo tree to find dataset directories
         tree_url = f"{SAFETYPROMPTS_API_URL}/git/trees/{commit_sha}?recursive=1"
-        tree_data, _ = _fetch_json(tree_url, headers=self._headers)
+        tree_data, _ = fetch_json(tree_url, headers=self._headers)
 
         # Look for dataset-related files (CSV, JSON, JSONL in data/ or dataset/ dirs)
         dataset_files = set()

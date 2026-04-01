@@ -42,14 +42,14 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L12**| `████████████████████` | **55/55**  | COMPLETE |
 | **L13**| `████████████████████` | **41/41**  | COMPLETE |
 | **L14**| `████████████████████` | **21/21**  | COMPLETE |
-| **L15**| `█████░░░░░░░░░░░░░░░` | **4/14**   | 29% |
+| **L15**| `████████████████████` | **18/18**  | COMPLETE |
 | **L16**| `███░░░░░░░░░░░░░░░░░` | **3/25**   | 12% |
 | **L17**| `░░░░░░░░░░░░░░░░░░░░` | **0/20**   | NOT STARTED |
 | **L18**| `░░░░░░░░░░░░░░░░░░░░` | **0/18**   | NOT STARTED |
 | **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
 | **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
 | **Hardening** | `██████████████░░░░░░` | **10/14** | 71% |
-|        |                        | **573/772** | **74%** |
+|        |                        | **587/776** | **76%** |
 
 ---
 
@@ -1268,15 +1268,11 @@ Layer 14 covers testing infrastructure and automation. Two evaluation scripts ex
 ### Updated Description
 Layer 15 provides automated synchronization with external threat intelligence sources to keep the detector current with evolving attack techniques. The layer monitors 7 upstream sources (MITRE ATLAS, Garak, AIID, JailbreakBench, HarmBench, OWASP LLM Top 10, SafetyPrompts) via a weekly GitHub Actions cron workflow. Each source implements a `ThreatIntelSource` interface (fetch → diff → apply) with idempotent sync, structured diffs (JSON + Markdown), and graceful partial failure. The taxonomy diff engine powers all sources and generates PR-ready changelogs. LLM-assisted incident-to-sample generation converts AIID reports into test samples (with template fallback). TAP/PAIR red teaming implements tree-search and iterative-refinement algorithms with LLM-powered and rule-based modes. A cross-benchmark dashboard visualizes overlap/gaps between Na0S's taxonomy and JailbreakBench/HarmBench via fuzzy Jaccard matching. An endpoint health checker verifies all upstream APIs (all 7 verified live, ATLAS and AIID schemas corrected).
 
-### TODO List
-
 #### DONE
 - [x] Static taxonomy mappings: OWASP-LLM 2025, AVID, LMRC Risk Cards — `data/tags.misp.tsv`
 - [x] 11 external dataset sources registered in `data/datasets.yaml`
 - [x] `sync_datasets.py` with SHA-256 freshness checking and lock file — `scripts/`
 - [x] Manual dataset download with `--force` option
-
-#### NEW
 - [x] **MITRE ATLAS YAML sync** — Monitor ATLAS GitHub repo for new techniques, auto-map to local taxonomy. **Priority**: P0. **Done**: `src/na0s/layer15/atlas_sync.py` (16 tests).
 - [x] **Garak probe monitoring** — Track leondz/garak GitHub releases for new probe categories. Auto-generate corresponding local probes. **Priority**: P0. **Done**: `src/na0s/layer15/garak_sync.py` (12 tests).
 - [x] **AIID GraphQL polling** — Query incidentdatabase.ai for new AI incidents, extract attack patterns for taxonomy expansion. **Priority**: P1. **Done**: `src/na0s/layer15/aiid_sync.py`.

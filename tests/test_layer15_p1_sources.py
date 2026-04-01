@@ -35,8 +35,8 @@ MOCK_AIID_RESPONSE = {
                 "title": "Chatbot produced harmful medical advice",
                 "description": "A chatbot was tricked into giving dangerous advice.",
                 "date": "2026-01-15",
-                "AllegedDeployerOfAISystem": ["AcmeCorp"],
-                "AllegedDeveloperOfAISystem": ["ModelCo"],
+                "AllegedDeployerOfAISystem": [{"entity_id": "1", "name": "AcmeCorp"}],
+                "AllegedDeveloperOfAISystem": [{"entity_id": "2", "name": "ModelCo"}],
                 "AllegedHarmedOrNearlyHarmedParties": [],
             },
             {
@@ -77,6 +77,9 @@ class TestAiidSync:
         assert len(snapshot.techniques) == 2
         assert snapshot.techniques[0].id == "AIID-42"
         assert "medical" in snapshot.techniques[0].name.lower()
+        # Verify entity extraction from object-typed fields
+        assert snapshot.techniques[0].metadata["deployer"] == ["AcmeCorp"]
+        assert snapshot.techniques[0].metadata["developer"] == ["ModelCo"]
 
     def test_empty_incidents_response(self, aiid):
         def mock_graphql(url, query, variables=None, timeout=30):
@@ -193,9 +196,9 @@ class TestOwaspSync:
             return MOCK_OWASP_README
 
         with patch(
-            "na0s.layer15.owasp_sync._fetch_json", side_effect=mock_fetch_json
+            "na0s.layer15.owasp_sync.fetch_json", side_effect=mock_fetch_json
         ), patch(
-            "na0s.layer15.owasp_sync._fetch_text", side_effect=mock_fetch_text
+            "na0s.layer15.owasp_sync.fetch_text", side_effect=mock_fetch_text
         ):
             snapshot = owasp.fetch_latest()
 
@@ -217,9 +220,9 @@ class TestOwaspSync:
             return "# This README has no LLM items"
 
         with patch(
-            "na0s.layer15.owasp_sync._fetch_json", side_effect=mock_fetch_json
+            "na0s.layer15.owasp_sync.fetch_json", side_effect=mock_fetch_json
         ), patch(
-            "na0s.layer15.owasp_sync._fetch_text", side_effect=mock_fetch_text
+            "na0s.layer15.owasp_sync.fetch_text", side_effect=mock_fetch_text
         ):
             snapshot = owasp.fetch_latest()
 
@@ -231,7 +234,7 @@ class TestOwaspSync:
             raise SourceUnavailableError("404")
 
         with patch(
-            "na0s.layer15.owasp_sync._fetch_json", side_effect=mock_fetch_json
+            "na0s.layer15.owasp_sync.fetch_json", side_effect=mock_fetch_json
         ):
             with pytest.raises(SourceUnavailableError):
                 owasp.fetch_latest()
@@ -274,7 +277,7 @@ class TestSafetyPromptsSync:
             return MOCK_SP_REPO, {}
 
         with patch(
-            "na0s.layer15.safetyprompts_sync._fetch_json",
+            "na0s.layer15.safetyprompts_sync.fetch_json",
             side_effect=mock_fetch_json,
         ):
             snapshot = sp.fetch_latest()
@@ -295,7 +298,7 @@ class TestSafetyPromptsSync:
             return MOCK_SP_REPO, {}
 
         with patch(
-            "na0s.layer15.safetyprompts_sync._fetch_json",
+            "na0s.layer15.safetyprompts_sync.fetch_json",
             side_effect=mock_fetch_json,
         ):
             snapshot = sp.fetch_latest()
@@ -357,7 +360,7 @@ class TestJailbreakBenchSync:
             return {}, {}
 
         with patch(
-            "na0s.layer15.jailbreakbench_sync._fetch_json",
+            "na0s.layer15.jailbreakbench_sync.fetch_json",
             side_effect=mock_fetch_json,
         ):
             snapshot = jb.fetch_latest()
@@ -384,7 +387,7 @@ class TestJailbreakBenchSync:
             return {}, {}
 
         with patch(
-            "na0s.layer15.jailbreakbench_sync._fetch_json",
+            "na0s.layer15.jailbreakbench_sync.fetch_json",
             side_effect=mock_fetch_json,
         ):
             snapshot = jb.fetch_latest()

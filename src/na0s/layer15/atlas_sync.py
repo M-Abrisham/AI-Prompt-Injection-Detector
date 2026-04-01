@@ -20,19 +20,13 @@ We fetch the tree in one call + individual files, staying well within limits.
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 from na0s.layer15.base import (
     ApplyResult,
-    RateLimitError,
     SchemaValidationError,
     SourceSnapshot,
     SourceUnavailableError,
@@ -45,11 +39,9 @@ from na0s.layer15.config import (
     ATLAS_MAPPING_FILE,
     ATLAS_RAW_URL,
     ATLAS_TECHNIQUES_PATH,
-    HTTP_BACKOFF_FACTOR,
-    HTTP_MAX_RETRIES,
-    HTTP_TIMEOUT_SECONDS,
 )
 from na0s.layer15.diff_engine import TaxonomyDiffEngine
+from na0s.layer15.http_utils import fetch_json, fetch_text, github_headers
 
 logger = logging.getLogger(__name__)
 
@@ -73,106 +65,11 @@ def _get_yaml():
     return _yaml
 
 
-def _github_headers(token: Optional[str] = None) -> Dict[str, str]:
-    """Build GitHub API request headers."""
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "Na0S-Layer15-ThreatIntelSync",
-    }
-    tok = token or os.environ.get("GITHUB_TOKEN", "")
-    if tok:
-        headers["Authorization"] = f"token {tok}"
-    return headers
 
-
-def _fetch_json(
-    url: str,
-    headers: Optional[Dict[str, str]] = None,
-    timeout: int = HTTP_TIMEOUT_SECONDS,
-) -> Tuple[Dict[str, Any], Dict[str, str]]:
-    """Fetch JSON from a URL with retry and error handling.
-
-    Returns (parsed_json, response_headers).
-
-    Raises SourceUnavailableError on network errors,
-    RateLimitError on 403 with rate limit headers.
-    """
-    headers = headers or {}
-    last_error: Optional[Exception] = None
-
-    for attempt in range(HTTP_MAX_RETRIES):
-        try:
-            req = Request(url, headers=headers)
-            with urlopen(req, timeout=timeout) as resp:
-                if resp.status != 200:
-                    body = resp.read().decode("utf-8", errors="replace")
-                    logger.warning(
-                        "ATLAS API returned %d for %s: %s",
-                        resp.status,
-                        url,
-                        body[:200],
-                    )
-                    raise SourceUnavailableError(
-                        f"HTTP {resp.status} from {url}"
-                    )
-                resp_headers = {
-                    k.lower(): v for k, v in resp.getheaders()
-                }
-                data = json.loads(resp.read().decode("utf-8"))
-                return data, resp_headers
-        except HTTPError as e:
-            if e.code == 403:
-                # Check for rate limiting
-                remaining = e.headers.get("X-RateLimit-Remaining", "")
-                if remaining == "0":
-                    reset_ts = e.headers.get("X-RateLimit-Reset", "")
-                    raise RateLimitError(
-                        f"GitHub rate limit exceeded. Resets at {reset_ts}"
-                    )
-            if e.code == 404:
-                raise SourceUnavailableError(f"Not found: {url}")
-            last_error = e
-            logger.warning(
-                "ATLAS fetch attempt %d/%d failed (HTTP %d): %s",
-                attempt + 1,
-                HTTP_MAX_RETRIES,
-                e.code,
-                str(e),
-            )
-        except (URLError, OSError) as e:
-            last_error = e
-            logger.warning(
-                "ATLAS fetch attempt %d/%d failed: %s",
-                attempt + 1,
-                HTTP_MAX_RETRIES,
-                str(e),
-            )
-
-        if attempt < HTTP_MAX_RETRIES - 1:
-            backoff = HTTP_BACKOFF_FACTOR ** (attempt + 1)
-            logger.info("Retrying in %ds...", backoff)
-            time.sleep(backoff)
-
-    raise SourceUnavailableError(
-        f"Failed to fetch {url} after {HTTP_MAX_RETRIES} attempts: {last_error}"
-    )
-
-
-def _fetch_text(
-    url: str,
-    headers: Optional[Dict[str, str]] = None,
-    timeout: int = HTTP_TIMEOUT_SECONDS,
-) -> str:
-    """Fetch raw text from a URL."""
-    headers = headers or {}
-    try:
-        req = Request(url, headers=headers)
-        with urlopen(req, timeout=timeout) as resp:
-            if resp.status != 200:
-                raise SourceUnavailableError(f"HTTP {resp.status} from {url}")
-            return resp.read().decode("utf-8")
-    except (HTTPError, URLError, OSError) as e:
-        raise SourceUnavailableError(f"Failed to fetch {url}: {e}")
+# Backward-compat aliases for tests that mock atlas_sync._fetch_json etc.
+_github_headers = github_headers
+_fetch_json = fetch_json
+_fetch_text = fetch_text
 
 
 class AtlasSync(ThreatIntelSource):

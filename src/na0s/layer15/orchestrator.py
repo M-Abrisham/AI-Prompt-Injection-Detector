@@ -1,3 +1,4 @@
+
 """Layer 15 Orchestrator — runs all threat intel sources and produces reports.
 
 This is the main entry point invoked by the GitHub Actions workflow and
@@ -84,7 +85,16 @@ class Orchestrator:
         """
         reports: List[SyncReport] = []
 
+        from na0s.layer15.http_utils import check_rate_limit
+
         for source in self.sources:
+            # Proactive rate limit check between sources
+            if not check_rate_limit():
+                logger.warning(
+                    "GitHub API rate limit low — skipping remaining sources"
+                )
+                break
+
             logger.info("--- Syncing: %s ---", source.name)
             try:
                 report = source.sync(dry_run=self.dry_run)

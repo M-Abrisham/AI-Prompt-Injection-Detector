@@ -139,9 +139,9 @@ class TestGarakFetchLatest:
             return ""
 
         with patch(
-            "na0s.layer15.garak_sync._fetch_json", side_effect=mock_fetch_json
+            "na0s.layer15.garak_sync.fetch_json", side_effect=mock_fetch_json
         ), patch(
-            "na0s.layer15.garak_sync._fetch_text", side_effect=mock_fetch_text
+            "na0s.layer15.garak_sync.fetch_text", side_effect=mock_fetch_text
         ):
             snapshot = garak.fetch_latest()
 
@@ -164,7 +164,7 @@ class TestGarakFetchLatest:
             return MOCK_REPO_INFO, {}
 
         with patch(
-            "na0s.layer15.garak_sync._fetch_json", side_effect=mock_fetch_json
+            "na0s.layer15.garak_sync.fetch_json", side_effect=mock_fetch_json
         ):
             snapshot = garak.fetch_latest()
             assert snapshot.version == "main"
@@ -190,9 +190,9 @@ class TestGarakFetchLatest:
             raise AssertionError(f"Should not fetch {url}")
 
         with patch(
-            "na0s.layer15.garak_sync._fetch_json", side_effect=mock_fetch_json
+            "na0s.layer15.garak_sync.fetch_json", side_effect=mock_fetch_json
         ), patch(
-            "na0s.layer15.garak_sync._fetch_text", side_effect=mock_fetch_text
+            "na0s.layer15.garak_sync.fetch_text", side_effect=mock_fetch_text
         ):
             snapshot = garak.fetch_latest()
             assert len(snapshot.techniques) == 4
@@ -206,7 +206,7 @@ class TestGarakFetchLatest:
             return MOCK_REPO_INFO, {}
 
         with patch(
-            "na0s.layer15.garak_sync._fetch_json", side_effect=mock_fetch_json
+            "na0s.layer15.garak_sync.fetch_json", side_effect=mock_fetch_json
         ):
             snapshot = garak.fetch_latest()
             assert len(snapshot.techniques) == 0

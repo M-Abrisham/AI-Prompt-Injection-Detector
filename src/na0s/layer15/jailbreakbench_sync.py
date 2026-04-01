@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from na0s.layer15.atlas_sync import _fetch_json
 from na0s.layer15.base import (
     ApplyResult,
     SourceSnapshot,
@@ -33,21 +32,9 @@ from na0s.layer15.config import (
     JAILBREAKBENCH_GITHUB_REPO,
 )
 from na0s.layer15.diff_engine import TaxonomyDiffEngine
+from na0s.layer15.http_utils import fetch_json, github_headers
 
 logger = logging.getLogger(__name__)
-
-
-def _github_headers(token: Optional[str] = None) -> Dict[str, str]:
-    import os
-
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "Na0S-Layer15-ThreatIntelSync",
-    }
-    tok = token or os.environ.get("GITHUB_TOKEN", "")
-    if tok:
-        headers["Authorization"] = f"token {tok}"
-    return headers
 
 
 def _scan_repo_datasets(
@@ -62,18 +49,22 @@ def _scan_repo_datasets(
     """
     api_url = f"https://api.github.com/repos/{owner}/{repo}"
 
-    repo_info, _ = _fetch_json(api_url, headers=headers)
+    repo_info, _ = fetch_json(api_url, headers=headers)
     default_branch = repo_info.get("default_branch", "main")
 
     branch_url = f"{api_url}/branches/{default_branch}"
-    branch_info, _ = _fetch_json(branch_url, headers=headers)
+    branch_info, _ = fetch_json(branch_url, headers=headers)
     commit_sha = branch_info["commit"]["sha"]
 
     tree_url = f"{api_url}/git/trees/{commit_sha}?recursive=1"
-    tree_data, _ = _fetch_json(tree_url, headers=headers)
+    tree_data, _ = fetch_json(tree_url, headers=headers)
 
-    # Find data files (CSV, JSON, JSONL, pickle, etc.)
+    # Find data files in dataset-related directories only.
+    # Excludes config files (package.json, tsconfig.json, etc.) and
+    # CI/tooling directories (.github/, node_modules/).
     data_extensions = {".csv", ".json", ".jsonl", ".pkl", ".parquet", ".tsv"}
+    data_dirs = {"data", "datasets", "dataset", "benchmark", "results"}
+    exclude_names = {"package.json", "package-lock.json", "tsconfig.json"}
     techniques = []
 
     for item in tree_data.get("tree", []):
@@ -81,7 +72,15 @@ def _scan_repo_datasets(
         if item.get("type") != "blob":
             continue
         p = Path(path)
-        if p.suffix in data_extensions:
+        if p.name in exclude_names:
+            continue
+        # Only include files under data-related directories
+        top_dir = p.parts[0].lower() if p.parts else ""
+        if top_dir.startswith(".") or top_dir in ("node_modules", "src", "docs"):
+            continue
+        if p.suffix in data_extensions and (
+            top_dir in data_dirs or len(p.parts) == 1
+        ):
             techniques.append(
                 TechniqueEntry(
                     id=f"{prefix}.{path}",
@@ -119,7 +118,7 @@ class JailbreakBenchSync(ThreatIntelSource):
         snapshots_dir: Optional[Path] = None,
     ):
         super().__init__(snapshots_dir=snapshots_dir)
-        self._headers = _github_headers(github_token)
+        self._headers = github_headers(github_token)
         self._diff_engine = TaxonomyDiffEngine()
 
     def fetch_latest(self) -> SourceSnapshot:

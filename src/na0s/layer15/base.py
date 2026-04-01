@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -73,14 +74,43 @@ class SourceSnapshot:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> SourceSnapshot:
-        """Deserialize from a JSON-safe dict."""
-        techniques = [
-            TechniqueEntry(**t) for t in data.get("techniques", [])
-        ]
+        """Deserialize from a JSON-safe dict.
+
+        Raises SchemaValidationError on missing keys or invalid values.
+        """
+        try:
+            source_name = data["source_name"]
+            version = data["version"]
+            fetched_at = datetime.fromisoformat(data["fetched_at"])
+        except KeyError as exc:
+            raise SchemaValidationError(
+                f"Snapshot missing required key: {exc}"
+            ) from exc
+        except (ValueError, TypeError) as exc:
+            raise SchemaValidationError(
+                f"Snapshot has invalid fetched_at timestamp: {exc}"
+            ) from exc
+
+        techniques = []
+        for t in data.get("techniques", []):
+            try:
+                # Filter to known fields to avoid TypeError on extra keys
+                known = {
+                    "id", "name", "description", "severity",
+                    "category", "metadata",
+                }
+                techniques.append(
+                    TechniqueEntry(**{k: v for k, v in t.items() if k in known})
+                )
+            except TypeError as exc:
+                raise SchemaValidationError(
+                    f"Invalid technique entry: {exc}"
+                ) from exc
+
         return cls(
-            source_name=data["source_name"],
-            fetched_at=datetime.fromisoformat(data["fetched_at"]),
-            version=data["version"],
+            source_name=source_name,
+            fetched_at=fetched_at,
+            version=version,
             etag=data.get("etag", ""),
             techniques=techniques,
             raw_metadata=data.get("raw_metadata", {}),
@@ -269,28 +299,43 @@ class ThreatIntelSource(ABC):
         ...
 
     def load_last_snapshot(self) -> Optional[SourceSnapshot]:
-        """Load the most recent snapshot for this source from disk."""
+        """Load the most recent snapshot for this source from disk.
+
+        Returns None if the file doesn't exist or is corrupt.
+        """
         snapshot_file = self.snapshots_dir / f"{self.name}_snapshot.json"
         if not snapshot_file.exists():
             logger.info(
                 "No previous snapshot for %s — first sync", self.name
             )
             return None
-        with open(snapshot_file) as f:
-            data = json.load(f)
-        return SourceSnapshot.from_dict(data)
+        try:
+            with open(snapshot_file) as f:
+                data = json.load(f)
+            return SourceSnapshot.from_dict(data)
+        except (json.JSONDecodeError, SchemaValidationError) as exc:
+            logger.warning(
+                "Corrupt snapshot for %s, treating as first sync: %s",
+                self.name,
+                exc,
+            )
+            return None
 
     def save_snapshot(self, snapshot: SourceSnapshot) -> None:
-        """Persist a snapshot to disk for future diffing."""
+        """Persist a snapshot to disk for future diffing.
+
+        Uses atomic write (temp file + rename) to avoid corruption
+        if the process crashes mid-write.
+        """
         snapshot_file = self.snapshots_dir / f"{self.name}_snapshot.json"
-        with open(snapshot_file, "w") as f:
+        tmp_file = snapshot_file.with_suffix(".tmp")
+        with open(tmp_file, "w") as f:
             json.dump(snapshot.to_dict(), f, indent=2)
+        tmp_file.rename(snapshot_file)
         logger.info("Saved snapshot for %s (version=%s)", self.name, snapshot.version)
 
     def sync(self, dry_run: bool = False) -> SyncReport:
         """Full sync pipeline: fetch → diff → apply → report."""
-        import time
-
         start = time.monotonic()
 
         previous = self.load_last_snapshot()
@@ -307,10 +352,8 @@ class ThreatIntelSource(ABC):
         taxonomy_diff = self.diff(previous, current)
         result = self.apply(taxonomy_diff, dry_run=dry_run)
 
-        if not dry_run and taxonomy_diff.has_changes:
-            self.save_snapshot(current)
-        elif not taxonomy_diff.has_changes:
-            # Still save to update the fetched_at timestamp
+        if not dry_run:
+            # Save snapshot to update fetched_at (even if no changes)
             self.save_snapshot(current)
 
         elapsed = time.monotonic() - start

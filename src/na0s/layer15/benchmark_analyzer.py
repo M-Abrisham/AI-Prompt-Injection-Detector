@@ -141,13 +141,20 @@ class BenchmarkAnalyzer:
             logger.info("Snapshots directory does not exist: %s", self.snapshots_dir)
             return snapshots
 
+        # Only load benchmark-related snapshots (not ATLAS, Garak, etc.)
+        benchmark_names = {"jailbreakbench", "harmbench"}
         for path in sorted(self.snapshots_dir.glob("*_snapshot.json")):
             try:
                 with open(path) as f:
                     data = json.load(f)
                 snap = SourceSnapshot.from_dict(data)
-                snapshots[snap.source_name] = snap
-            except (json.JSONDecodeError, KeyError, TypeError) as exc:
+                # Filter: only include snapshots with benchmark techniques
+                if snap.source_name in benchmark_names or any(
+                    t.id.startswith(("jailbreakbench", "harmbench"))
+                    for t in snap.techniques[:5]  # check first few
+                ):
+                    snapshots[snap.source_name] = snap
+            except (json.JSONDecodeError, KeyError, TypeError, Exception) as exc:
                 logger.warning("Skipping invalid snapshot %s: %s", path.name, exc)
         return snapshots
 
@@ -257,7 +264,10 @@ class BenchmarkAnalyzer:
                 if item_id not in all_matched_bench_ids:
                     unmatched_bench_ids.add(item_id)
 
-        # Assign unmatched items as gaps to the *closest* category.
+        # Assign unmatched items as gaps to the *closest* category,
+        # but only if similarity is above a minimum floor (0.05) to
+        # avoid assigning completely unrelated items.
+        GAP_MIN_SIMILARITY = 0.05
         for item_id in unmatched_bench_ids:
             best_cat_idx = -1
             best_sim = -1.0
@@ -273,7 +283,7 @@ class BenchmarkAnalyzer:
                 if sim > best_sim:
                     best_sim = sim
                     best_cat_idx = idx
-            if best_cat_idx >= 0:
+            if best_cat_idx >= 0 and best_sim >= GAP_MIN_SIMILARITY:
                 for t in benchmark_techniques.get(bench_name_for_item, []):
                     if t.id == item_id:
                         coverage_list[best_cat_idx].gaps.append(

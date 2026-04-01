@@ -376,19 +376,12 @@ class DashboardGenerator:
             for bn in benchmark_names:
                 count = cov.benchmark_matches.get(bn, 0)
                 if count > 0:
-                    # Determine per-cell level based on count relative
-                    # to category techniques.
                     ratio = (
                         count / cov.na0s_technique_count
                         if cov.na0s_technique_count
                         else 0
                     )
-                    if ratio >= 0.3:
-                        cls = "cell-strong"
-                    elif count > 0:
-                        cls = "cell-partial"
-                    else:
-                        cls = "cell-none"
+                    cls = "cell-strong" if ratio >= 0.3 else "cell-partial"
                     bench_cells += f'<td class="{cls}">{count}</td>'
                 else:
                     bench_cells += '<td class="cell-none">0</td>'
@@ -413,4 +406,5 @@ def _esc(text: str) -> str:
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
+        .replace("'", "&#39;")
     )
