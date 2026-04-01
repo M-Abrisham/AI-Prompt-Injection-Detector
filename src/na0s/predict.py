@@ -247,6 +247,37 @@ _cached_vectorizer = None
 _cached_model = None
 _model_cache_lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# LAYER16: Singleton ConversationSecurityMonitor — persists session state
+# across scan() calls. Uses same double-checked locking pattern as model cache.
+# ---------------------------------------------------------------------------
+_conversation_monitor = None
+_conversation_monitor_lock = threading.Lock()
+
+
+def _get_conversation_monitor():
+    """Return the shared ConversationSecurityMonitor, creating on first call.
+
+    Thread-safe via double-checked locking. The monitor must persist so
+    that session state (turns, risk scores, alerts) survives across calls.
+    """
+    global _conversation_monitor
+    if _conversation_monitor is None:
+        with _conversation_monitor_lock:
+            if _conversation_monitor is None:
+                from na0s.layer16.conversation_monitor import ConversationSecurityMonitor
+                _conversation_monitor = ConversationSecurityMonitor()
+    return _conversation_monitor
+
+
+def _reset_conversation_monitor():
+    """Reset the singleton monitor. FOR TESTING ONLY."""
+    global _conversation_monitor
+    with _conversation_monitor_lock:
+        if _conversation_monitor is not None:
+            _conversation_monitor.cleanup()
+        _conversation_monitor = None
+
 
 def _get_cached_models() -> Tuple:
     """Return (vectorizer, model), loading from disk only on first call.
@@ -1653,11 +1684,13 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         perplexity_score=round(perplexity_score, 4),
     )
     # LAYER16: Multi-turn detection (optional, only when session_id provided)
+    # FIX: Use singleton monitor so session state persists across scan() calls.
+    # Without this, every call creates a fresh monitor with no memory of previous
+    # turns, making multi-turn detection non-functional.
     if session_id:
         try:
-            from na0s.layer16.conversation_monitor import ConversationSecurityMonitor
-            _l16 = ConversationSecurityMonitor()
-            analysis = _l16.process_turn(
+            monitor = _get_conversation_monitor()
+            analysis = monitor.process_turn(
                 text=text, session_id=session_id,
                 risk_score=result.risk_score, label=result.label,
             )
