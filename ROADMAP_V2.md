@@ -1259,14 +1259,14 @@ Layer 14 covers testing infrastructure and automation. Two evaluation scripts ex
 
 ---
 
-## Layer 15: Threat Intelligence Sync — Tasks: 4/14 (29%)
+## Layer 15: Threat Intelligence Sync — Tasks: 14/18 (78%)
 
-**Files**: `scripts/sync_datasets.py` (partial — syncs data but no threat intel feeds), `data/datasets.yaml` (11 sources), `data/taxonomy.yaml`, `data/tags.misp.tsv`
-**Tests**: None
-**Status**: **NOT implemented** — static taxonomy only, zero automated feeds
+**Files**: `src/na0s/layer15/` (13 modules), `.github/workflows/threat_intel_sync.yml`, `scripts/sync_datasets.py`, `data/datasets.yaml`, `data/taxonomy.yaml`, `data/tags.misp.tsv`
+**Tests**: 83 tests across 6 test files (`tests/test_layer15_*.py`)
+**Status**: **Implemented** — all P0/P1/P2 components built; P2 stubs need full algorithm implementation; upstream endpoints need live verification
 
 ### Updated Description
-Layer 15 should provide automated synchronization with external threat intelligence sources to keep the detector current with evolving attack techniques. Currently, the project has static references to OWASP-LLM, AVID, and LMRC taxonomies in `taxonomy.yaml` and `tags.misp.tsv`, and `sync_datasets.py` can download 11 external datasets (3 GitHub CSVs + 8 HuggingFace repos) with SHA-256 freshness checking. However, there is **zero automated update mechanism** — no cron jobs, no GitHub Actions, no API clients for any threat intel source. Dataset staleness is a systemic risk as the threat landscape evolves weekly.
+Layer 15 provides automated synchronization with external threat intelligence sources to keep the detector current with evolving attack techniques. The layer monitors 7 upstream sources (MITRE ATLAS, Garak, AIID, JailbreakBench, HarmBench, OWASP LLM Top 10, SafetyPrompts) via a weekly GitHub Actions cron workflow. Each source implements a `ThreatIntelSource` interface (fetch → diff → apply) with idempotent sync, structured diffs (JSON + Markdown), and graceful partial failure. The taxonomy diff engine powers all sources and generates PR-ready changelogs. P2 stubs define the interface for incident-to-sample conversion (template-based generation working) and TAP/PAIR automated red teaming.
 
 ### TODO List
 
@@ -1276,22 +1276,28 @@ Layer 15 should provide automated synchronization with external threat intellige
 - [x] `sync_datasets.py` with SHA-256 freshness checking and lock file — `scripts/`
 - [x] Manual dataset download with `--force` option
 
-#### NEW (All items are new — layer not yet implemented)
-- [ ] **MITRE ATLAS YAML sync** — Monitor ATLAS GitHub repo for new techniques, auto-map to local taxonomy. **Priority**: P0.
-- [ ] **Garak probe monitoring** — Track leondz/garak GitHub releases for new probe categories. Auto-generate corresponding local probes. **Priority**: P0.
-- [ ] **AIID GraphQL polling** — Query incidentdatabase.ai for new AI incidents, extract attack patterns for taxonomy expansion. **Priority**: P1.
-- [ ] **JailbreakBench/HarmBench sync** — Auto-download new benchmark datasets for cross-validation. **Priority**: P1.
-- [ ] **OWASP LLM Top 10 monitoring** — Detect annual taxonomy revisions, alert on changes. **Priority**: P1.
-- [ ] **GitHub Actions weekly sync** — Scheduled workflow: sync datasets → generate samples → run evaluate_probes → report detection rate changes. **Priority**: P0.
-- [ ] **Taxonomy diff detection** — Compare old vs new taxonomy versions, highlight new techniques, deprecated ones, reclassifications. **Priority**: P1.
-- [ ] **Incident-to-sample pipeline** — Convert real-world incident reports (AIID) into training samples. **Priority**: P2.
-- [ ] **Add SafetyPrompts.com monitoring** — Living catalogue of 144+ prompt injection datasets. Monitor for new dataset additions. Source: Automation gap #60. **Priority**: P1.
-- [ ] **Add TAP/PAIR automated red teaming** — Tree of Attacks with Pruning (TAP) and Prompt Automatic Iterative Refinement (PAIR) alongside Rainbow Teaming. Source: Automation gap #61. **Priority**: P2.
+#### NEW
+- [x] **MITRE ATLAS YAML sync** — Monitor ATLAS GitHub repo for new techniques, auto-map to local taxonomy. **Priority**: P0. **Done**: `src/na0s/layer15/atlas_sync.py` (16 tests).
+- [x] **Garak probe monitoring** — Track leondz/garak GitHub releases for new probe categories. Auto-generate corresponding local probes. **Priority**: P0. **Done**: `src/na0s/layer15/garak_sync.py` (12 tests).
+- [x] **AIID GraphQL polling** — Query incidentdatabase.ai for new AI incidents, extract attack patterns for taxonomy expansion. **Priority**: P1. **Done**: `src/na0s/layer15/aiid_sync.py`.
+- [x] **JailbreakBench/HarmBench sync** — Auto-download new benchmark datasets for cross-validation. **Priority**: P1. **Done**: `src/na0s/layer15/jailbreakbench_sync.py`.
+- [x] **OWASP LLM Top 10 monitoring** — Detect annual taxonomy revisions, alert on changes. **Priority**: P1. **Done**: `src/na0s/layer15/owasp_sync.py`.
+- [x] **GitHub Actions weekly sync** — Scheduled workflow: sync datasets → generate samples → run evaluate_probes → report detection rate changes. **Priority**: P0. **Done**: `.github/workflows/threat_intel_sync.yml` + `src/na0s/layer15/orchestrator.py` (8 tests).
+- [x] **Taxonomy diff detection** — Compare old vs new taxonomy versions, highlight new techniques, deprecated ones, reclassifications. **Priority**: P1. **Done**: `src/na0s/layer15/diff_engine.py` (18 tests). Outputs JSON + Markdown.
+- [x] **Incident-to-sample pipeline** — Convert real-world incident reports (AIID) into training samples. **Priority**: P2. **Done**: `src/na0s/layer15/incident_to_sample.py` — template-based generation implemented; LLM-assisted and NLP extraction marked as FUTURE.
+- [x] **Add SafetyPrompts.com monitoring** — Living catalogue of 144+ prompt injection datasets. Monitor for new dataset additions. Source: Automation gap #60. **Priority**: P1. **Done**: `src/na0s/layer15/safetyprompts_sync.py`.
+- [x] **Add TAP/PAIR automated red teaming** — Tree of Attacks with Pruning (TAP) and Prompt Automatic Iterative Refinement (PAIR) alongside Rainbow Teaming. Source: Automation gap #61. **Priority**: P2. **Done**: `src/na0s/layer15/red_teaming.py` — interface + evaluate() implemented; generate() stubbed for both TAP and PAIR.
+
+#### REMAINING
+- [ ] **Verify upstream API endpoints** — ATLAS repo tree path, AIID GraphQL schema, and OWASP README format need verification on first live `workflow_dispatch --dry-run`. See `# TODO: VERIFY` comments in `config.py`.
+- [ ] **LLM-assisted incident-to-sample generation** — Upgrade `incident_to_sample.py` to use LLM reformulation for higher-quality test samples (FUTURE comment in code).
+- [ ] **Full TAP/PAIR implementation** — Implement `generate()` methods with attacker LLM + judge LLM (FUTURE comment in `red_teaming.py`).
+- [ ] **Cross-benchmark validation dashboard** — Visualization of overlap/gaps between Na0S test corpus and JailbreakBench/HarmBench datasets.
 
 ### Implementation Plan
-**Phase 1 (P0)**: GitHub Actions weekly sync workflow, MITRE ATLAS monitoring, Garak probe tracking
-**Phase 2 (P1)**: AIID polling, JailbreakBench sync, taxonomy diff detection, OWASP monitoring, SafetyPrompts.com monitoring
-**Phase 3 (P2)**: Incident-to-sample pipeline, TAP/PAIR red teaming, cross-benchmark validation dashboards
+**Phase 1 (P0)**: ~~GitHub Actions weekly sync workflow, MITRE ATLAS monitoring, Garak probe tracking~~ ✅ Complete
+**Phase 2 (P1)**: ~~AIID polling, JailbreakBench sync, taxonomy diff detection, OWASP monitoring, SafetyPrompts.com monitoring~~ ✅ Complete
+**Phase 3 (P2)**: ~~Incident-to-sample pipeline, TAP/PAIR red teaming~~ ✅ Stubs complete — cross-benchmark validation dashboard remaining
 
 ---
 

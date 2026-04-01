@@ -1,0 +1,128 @@
+name: Threat Intel Sync (Layer 15)
+
+# Schedule: Weekly on Sunday at 02:00 UTC (avoids peak hours)
+on:
+  schedule:
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (report only, no changes)'
+        required: false
+        default: 'false'
+        type: boolean
+      sources:
+        description: 'Specific sources to sync (comma-separated, e.g. atlas,garak)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
+          pip install PyYAML
+
+      - name: Run threat intel sync
+        id: sync
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS="--json"
+
+          # Handle dry_run input
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            ARGS="$ARGS --dry-run"
+          fi
+
+          # Handle source filtering
+          if [[ -n "${{ inputs.sources }}" ]]; then
+            IFS=',' read -ra SOURCES <<< "${{ inputs.sources }}"
+            ARGS="$ARGS --sources ${SOURCES[*]}"
+          fi
+
+          echo "Running: python -m na0s.layer15.orchestrator $ARGS"
+          python -m na0s.layer15.orchestrator $ARGS > sync_report.json
+
+          # Extract change count for later steps
+          CHANGES=$(python3 -c "import json; d=json.load(open('sync_report.json')); print(d.get('total_changes', 0))")
+          echo "total_changes=$CHANGES" >> "$GITHUB_OUTPUT"
+
+      - name: Generate markdown report
+        if: steps.sync.outputs.total_changes != '0'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS=""
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [[ -n "${{ inputs.sources }}" ]]; then
+            IFS=',' read -ra SOURCES <<< "${{ inputs.sources }}"
+            ARGS="$ARGS --sources ${SOURCES[*]}"
+          fi
+          python -m na0s.layer15.orchestrator $ARGS > sync_report.md
+
+      - name: Create PR with changes
+        if: steps.sync.outputs.total_changes != '0' && inputs.dry_run != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="threat-intel-sync/$(date +%Y%m%d)"
+          git checkout -b "$BRANCH"
+
+          # Stage only threat intel data files
+          git add data/threat_intel_snapshots/ data/threat_intel_reports/ || true
+
+          # Check if there are actual changes to commit
+          if git diff --cached --quiet; then
+            echo "No file changes to commit"
+            exit 0
+          fi
+
+          git config user.name "Na0S Threat Intel Bot"
+          git config user.email "na0s-bot@users.noreply.github.com"
+          git commit -m "feat(layer15): weekly threat intel sync $(date +%Y-%m-%d)"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "Threat Intel Sync — $(date +%Y-%m-%d)" \
+            --body-file sync_report.md \
+            --label "threat-intel,automated"
+
+      - name: Post summary (no changes)
+        if: steps.sync.outputs.total_changes == '0'
+        run: |
+          echo "### Threat Intel Sync Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "No changes detected from any upstream sources." >> "$GITHUB_STEP_SUMMARY"
+          echo "Next run: $(date -d 'next sunday 02:00' +%Y-%m-%d 2>/dev/null || echo 'next week')" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post summary (with changes)
+        if: steps.sync.outputs.total_changes != '0'
+        run: |
+          echo "### Threat Intel Sync Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**${{ steps.sync.outputs.total_changes }}** changes detected." >> "$GITHUB_STEP_SUMMARY"
+          cat sync_report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true

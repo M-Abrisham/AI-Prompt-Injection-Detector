@@ -90,6 +90,9 @@ data = [
     "tqdm>=4.65",
     "pyarrow>=14.0",
 ]
+threatintel = [
+    "PyYAML>=6.0.1,<7",
+]
 audit = [
     "cleanlab>=2.6.0",
 ]
