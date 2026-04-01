@@ -34,6 +34,12 @@ class ScanResult:
     canary_leaks: list = field(default_factory=list)        # Layer 10: canary leak details
     elapsed_ms: float = 0.0
 
+    # Layer 16: Multi-turn detection  # LAYER16
+    multi_turn_alerts: list = field(default_factory=list)
+    multi_turn_risk_trend: list = field(default_factory=list)
+    escalation_detected: bool = False
+    session_id: str = ""
+
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
 

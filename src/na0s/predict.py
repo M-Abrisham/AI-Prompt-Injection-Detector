@@ -1167,7 +1167,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     return label, composite, hits, l0, detailed_hits, embedding_info, perplexity_score
 
 
-def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None) -> ScanResult:
+def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, session_id: str = "") -> ScanResult:  # LAYER16: session_id
     """Unified entry point returning a structured ScanResult.
 
     Parameters
@@ -1652,6 +1652,22 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None) -> Sca
         model_version=_get_model_version(),
         perplexity_score=round(perplexity_score, 4),
     )
+    # LAYER16: Multi-turn detection (optional, only when session_id provided)
+    if session_id:
+        try:
+            from na0s.layer16.conversation_monitor import ConversationSecurityMonitor
+            _l16 = ConversationSecurityMonitor()
+            analysis = _l16.process_turn(
+                text=text, session_id=session_id,
+                risk_score=result.risk_score, label=result.label,
+            )
+            result.multi_turn_alerts = [a.__dict__ for a in analysis.alerts] if analysis.alerts else []
+            result.multi_turn_risk_trend = analysis.risk_trend
+            result.escalation_detected = analysis.escalation_detected
+            result.session_id = session_id
+        except Exception:
+            pass  # Layer 16 failure is non-fatal
+
     result.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
     return result
 

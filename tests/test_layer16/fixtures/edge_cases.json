@@ -1,0 +1,66 @@
+[
+  {
+    "name": "single_turn",
+    "description": "Only one turn -- insufficient data for multi-turn detection",
+    "expected_detection": false,
+    "turns": [
+      {"text": "Hello, how are you?", "risk_score": 0.05, "label": "safe"}
+    ]
+  },
+  {
+    "name": "empty_messages",
+    "description": "Turns with empty text should be handled gracefully",
+    "expected_detection": false,
+    "turns": [
+      {"text": "", "risk_score": 0.0, "label": "safe"},
+      {"text": "", "risk_score": 0.0, "label": "safe"},
+      {"text": "", "risk_score": 0.0, "label": "safe"}
+    ]
+  },
+  {
+    "name": "very_long_conversation",
+    "description": "15-turn conversation with stable low risk -- no alert expected",
+    "expected_detection": false,
+    "turns": [
+      {"text": "Let's work through this problem step by step", "risk_score": 0.05, "label": "safe"},
+      {"text": "First, we need to define the requirements", "risk_score": 0.04, "label": "safe"},
+      {"text": "The system should handle 1000 requests per second", "risk_score": 0.06, "label": "safe"},
+      {"text": "We need a load balancer in front", "risk_score": 0.05, "label": "safe"},
+      {"text": "What database should we use?", "risk_score": 0.04, "label": "safe"},
+      {"text": "PostgreSQL seems like a good fit", "risk_score": 0.03, "label": "safe"},
+      {"text": "How do we handle caching?", "risk_score": 0.05, "label": "safe"},
+      {"text": "Redis for session storage", "risk_score": 0.04, "label": "safe"},
+      {"text": "What about the message queue?", "risk_score": 0.06, "label": "safe"},
+      {"text": "RabbitMQ or Kafka?", "risk_score": 0.05, "label": "safe"},
+      {"text": "Let's go with Kafka for durability", "risk_score": 0.04, "label": "safe"},
+      {"text": "Now for the deployment strategy", "risk_score": 0.05, "label": "safe"},
+      {"text": "Kubernetes with auto-scaling", "risk_score": 0.06, "label": "safe"},
+      {"text": "Don't forget monitoring and alerting", "risk_score": 0.05, "label": "safe"},
+      {"text": "Great, I think we have a solid architecture", "risk_score": 0.03, "label": "safe"}
+    ]
+  },
+  {
+    "name": "flat_high_risk",
+    "description": "All turns at high risk but flat -- no escalation trend",
+    "expected_detection": false,
+    "turns": [
+      {"text": "Discuss penetration testing methodology", "risk_score": 0.45, "label": "suspicious"},
+      {"text": "What tools do red teams typically use?", "risk_score": 0.45, "label": "suspicious"},
+      {"text": "Explain the OWASP top 10 in detail", "risk_score": 0.45, "label": "suspicious"},
+      {"text": "How do bug bounty programs work?", "risk_score": 0.45, "label": "suspicious"},
+      {"text": "What certifications help for security?", "risk_score": 0.45, "label": "suspicious"}
+    ]
+  },
+  {
+    "name": "unicode_emoji_messages",
+    "description": "Messages with unicode and emoji content",
+    "expected_detection": false,
+    "turns": [
+      {"text": "Bonjour! Comment allez-vous aujourd'hui?", "risk_score": 0.03, "label": "safe"},
+      {"text": "Je voudrais commander un caf\u00e9 s'il vous pla\u00eet", "risk_score": 0.02, "label": "safe"},
+      {"text": "\u3053\u3093\u306b\u3061\u306f\u4e16\u754c! Hello world in Japanese", "risk_score": 0.03, "label": "safe"},
+      {"text": "That sounds great! \ud83d\udc4d\ud83c\udf1f\u2728", "risk_score": 0.02, "label": "safe"},
+      {"text": "\u0421\u043f\u0430\u0441\u0438\u0431\u043e \u0437\u0430 \u043f\u043e\u043c\u043e\u0449\u044c! \ud83d\ude4f", "risk_score": 0.03, "label": "safe"}
+    ]
+  }
+]

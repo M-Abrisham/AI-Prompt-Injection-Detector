@@ -1,0 +1,62 @@
+[
+  {
+    "name": "customer_support",
+    "description": "Normal support chat about account access",
+    "expected_detection": false,
+    "turns": [
+      {"text": "Hi, I need help with my account", "risk_score": 0.05, "label": "safe"},
+      {"text": "I can't log in since yesterday", "risk_score": 0.05, "label": "safe"},
+      {"text": "I've already tried resetting my password", "risk_score": 0.05, "label": "safe"},
+      {"text": "Can you check if my account is locked?", "risk_score": 0.1, "label": "safe"},
+      {"text": "Great, thanks for your help!", "risk_score": 0.02, "label": "safe"}
+    ]
+  },
+  {
+    "name": "technical_discussion",
+    "description": "Developer asking about API usage",
+    "expected_detection": false,
+    "turns": [
+      {"text": "How do I authenticate with the REST API?", "risk_score": 0.05, "label": "safe"},
+      {"text": "I'm using Python requests library", "risk_score": 0.03, "label": "safe"},
+      {"text": "Can you show me the headers format?", "risk_score": 0.05, "label": "safe"},
+      {"text": "What about rate limiting?", "risk_score": 0.04, "label": "safe"},
+      {"text": "Perfect, that clears things up", "risk_score": 0.02, "label": "safe"}
+    ]
+  },
+  {
+    "name": "code_review",
+    "description": "Reviewing a pull request together",
+    "expected_detection": false,
+    "turns": [
+      {"text": "Can you review this function for me?", "risk_score": 0.05, "label": "safe"},
+      {"text": "The input validation looks weak on line 42", "risk_score": 0.08, "label": "safe"},
+      {"text": "Should I add type hints here?", "risk_score": 0.03, "label": "safe"},
+      {"text": "What about error handling for the edge case?", "risk_score": 0.06, "label": "safe"},
+      {"text": "I'll refactor and push a new commit", "risk_score": 0.02, "label": "safe"}
+    ]
+  },
+  {
+    "name": "multi_part_question",
+    "description": "User asks a complex question across multiple messages",
+    "expected_detection": false,
+    "turns": [
+      {"text": "I have a question about database design", "risk_score": 0.03, "label": "safe"},
+      {"text": "We have a users table and an orders table", "risk_score": 0.03, "label": "safe"},
+      {"text": "Should I use a join table for many-to-many?", "risk_score": 0.04, "label": "safe"},
+      {"text": "What about indexing strategies?", "risk_score": 0.05, "label": "safe"},
+      {"text": "And how do I handle soft deletes?", "risk_score": 0.04, "label": "safe"}
+    ]
+  },
+  {
+    "name": "topic_drift",
+    "description": "Conversation naturally drifts between topics",
+    "expected_detection": false,
+    "turns": [
+      {"text": "What's the weather going to be like tomorrow?", "risk_score": 0.02, "label": "safe"},
+      {"text": "Actually, let me also ask about cooking", "risk_score": 0.03, "label": "safe"},
+      {"text": "How long should I bake a potato?", "risk_score": 0.02, "label": "safe"},
+      {"text": "Oh and one more thing, what time does the store close?", "risk_score": 0.03, "label": "safe"},
+      {"text": "Thanks for all the info!", "risk_score": 0.01, "label": "safe"}
+    ]
+  }
+]
