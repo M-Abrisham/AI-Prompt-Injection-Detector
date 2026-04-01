@@ -8,7 +8,6 @@ degradation so missing deps do not break the monitor.
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -153,16 +152,21 @@ class ConversationSecurityMonitor:
             if flags is None and "technique_tags" in single_turn_result:
                 flags = list(single_turn_result["technique_tags"])
 
-        # 1. Get or auto-create session state
+        # 1. Get or auto-create session state (thread-safe via SessionManager's lock)
         state = self._session_mgr.get_session(session_id)
         if state is None:
-            # Auto-create the session so callers don't need to call
-            # create_session() explicitly.
-            self._session_mgr._sessions[session_id] = ConversationState(
+            # Auto-create: use lock-protected path to avoid TOCTOU race
+            now = datetime.now(timezone.utc)
+            new_state = ConversationState(
                 session_id=session_id,
-                created_at=datetime.now(timezone.utc),
-                last_activity=datetime.now(timezone.utc),
+                created_at=now,
+                last_activity=now,
             )
+            with self._session_mgr._lock:
+                # Re-check under lock — another thread may have created it
+                existing = self._session_mgr._sessions.get(session_id)
+                if existing is None:
+                    self._session_mgr._sessions[session_id] = new_state
             state = self._session_mgr.get_session(session_id)
 
         # 2. Add the turn

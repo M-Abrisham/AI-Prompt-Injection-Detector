@@ -11,7 +11,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from na0s.layer16.config import DEFAULT_TTL_SECONDS, DEFAULT_WINDOW_SIZE, MAX_SESSIONS
 from na0s.layer16.models import ConversationState, SessionConfig
 from na0s.layer16.state import add_turn
 
