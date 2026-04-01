@@ -5,7 +5,7 @@ each fragment appears harmless alone but the assembled result is malicious.
 
 D7 sub-techniques:
     D7.1 -- Token-level splitting with assembly instructions
-    D7.2 -- Multi-turn splitting (stub — requires ConversationSecurityMonitor)
+    D7.2 -- Multi-turn splitting across recent conversation turns
     D7.3 -- Code-block weaponization (exec/eval + attack strings)
     D7.4 -- Comment/metadata payload hiding (HTML/JSON/YAML/XML/SQL)
     D7.5 -- Cross-encoding fragment assembly
@@ -61,6 +61,24 @@ _ATTACK_INDICATORS = re.compile(
     r"override\s+(?:all\s+)?(?:safety|security)|"
     r"disable\s+(?:all\s+)?(?:safety|filters|restrictions)|"
     r"bypass\s+(?:all\s+)?(?:safety|security|restrictions))",
+    re.IGNORECASE,
+)
+
+_MULTITURN_SETUP = re.compile(
+    r"\b(?:rules|guidelines|instructions|system\s+prompt|system\s+instructions|"
+    r"initial\s+configuration|developer\s+instructions?)\b",
+    re.IGNORECASE,
+)
+
+_MULTITURN_REFINEMENT = re.compile(
+    r"\b(?:one\s+by\s+one|step\s+by\s+step|verbatim|exact(?:ly)?|"
+    r"list\s+them|repeat|quote|show\s+(?:me\s+)?the\s+exact)\b",
+    re.IGNORECASE,
+)
+
+_MULTITURN_TARGET = re.compile(
+    r"\b(?:system\s+prompt|system\s+instructions?|initial\s+configuration|"
+    r"exact\s+text|hidden\s+instructions?|developer\s+instructions?)\b",
     re.IGNORECASE,
 )
 
@@ -312,15 +330,12 @@ def detect_cross_encoding(decoded_views: list) -> Optional[FragmentResult]:
 
 
 # ---------------------------------------------------------------------------
-# D7.2 — Multi-turn stub (requires ConversationSecurityMonitor)
+# D7.2 — Multi-turn assembly detection
 # ---------------------------------------------------------------------------
 
 def detect_multiturn_assembly(text: str,
-                              session_history: Optional[list] = None) -> None:
-    """Stub for D7.2 multi-turn fragment assembly detection.
-
-    Returns None when no session history is available. Architecturally
-    ready for when ConversationSecurityMonitor is built.
+                              session_history: Optional[list] = None) -> Optional[FragmentResult]:
+    """Detect D7.2 multi-turn fragment assembly across recent turns.
 
     Parameters
     ----------
@@ -329,11 +344,72 @@ def detect_multiturn_assembly(text: str,
     session_history : list[str] or None
         Previous turns in the conversation, if available.
     """
-    if session_history is None:
+    if not text or session_history is None:
         return None
-    # FUTURE: concatenate recent turns, re-analyze combined text.
-    # Detect when fragments across turns assemble into attack.
-    # Depends on ConversationSecurityMonitor (not yet built).
+
+    recent_turns = [
+        turn.strip()
+        for turn in session_history[-5:]
+        if isinstance(turn, str) and turn.strip()
+    ]
+    current_turn = text.strip()
+    if not current_turn or not recent_turns:
+        return None
+
+    turns = recent_turns + [current_turn]
+    if len(turns) < 2:
+        return None
+
+    individual_attack = any(_ATTACK_INDICATORS.search(turn) for turn in turns)
+
+    combined_views = [
+        " ".join(turns),
+        " ".join(turns[-3:]),
+        "".join(turns),
+    ]
+    for assembled in combined_views:
+        attack_match = _ATTACK_INDICATORS.search(assembled)
+        if attack_match and not individual_attack:
+            fragment_count = min(len(turns), 4)
+            confidence = 0.76 + min(0.12, 0.03 * fragment_count)
+            return FragmentResult(
+                fragment_type="multiturn",
+                fragments_found=turns[-fragment_count:],
+                assembled_text=assembled[:200],
+                assembled_is_malicious=True,
+                technique_ids=["D7", "D7.2"],
+                confidence=round(confidence, 2),
+                matched_patterns=[
+                    "history_window: {}".format(len(turns)),
+                    "assembled_attack: " + attack_match.group(0)[:60],
+                ],
+            )
+
+    setup_hits = [i for i, turn in enumerate(turns[:-1]) if _MULTITURN_SETUP.search(turn)]
+    refinement_hits = [i for i, turn in enumerate(turns) if _MULTITURN_REFINEMENT.search(turn)]
+    target_hits = [i for i, turn in enumerate(turns) if _MULTITURN_TARGET.search(turn)]
+
+    if setup_hits and refinement_hits and target_hits and target_hits[-1] == len(turns) - 1:
+        contributing_turns = {
+            setup_hits[-1],
+            refinement_hits[-1],
+            target_hits[-1],
+        }
+        if len(contributing_turns) >= 2:
+            excerpt_turns = turns[-3:]
+            return FragmentResult(
+                fragment_type="multiturn",
+                fragments_found=excerpt_turns,
+                assembled_text=" ".join(excerpt_turns)[:200],
+                assembled_is_malicious=True,
+                technique_ids=["D7", "D7.2"],
+                confidence=0.78,
+                matched_patterns=[
+                    "history_window: {}".format(len(turns)),
+                    "cross_turn_extraction_chain",
+                ],
+            )
+
     return None
 
 
@@ -342,7 +418,8 @@ def detect_multiturn_assembly(text: str,
 # ---------------------------------------------------------------------------
 
 def detect_fragmented_payload(text: str,
-                              decoded_views: Optional[list] = None) -> Optional[FragmentResult]:
+                              decoded_views: Optional[list] = None,
+                              session_history: Optional[list] = None) -> Optional[FragmentResult]:
     """Run all D7 fragment assembly detectors on the input.
 
     Parameters
@@ -351,6 +428,8 @@ def detect_fragmented_payload(text: str,
         The input text to analyze.
     decoded_views : list[str] or None
         Decoded text segments from obfuscation_scan() for D7.5 detection.
+    session_history : list[str] or None
+        Previous conversation turns for D7.2 multi-turn detection.
 
     Returns
     -------
@@ -366,6 +445,12 @@ def detect_fragmented_payload(text: str,
     r = detect_token_split(text)
     if r:
         results.append(r)
+
+    # D7.2: Multi-turn assembly
+    if session_history:
+        r = detect_multiturn_assembly(text, session_history=session_history)
+        if r:
+            results.append(r)
 
     # D7.3: Code-block weaponization
     r = detect_code_weaponization(text)
@@ -409,6 +494,7 @@ def get_fragment_weight(result: Optional[FragmentResult]) -> float:
 
     _TYPE_WEIGHTS = {
         "token_split": 0.25,
+        "multiturn": 0.30,
         "code_weapon": 0.20,
         "comment_payload": 0.25,
         "cross_encoding": 0.30,
