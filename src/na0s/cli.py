@@ -172,9 +172,16 @@ def _cmd_scan(args):
         return EXIT_BAD_INPUT
 
     threshold = getattr(args, 'threshold', 0.55)
+    session_id = getattr(args, 'session_id', None) or ""
+    if getattr(args, 'new_session', False):
+        from na0s.predict import _get_conversation_monitor
+        monitor = _get_conversation_monitor()
+        session_id = monitor.create_session()
+        print(f"Session: {session_id}", file=sys.stderr)
+
     try:
         from na0s import scan
-        result = scan(text, threshold=threshold)
+        result = scan(text, threshold=threshold, session_id=session_id)
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -284,6 +291,171 @@ def _cmd_version(args):
     return EXIT_CLEAN
 
 
+def _cmd_session(args):
+    """Handle all session subcommands."""
+    from na0s.predict import _get_conversation_monitor
+    from datetime import datetime, timezone
+    import json as json_mod
+
+    try:
+        monitor = _get_conversation_monitor()
+    except Exception as exc:
+        print(f"Error initializing session monitor: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    cmd = getattr(args, 'session_command', None)
+    output_json = getattr(args, 'output_json', False)
+
+    if cmd == "create":
+        sid = monitor.create_session()
+        if output_json:
+            print(json_mod.dumps({"session_id": sid, "status": "created"}))
+        else:
+            print(sid)
+        return EXIT_CLEAN
+
+    elif cmd == "list":
+        sessions = []
+        for sid in monitor._session_mgr.list_active_sessions():
+            state = monitor._session_mgr.get_session(sid)
+            if state is None:
+                continue
+            age = (datetime.now(timezone.utc) - state.created_at).total_seconds()
+            sessions.append({
+                "session_id": sid,
+                "turn_count": len(state.turns),
+                "age_seconds": round(age),
+                "last_activity": state.last_activity.isoformat(),
+            })
+        if output_json:
+            print(json_mod.dumps(sessions, indent=2))
+        else:
+            if not sessions:
+                print("No active sessions.")
+            else:
+                print(f"Active Sessions ({len(sessions)})")
+                print(f"{'ID':<40} {'Turns':>5}  {'Age':>8}")
+                print("-" * 58)
+                for s in sessions:
+                    age_s = s["age_seconds"]
+                    age_str = f"{age_s // 60}m {age_s % 60:02d}s" if age_s >= 60 else f"{age_s}s"
+                    print(f"{s['session_id']:<40} {s['turn_count']:>5}  {age_str:>8}")
+        return EXIT_CLEAN
+
+    elif cmd == "inspect":
+        sid = args.session_id
+        # Prefix matching
+        all_ids = monitor._session_mgr.list_active_sessions()
+        matches = [s for s in all_ids if s.startswith(sid)]
+        if len(matches) == 0:
+            print(f"Session not found: {sid}", file=sys.stderr)
+            return EXIT_BAD_INPUT
+        if len(matches) > 1:
+            print(f"Ambiguous prefix '{sid}', matches: {matches[:5]}", file=sys.stderr)
+            return EXIT_BAD_INPUT
+        full_id = matches[0]
+        state = monitor._session_mgr.get_session(full_id)
+        if state is None:
+            print(f"Session expired: {full_id}", file=sys.stderr)
+            return EXIT_BAD_INPUT
+
+        turns = state.turns
+        max_turns = getattr(args, 'turns', None)
+        if max_turns is not None:
+            turns = turns[-max_turns:]
+
+        data = {
+            "session_id": full_id,
+            "turn_count": len(state.turns),
+            "created_at": state.created_at.isoformat(),
+            "last_activity": state.last_activity.isoformat(),
+            "alert_count": len(state.active_alerts),
+            "risk_trend": [round(t.risk_score, 4) for t in state.turns],
+            "turns": [
+                {"turn": i + 1, "risk": round(t.risk_score, 4),
+                 "text": t.text[:80] + ("..." if len(t.text) > 80 else "")}
+                for i, t in enumerate(turns)
+            ],
+        }
+        if output_json:
+            print(json_mod.dumps(data, indent=2))
+        else:
+            print(f"Session: {full_id}")
+            print(f"Turns: {data['turn_count']}  Alerts: {data['alert_count']}")
+            print(f"Created: {data['created_at']}")
+            # Sparkline
+            chars = " \u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
+            spark = "".join(chars[min(int(v * 8), 8)] for v in data["risk_trend"]) if data["risk_trend"] else ""
+            print(f"Risk trend: {spark}")
+            if data["turns"]:
+                print(f"{'#':>3}  {'Risk':>5}  Text")
+                print("-" * 60)
+                for t in data["turns"]:
+                    print(f"{t['turn']:>3}  {t['risk']:>5.2f}  \"{t['text']}\"")
+        return EXIT_CLEAN
+
+    elif cmd == "expire":
+        sid = args.session_id
+        all_ids = monitor._session_mgr.list_active_sessions()
+        matches = [s for s in all_ids if s.startswith(sid)]
+        if not matches:
+            print(f"Session not found: {sid}", file=sys.stderr)
+            return EXIT_BAD_INPUT
+        for m in matches:
+            monitor._session_mgr.expire_session(m)
+            print(f"Expired: {m}")
+        return EXIT_CLEAN
+
+    elif cmd == "cleanup":
+        dry_run = getattr(args, 'dry_run', False)
+        if dry_run:
+            # Count expired without removing
+            count = 0
+            now = datetime.now(timezone.utc)
+            for sid in monitor._session_mgr.list_active_sessions():
+                state = monitor._session_mgr.get_session(sid)
+                if state and (now - state.last_activity).total_seconds() > monitor._config.ttl_seconds:
+                    count += 1
+            result = {"would_remove": count, "dry_run": True}
+        else:
+            removed = monitor._session_mgr.cleanup_expired()
+            result = {"removed": removed, "dry_run": False}
+        if output_json:
+            print(json_mod.dumps(result))
+        else:
+            if dry_run:
+                print(f"Would remove {result['would_remove']} expired session(s)")
+            else:
+                print(f"Removed {result['removed']} expired session(s)")
+        return EXIT_CLEAN
+
+    elif cmd == "stats":
+        all_sessions = monitor._session_mgr.list_active_sessions()
+        total_turns = 0
+        for sid in all_sessions:
+            state = monitor._session_mgr.get_session(sid)
+            if state:
+                total_turns += len(state.turns)
+        count = len(all_sessions)
+        stats = {
+            "active_sessions": count,
+            "total_turns": total_turns,
+            "avg_turns": round(total_turns / count, 1) if count else 0,
+        }
+        if output_json:
+            print(json_mod.dumps(stats))
+        else:
+            print(f"Active sessions: {stats['active_sessions']}")
+            print(f"Total turns: {stats['total_turns']}")
+            print(f"Avg turns/session: {stats['avg_turns']}")
+        return EXIT_CLEAN
+
+    else:
+        # No subcommand given
+        print("Usage: na0s session {create,list,inspect,expire,cleanup,stats}", file=sys.stderr)
+        return EXIT_USAGE
+
+
 # ── Main parser ────────────────────────────────────────────────────
 
 def main(argv=None):
@@ -331,6 +503,14 @@ def main(argv=None):
         default=0.55,
         help="Decision threshold for the composite score (default: 0.55)",
     )
+    p_scan.add_argument(
+        "--session-id", default=None,
+        help="Session ID for multi-turn detection",
+    )
+    p_scan.add_argument(
+        "--new-session", action="store_true",
+        help="Create new session for this scan",
+    )
     p_scan.set_defaults(func=_cmd_scan)
 
     # ── scan-output ────────────────────────────────────────────────
@@ -353,6 +533,34 @@ def main(argv=None):
     p_ver = sub.add_parser("version", help="Show version and installed extras")
     p_ver.add_argument("--json", action="store_true")
     p_ver.set_defaults(func=_cmd_version)
+
+    # ── session ──────────────────────────────────────────────────
+    p_session = sub.add_parser("session", help="Manage multi-turn sessions (Layer 16)")
+    session_sub = p_session.add_subparsers(dest="session_command")
+
+    p_sc = session_sub.add_parser("create", help="Create a new session")
+    p_sc.add_argument("--ttl", type=int, default=None)
+    p_sc.add_argument("--json", action="store_true", dest="output_json")
+
+    p_sl = session_sub.add_parser("list", help="List active sessions")
+    p_sl.add_argument("--json", action="store_true", dest="output_json")
+
+    p_si = session_sub.add_parser("inspect", help="Show session details")
+    p_si.add_argument("session_id", help="Session ID or prefix")
+    p_si.add_argument("--json", action="store_true", dest="output_json")
+    p_si.add_argument("--turns", type=int, default=None)
+
+    p_se = session_sub.add_parser("expire", help="Expire a session")
+    p_se.add_argument("session_id")
+
+    p_scl = session_sub.add_parser("cleanup", help="Remove expired sessions")
+    p_scl.add_argument("--dry-run", action="store_true")
+    p_scl.add_argument("--json", action="store_true", dest="output_json")
+
+    p_ss = session_sub.add_parser("stats", help="Session statistics")
+    p_ss.add_argument("--json", action="store_true", dest="output_json")
+
+    p_session.set_defaults(func=_cmd_session)
 
     # ── parse & dispatch ───────────────────────────────────────────
     args = parser.parse_args(argv)
