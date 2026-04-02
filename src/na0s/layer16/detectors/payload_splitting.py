@@ -1,30 +1,37 @@
 """Payload splitting detector -- fragmented injections across turns (D7.2).
 
-Algorithm
----------
-1. Get last ASSEMBLY_WINDOW (5) turns from state.
-2. Concatenate their texts with " " separator.
-3. Check for FRAGMENT_MARKERS in individual turns.
-4. Count attack keywords in combined text vs individual turns.
-   Attack keywords: "ignore", "override", "system prompt", "instructions",
-   "execute", "eval", "import os", "rm -rf".
-5. If combined_keyword_count > 2 * max_individual_count AND
-   fragment_markers found: alert.
-6. Also: if any turn contains explicit assembly instructions
-   ("combine", "put together"): boost confidence.
+Algorithm (3-stage)
+-------------------
+Stage 1 — Fragment Assembly: Generate candidate combined texts.
+  A. Sequential concatenation of last N turns (N = 2..ASSEMBLY_WINDOW).
+  B. If the latest turn has assembly cues, concat ALL preceding window turns.
+
+Stage 2 — Re-Scan: For each candidate, call rescan_text().
+  If the combined text is malicious AND the risk gap vs individual turns
+  exceeds ASSEMBLY_RISK_GAP_THRESHOLD, flag as payload splitting.
+
+Stage 3 — Alert: Generate alert with evidence showing the risk gap.
+
+Falls back to keyword heuristic if rescan_text raises an exception.
 """
 
 from __future__ import annotations
 
+import logging
 import re
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from ..config import (
+    ASSEMBLY_CONFIDENCE_MIN,
+    ASSEMBLY_MAX_CANDIDATES,
+    ASSEMBLY_RISK_GAP_THRESHOLD,
     ASSEMBLY_WINDOW,
     FRAGMENT_MARKERS,
 )
 from ..models import Alert, ConversationState
 from .base_detector import MultiTurnDetector
+
+logger = logging.getLogger(__name__)
 
 # Attack keywords used for the combined-vs-individual comparison
 _ATTACK_KEYWORDS = [
@@ -190,6 +197,46 @@ class PayloadSplittingDetector(MultiTurnDetector):
     def reset(self) -> None:
         pass
 
+    # -----------------------------------------------------------------
+    # Internal helpers
+    # -----------------------------------------------------------------
+
+    @staticmethod
+    def _generate_candidates(
+        turn_texts: List[str],
+    ) -> List[Tuple[str, str]]:
+        """Stage 1: build candidate combined texts.
+
+        Returns list of (candidate_text, label) capped at
+        ASSEMBLY_MAX_CANDIDATES.
+        """
+        candidates: List[Tuple[str, str]] = []
+        n = len(turn_texts)
+
+        # Strategy A: sequential tail windows of size 2..ASSEMBLY_WINDOW
+        for size in range(2, min(n, ASSEMBLY_WINDOW) + 1):
+            text = " ".join(turn_texts[n - size :])
+            label = f"seq_tail_{size}"
+            candidates.append((text, label))
+            if len(candidates) >= ASSEMBLY_MAX_CANDIDATES:
+                return candidates
+
+        # Strategy B: if latest turn has assembly cues, concat ALL
+        # preceding turns in the window (excluding the cue turn itself)
+        latest = turn_texts[-1]
+        if _has_assembly_instructions(latest) or _has_fragment_markers(latest):
+            preceding = " ".join(turn_texts[:-1])
+            if preceding.strip():
+                candidates.append((preceding, "assembly_cue_preceding"))
+                if len(candidates) >= ASSEMBLY_MAX_CANDIDATES:
+                    return candidates
+
+        return candidates
+
+    # -----------------------------------------------------------------
+    # Main entry point
+    # -----------------------------------------------------------------
+
     def analyze(self, state: ConversationState) -> List[Alert]:
         if state is None or state.is_empty:
             return []
@@ -202,21 +249,93 @@ class PayloadSplittingDetector(MultiTurnDetector):
         if not turn_texts:
             return []
 
-        combined = " ".join(turn_texts)
-
-        # Try the full Na0S detector first
+        # Fast path: existing Na0S fragmented-payload detector
         detection = _try_detect_fragmented(turn_texts)
+        if detection is not None:
+            return self._build_alerts(detection, turns, state)
 
-        # Fall back to keyword-count heuristic
-        if detection is None:
-            detection = _keyword_heuristic_check(combined, turn_texts)
-
-        if detection is None:
+        # ----------------------------------------------------------
+        # Stage 1: Generate candidate combined texts
+        # ----------------------------------------------------------
+        candidates = self._generate_candidates(turn_texts)
+        if not candidates:
             return []
 
+        # Individual-turn max risk (from the ConversationTurn.risk_score
+        # already computed by single-turn scan)
+        individual_risks = [t.risk_score for t in turns]
+        max_individual_risk = max(individual_risks) if individual_risks else 0.0
+
+        # ----------------------------------------------------------
+        # Stage 2: Re-scan each candidate
+        # ----------------------------------------------------------
+        try:
+            from na0s.layer16.scan_bridge import rescan_text  # lazy import
+
+            for candidate_text, label in candidates:
+                result = rescan_text(candidate_text)
+
+                if not result.is_malicious:
+                    continue
+
+                risk_gap = result.risk_score - max_individual_risk
+
+                if risk_gap < ASSEMBLY_RISK_GAP_THRESHOLD:
+                    continue
+
+                # --------------------------------------------------
+                # Stage 3: Build alert with evidence
+                # --------------------------------------------------
+                has_assembly = any(
+                    _has_assembly_instructions(t) for t in turn_texts
+                )
+                confidence = min(
+                    1.0,
+                    0.5 + risk_gap + (0.1 if has_assembly else 0.0),
+                )
+                if confidence < ASSEMBLY_CONFIDENCE_MIN:
+                    continue
+
+                detection = {
+                    "source": f"rescan:{label}",
+                    "confidence": confidence,
+                    "technique_ids": ["D7.2", "D7.6"],
+                    "matched_patterns": [
+                        f"combined_risk={result.risk_score:.3f}",
+                        f"max_individual_risk={max_individual_risk:.3f}",
+                        f"risk_gap={risk_gap:.3f}",
+                        f"candidate={label}",
+                        f"detections={result.detections}",
+                        f"assembly_instructions={has_assembly}",
+                    ],
+                }
+                return self._build_alerts(detection, turns, state)
+
+        except Exception:
+            # Scanner unavailable — fall back to keyword heuristic
+            logger.debug(
+                "rescan_text unavailable, falling back to keyword heuristic",
+                exc_info=True,
+            )
+            combined = " ".join(turn_texts)
+            detection = _keyword_heuristic_check(combined, turn_texts)
+            if detection is not None:
+                return self._build_alerts(detection, turns, state)
+
+        return []
+
+    # -----------------------------------------------------------------
+    # Alert builder
+    # -----------------------------------------------------------------
+
+    @staticmethod
+    def _build_alerts(
+        detection: dict,
+        turns: list,
+        state: ConversationState,
+    ) -> List[Alert]:
         confidence = detection["confidence"]
         technique_ids = detection["technique_ids"]
-
         return [
             Alert(
                 alert_type="payload_assembly",

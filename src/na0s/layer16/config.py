@@ -30,6 +30,9 @@ ESCALATION_RECENT_WEIGHT = 0.7  # weight for recent turns vs full history
 
 ASSEMBLY_WINDOW = 5  # concatenate last N turns for assembly check
 ASSEMBLY_RISK_THRESHOLD = 0.8
+ASSEMBLY_RISK_GAP_THRESHOLD = 0.3  # min gap between combined and individual risk
+ASSEMBLY_CONFIDENCE_MIN = 0.5  # min confidence to generate alert
+ASSEMBLY_MAX_CANDIDATES = 5  # cap on re-scan candidates per turn
 FRAGMENT_MARKERS = [
     "remember this", "add to", "continue from", "combine",
     "piece together", "concatenate", "merge", "join",
