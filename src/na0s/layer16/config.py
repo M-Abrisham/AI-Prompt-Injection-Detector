@@ -65,3 +65,12 @@ ENABLE_MULTI_TURN = True  # master switch
 ENABLE_ESCALATION = True
 ENABLE_PAYLOAD_SPLITTING = True
 ENABLE_FABRICATED_HISTORY = True
+ENABLE_CONTEXT_POISONING = True
+
+# ---------------------------------------------------------------------------
+# Context Poisoning (D1.20)
+# ---------------------------------------------------------------------------
+
+POISONING_MIN_TURNS = 3
+POISONING_CONFIDENCE_MIN = 0.25
+POISONING_MULTI_SIGNAL_BOOST = 1.5

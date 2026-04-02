@@ -42,6 +42,11 @@ try:
 except ImportError:  # pragma: no cover
     FabricatedHistoryDetector = None  # type: ignore[misc,assignment]
 
+try:
+    from na0s.layer16.detectors.context_poisoning import ContextPoisoningDetector
+except ImportError:  # pragma: no cover
+    ContextPoisoningDetector = None  # type: ignore[misc,assignment]
+
 
 def _compute_recommendation(alerts: List[Alert]) -> str:
     """Derive a recommendation string from a list of alerts.
@@ -92,6 +97,8 @@ class ConversationSecurityMonitor:
             detectors.append(PayloadSplittingDetector())
         if FabricatedHistoryDetector is not None:
             detectors.append(FabricatedHistoryDetector())
+        if ContextPoisoningDetector is not None:
+            detectors.append(ContextPoisoningDetector())
         return detectors
 
     # ------------------------------------------------------------------
@@ -200,6 +207,9 @@ class ConversationSecurityMonitor:
         fabricated_history_detected = any(
             a.alert_type == "fabricated_history" for a in all_alerts
         )
+        context_poisoning_detected = any(
+            a.alert_type == "context_poisoning" for a in all_alerts
+        )
 
         # Recommendation logic:
         #   HIGH or CRITICAL -> block
@@ -216,7 +226,7 @@ class ConversationSecurityMonitor:
                 default=0.0,
             ),
             payload_assembly_detected=payload_assembly_detected,
-            context_poisoning_detected=False,  # reserved for future detector
+            context_poisoning_detected=context_poisoning_detected,
             fabricated_history_detected=fabricated_history_detected,
             risk_trend=risk_trend,
             alerts=all_alerts,
@@ -293,6 +303,9 @@ class ConversationSecurityMonitor:
         fabricated_history_detected = any(
             a.alert_type == "fabricated_history" for a in all_alerts
         )
+        context_poisoning_detected = any(
+            a.alert_type == "context_poisoning" for a in all_alerts
+        )
 
         recommendation = _compute_recommendation(all_alerts)
 
@@ -305,7 +318,7 @@ class ConversationSecurityMonitor:
                 default=0.0,
             ),
             payload_assembly_detected=payload_assembly_detected,
-            context_poisoning_detected=False,
+            context_poisoning_detected=context_poisoning_detected,
             fabricated_history_detected=fabricated_history_detected,
             risk_trend=risk_trend,
             alerts=all_alerts,
