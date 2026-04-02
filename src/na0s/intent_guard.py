@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Intent-analysis detection module (N1 category).
 
 Analyzes whether a prompt contains language designed to make an LLM
