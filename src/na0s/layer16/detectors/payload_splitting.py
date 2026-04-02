@@ -109,6 +109,39 @@ def _try_detect_fragmented(turn_texts: List[str]) -> Optional[dict]:
     return None
 
 
+def _try_detect_multiturn(turn_texts: List[str]) -> Optional[dict]:
+    """Try the D7.2 multi-turn assembly detector; return a dict summary or None.
+
+    Calls ``detect_multiturn_assembly`` which looks for cross-turn
+    setup-refinement-target chains that individually appear benign
+    but together form an attack.
+    """
+    try:
+        from na0s.payload_assembly_detector import detect_multiturn_assembly
+
+        if len(turn_texts) < 2:
+            return None
+
+        current_text = turn_texts[-1]
+        history = turn_texts[:-1]
+
+        result = detect_multiturn_assembly(current_text, session_history=history)
+        if result and result.assembled_is_malicious:
+            return {
+                "source": "multiturn_assembly",
+                "confidence": result.confidence,
+                "technique_ids": result.technique_ids,
+                "matched_patterns": result.matched_patterns,
+                "assembled_text": result.assembled_text,
+            }
+    except Exception:
+        logger.debug(
+            "detect_multiturn_assembly failed, continuing",
+            exc_info=True,
+        )
+    return None
+
+
 def _keyword_heuristic_check(
     combined: str, turn_texts: List[str],
 ) -> Optional[dict]:
@@ -253,6 +286,46 @@ class PayloadSplittingDetector(MultiTurnDetector):
         detection = _try_detect_fragmented(turn_texts)
         if detection is not None:
             return self._build_alerts(detection, turns, state)
+
+        # ----------------------------------------------------------
+        # Multi-turn assembly detector (D7.2 cross-turn chains)
+        # ----------------------------------------------------------
+        multiturn_det = _try_detect_multiturn(turn_texts)
+        if multiturn_det is not None:
+            # Validate via re-scan: if assembled text is truly malicious
+            # boost confidence; otherwise emit a weaker monitoring alert.
+            try:
+                from na0s.layer16.scan_bridge import rescan_text as _rescan
+
+                assembled = multiturn_det.get("assembled_text", "")
+                if assembled:
+                    rescan_result = _rescan(assembled)
+                    if rescan_result.is_malicious:
+                        # Re-scan confirms: boost confidence by 25%
+                        multiturn_det["confidence"] = min(
+                            1.0, multiturn_det["confidence"] + 0.25
+                        )
+                        multiturn_det["matched_patterns"].append(
+                            "rescan_confirmed=True"
+                        )
+                        return self._build_alerts(multiturn_det, turns, state)
+
+                # Assembly found but re-scan says benign → monitoring alert
+                multiturn_det["confidence"] = min(
+                    multiturn_det["confidence"], 0.45
+                )
+                multiturn_det["matched_patterns"].append(
+                    "rescan_confirmed=False"
+                )
+                return self._build_alerts(multiturn_det, turns, state)
+
+            except Exception:
+                # Re-scan unavailable — use assembly result as-is
+                logger.debug(
+                    "rescan unavailable for multiturn confirmation",
+                    exc_info=True,
+                )
+                return self._build_alerts(multiturn_det, turns, state)
 
         # ----------------------------------------------------------
         # Stage 1: Generate candidate combined texts
