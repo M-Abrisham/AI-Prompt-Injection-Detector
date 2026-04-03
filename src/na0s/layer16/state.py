@@ -19,6 +19,7 @@ def add_turn(
     risk_score: float = 0.0,
     label: str = "safe",
     flags: Optional[List[str]] = None,
+    role: str = "user",
 ) -> ConversationTurn:
     """Add a turn to the conversation state (mutates in place).
 
@@ -28,13 +29,25 @@ def add_turn(
         risk_score: Risk score from single-turn analysis.
         label: Classification label from single-turn analysis.
         flags: Optional list of flag strings.
+        role: Role of the speaker ("user", "assistant", or "system").
 
     Returns:
         The newly created ConversationTurn.
     """
+    # --- Input validation (T1.6) ---
+    if not isinstance(text, str) or not text:
+        raise ValueError("text must be a non-empty string")
+    if not isinstance(label, str):
+        raise TypeError("label must be a string")
+    if not isinstance(risk_score, (int, float)) or risk_score < 0.0 or risk_score > 1.0:
+        raise ValueError("risk_score must be between 0.0 and 1.0")
+    if role not in ("user", "assistant", "system"):
+        raise ValueError("role must be one of: 'user', 'assistant', 'system'")
+
     turn = ConversationTurn(
         turn_id=str(uuid.uuid4()),
         text=text,
+        role=role,
         timestamp=datetime.now(timezone.utc),
         risk_score=risk_score,
         label=label,
@@ -72,6 +85,14 @@ def update_cumulative_risk(
     Returns:
         The updated cumulative_risk value.
     """
+    # --- Input validation (T1.6) ---
+    if not isinstance(turn_risk, (int, float)) or turn_risk < 0.0 or turn_risk > 1.0:
+        raise ValueError("turn_risk must be between 0.0 and 1.0")
+    if not isinstance(decay, (int, float)) or decay < 0.0 or decay > 1.0:
+        raise ValueError("decay must be between 0.0 and 1.0")
+    if not isinstance(alpha, (int, float)) or alpha <= 0:
+        raise ValueError("alpha must be > 0")
+
     raw = decay * state.cumulative_risk + alpha * turn_risk
     state.cumulative_risk = max(0.0, min(1.0, raw))
     return state.cumulative_risk
@@ -165,6 +186,7 @@ def _turn_to_dict(turn: ConversationTurn) -> Dict[str, Any]:
     return {
         "turn_id": turn.turn_id,
         "text": turn.text,
+        "role": turn.role,
         "timestamp": turn.timestamp.isoformat(),
         "risk_score": turn.risk_score,
         "label": turn.label,
@@ -178,6 +200,7 @@ def _turn_from_dict(d: Dict[str, Any]) -> ConversationTurn:
     return ConversationTurn(
         turn_id=d["turn_id"],
         text=d["text"],
+        role=d.get("role", "user"),
         timestamp=datetime.fromisoformat(d["timestamp"]),
         risk_score=d["risk_score"],
         label=d["label"],

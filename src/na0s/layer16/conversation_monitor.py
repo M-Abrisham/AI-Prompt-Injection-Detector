@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+from na0s.layer16 import config as layer16_config
 from na0s.layer16.exceptions import SessionNotFoundError
 from na0s.layer16.models import (
     Alert,
@@ -87,6 +88,10 @@ class ConversationSecurityMonitor:
         self._config = config or SessionConfig()
         self._session_mgr = SessionManager(config=self._config)
         self._detectors = self._init_detectors()
+        # Alert dedup: session_id -> {alert_type -> (last_turn_fired, confidence)}
+        self._last_alert_turn: Dict[str, Dict[str, tuple]] = {}
+        # Last deduped alerts per session (for consumers that want filtered view)
+        self._last_deduped: Dict[str, List[Alert]] = {}
 
     # ------------------------------------------------------------------
     # Detector initialisation
@@ -109,8 +114,51 @@ class ConversationSecurityMonitor:
         return detectors
 
     # ------------------------------------------------------------------
+    # Alert deduplication
+    # ------------------------------------------------------------------
+
+    def _dedup_alerts(
+        self,
+        alerts: List[Alert],
+        session_id: str,
+        current_turn: int,
+    ) -> List[Alert]:
+        """Filter duplicate alerts within the suppression window.
+
+        An alert is suppressed when the same ``alert_type`` fired within
+        the last ``ALERT_SUPPRESSION_TURNS`` turns **and** the new
+        confidence is not significantly higher (< 0.15 increase).
+        """
+        session_history = self._last_alert_turn.setdefault(session_id, {})
+        passed: List[Alert] = []
+        suppression_window = layer16_config.ALERT_SUPPRESSION_TURNS
+
+        for alert in alerts:
+            prev = session_history.get(alert.alert_type)
+            if prev is not None:
+                prev_turn, prev_conf = prev
+                within_window = (current_turn - prev_turn) <= suppression_window
+                confidence_jump = alert.confidence - prev_conf
+                if within_window and confidence_jump < 0.15:
+                    # Suppress — same type, recent, no significant escalation
+                    continue
+            passed.append(alert)
+            session_history[alert.alert_type] = (current_turn, alert.confidence)
+
+        return passed
+
+    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def get_new_alerts(self, session_id: str) -> List[Alert]:
+        """Return the deduped (non-suppressed) alerts from the last turn.
+
+        When ``ENABLE_ALERT_DEDUP`` is active, this returns only alerts
+        that were not suppressed by the dedup filter.  When disabled,
+        this returns the same list as ``state.active_alerts``.
+        """
+        return list(self._last_deduped.get(session_id, []))
 
     def create_session(self, **metadata: object) -> str:
         """Create a new conversation session.
@@ -200,36 +248,46 @@ class ConversationSecurityMonitor:
                     exc_info=True,
                 )
 
-        # 4. Update cumulative state
+        # 4. Update cumulative state (always stores full alert set)
         state.active_alerts = all_alerts
 
+        # 4b. Alert deduplication — tracks repeated alerts and stores a
+        #     filtered view while keeping state.active_alerts intact.
+        if layer16_config.ENABLE_ALERT_DEDUP:
+            self._last_deduped[session_id] = self._dedup_alerts(
+                all_alerts, session_id, state.turn_count,
+            )
+        else:
+            self._last_deduped[session_id] = list(all_alerts)
+
         # 5. Build the analysis result
+        # Detection flags and recommendation use the full (unfiltered) state
+        # so callers always see the current threat picture.  The ``alerts``
+        # list in the returned analysis is deduped to reduce noise.
         risk_trend = get_risk_trend(state)
+        active = state.active_alerts
         escalation_detected = any(
-            a.alert_type == "escalation" for a in all_alerts
+            a.alert_type == "escalation" for a in active
         )
         payload_assembly_detected = any(
-            a.alert_type == "payload_assembly" for a in all_alerts
+            a.alert_type == "payload_assembly" for a in active
         )
         fabricated_history_detected = any(
-            a.alert_type == "fabricated_history" for a in all_alerts
+            a.alert_type == "fabricated_history" for a in active
         )
         context_poisoning_detected = any(
-            a.alert_type == "context_poisoning" for a in all_alerts
+            a.alert_type == "context_poisoning" for a in active
         )
 
-        # Recommendation logic:
-        #   HIGH or CRITICAL -> block
-        #   MEDIUM           -> flag
-        #   LOW only (or no alerts) -> continue_monitoring
-        recommendation = _compute_recommendation(all_alerts)
+        # Recommendation logic uses full state alerts
+        recommendation = _compute_recommendation(active)
 
         return MultiTurnAnalysis(
             session_id=session_id,
             turn_count=state.turn_count,
             escalation_detected=escalation_detected,
             escalation_score=max(
-                (a.confidence for a in all_alerts if a.alert_type == "escalation"),
+                (a.confidence for a in active if a.alert_type == "escalation"),
                 default=0.0,
             ),
             payload_assembly_detected=payload_assembly_detected,
@@ -334,7 +392,9 @@ class ConversationSecurityMonitor:
             recommendation=recommendation,
         )
 
-        # Remove the session
+        # Remove the session and dedup tracking
+        self._last_alert_turn.pop(session_id, None)
+        self._last_deduped.pop(session_id, None)
         self._session_mgr.expire_session(session_id)
         return analysis
 

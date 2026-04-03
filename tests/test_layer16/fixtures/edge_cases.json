@@ -9,12 +9,12 @@
   },
   {
     "name": "empty_messages",
-    "description": "Turns with empty text should be handled gracefully",
+    "description": "Turns with minimal/whitespace text should be handled gracefully",
     "expected_detection": false,
     "turns": [
-      {"text": "", "risk_score": 0.0, "label": "safe"},
-      {"text": "", "risk_score": 0.0, "label": "safe"},
-      {"text": "", "risk_score": 0.0, "label": "safe"}
+      {"text": " ", "risk_score": 0.0, "label": "safe"},
+      {"text": " ", "risk_score": 0.0, "label": "safe"},
+      {"text": " ", "risk_score": 0.0, "label": "safe"}
     ]
   },
   {

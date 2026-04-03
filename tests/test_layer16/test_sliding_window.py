@@ -83,7 +83,7 @@ class TestCombinedText:
         sw = SlidingWindow(max_size=5)
         sw.add(_make_turn("hello"))
         sw.add(_make_turn("world"))
-        assert sw.get_combined_text() == "hello\nworld"
+        assert sw.get_combined_text() == "hello\n---\nworld"
 
     def test_empty_combined(self) -> None:
         sw = SlidingWindow(max_size=5)

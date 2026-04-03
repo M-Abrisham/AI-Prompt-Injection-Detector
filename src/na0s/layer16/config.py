@@ -67,6 +67,13 @@ ENABLE_PAYLOAD_SPLITTING = True
 ENABLE_FABRICATED_HISTORY = True
 ENABLE_CONTEXT_POISONING = True
 ENABLE_BEHAVIORAL_STYLOMETRY = True
+ENABLE_ALERT_DEDUP = True  # deduplicate repeated alert_type within a session
+
+# ---------------------------------------------------------------------------
+# Alert Deduplication
+# ---------------------------------------------------------------------------
+
+ALERT_SUPPRESSION_TURNS = 3  # suppress duplicate alert_type for N turns after firing
 
 # ---------------------------------------------------------------------------
 # Context Poisoning (D1.20)

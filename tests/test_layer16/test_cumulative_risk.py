@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from na0s.layer16.conversation_monitor import ConversationSecurityMonitor
 from na0s.layer16.models import ConversationState, SessionConfig
 from na0s.layer16.state import add_turn, update_cumulative_risk
@@ -41,8 +43,9 @@ class TestUpdateCumulativeRisk:
 
     def test_never_negative(self) -> None:
         state = _make_state()
-        update_cumulative_risk(state, -0.5)
-        assert state.cumulative_risk >= 0.0
+        # Negative turn_risk is now rejected by input validation (T1.6).
+        with pytest.raises(ValueError):
+            update_cumulative_risk(state, -0.5)
 
     def test_decays_with_safe_turns(self) -> None:
         state = _make_state()

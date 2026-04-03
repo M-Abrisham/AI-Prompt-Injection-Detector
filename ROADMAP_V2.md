@@ -1298,8 +1298,8 @@ Layer 15 provides automated synchronization with external threat intelligence so
 ## Layer 16: Multi-Turn Detection — Tasks: 17/17 (100%)
 
 **Files**: `src/na0s/layer16/` (23 modules), `src/na0s/predict.py` (+session_id), `src/na0s/scan_result.py` (+4 fields)
-**Tests**: 300+ tests across 17 test files + 6 JSON fixtures (`tests/test_layer16/`)
-**Status**: **Complete** — stateful multi-turn detection with backward-compatible API; singleton monitor, 4 detectors (+ stylometry D1.21), weighted sliding window, cumulative risk tracking, 3 storage backends, test harness. v2 baseline: 50 scenarios, F1=0.9333, 0% FPR.
+**Tests**: 440+ tests across 20 test files + 6 JSON fixtures (`tests/test_layer16/`)
+**Status**: **Complete** — stateful multi-turn detection with backward-compatible API; singleton monitor, 5 detectors (+ stylometry D1.21), weighted sliding window with eviction log + min weight floor, role-aware turns, cumulative risk tracking, alert deduplication, input validation, 3 storage backends, test harness. v2 baseline: 50 scenarios, F1=0.9333, 0% FPR.
 
 ### Updated Description
 Layer 16 adds conversation-level memory and stateful analysis to Na0S via a post-processor pattern. When `scan(text, session_id="...")` is called, the existing single-turn pipeline runs first, then `ConversationSecurityMonitor` records the turn and runs multi-turn detectors on accumulated state. The stateless API (`scan(text)` without session_id) is unchanged. The layer includes: `ConversationState` with sliding window, `SessionManager` with TTL expiry, 3 storage backends (memory/SQLite/Redis), 3 detectors (escalation C1.1, payload splitting D7.2, fabricated history D1.22), a `TurnAnalyzer` for per-turn risk augmentation, and a `ConversationTestHarness` for multi-turn testing. Singleton monitor uses double-checked locking matching Na0S's existing model cache pattern.
@@ -1328,6 +1328,15 @@ Layer 16 adds conversation-level memory and stateful analysis to Na0S via a post
 - [x] **Behavioral stylometry detector (D1.21)** — Detect human-to-automated-tool handoff mid-conversation via writing pattern analysis. **Done** (2026-04-02): 4 signals (vocabulary shift, structural patterns, timing, template indicators). Requires 2+ signals or single signal >= 0.35 confidence. Feature-flagged in `config.py`. 35 tests in `test_stylometry.py`.
 - [x] **cumulative_risk tracking** — Wire up the `cumulative_risk` field on `ConversationState`. **Done** (2026-04-02): EMA formula `clamp(0.85*old + 0.3*turn_risk, 0, 1)` in `state.py`, wired into `add_turn()`, exposed in `MultiTurnAnalysis`. 19 tests in `test_cumulative_risk.py`.
 - [x] **v2 baseline** — 50 scenarios, 87.5% detection, 0% FPR, F1=0.9333. 3 FN are pre-existing (sklearn-dependent rescan scenarios). Saved as `baselines/v2_baseline.json`.
+- [x] **Sprint A: Hardening (T1.1-T1.8)** — 8 quick wins implemented (2026-04-03), 60 new tests:
+  - T1.1: `role` field on `ConversationTurn` ("user"|"assistant"|"system"), wired through `add_turn()` and serialization
+  - T1.2: Eviction summary log — `_eviction_log` saves fingerprints of evicted suspicious turns (capped at 50)
+  - T1.3: `get_aggregate_risk()` (weight-adjusted mean) + `get_peak_risk()` on SlidingWindow
+  - T1.4: Turn boundary separator — `get_combined_text()` uses `\n---\n` instead of `\n`
+  - T1.5: Alert deduplication + suppression window — same alert_type suppressed for 3 turns unless confidence jumps >= 0.15. Feature-flagged.
+  - T1.6: Input validation on SlidingWindow constructor, `add_turn()`, and `update_cumulative_risk()`
+  - T1.7: Minimum weight floor (0.1) — suspicious turns never decay below floor, preventing premature eviction
+  - T1.8: Pythonic API — `__len__`, `__iter__`, `clear()` on SlidingWindow
 
 #### REMAINING
 - [ ] **Context poisoning detection (D1.20)** — Detect when early turns plant misleading context exploited later.

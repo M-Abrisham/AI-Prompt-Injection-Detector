@@ -33,7 +33,8 @@ class ConversationTurn:
 
     turn_id: str
     text: str
-    timestamp: datetime
+    role: str = "user"  # "user" | "assistant" | "system"
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     risk_score: float = 0.0
     label: str = "safe"  # from single-turn ScanResult
     flags: List[str] = field(default_factory=list)
