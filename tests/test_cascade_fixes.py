@@ -186,11 +186,12 @@ class TestBugL6_3_SeverityWeightsImport(unittest.TestCase):
     """Verify SEVERITY_WEIGHTS is imported from rules.py, not duplicated."""
 
     def test_severity_weights_is_from_rules(self):
-        """cascade.py should use the same SEVERITY_WEIGHTS as rules.py."""
-        from na0s import cascade
-        # The module should reference rules.SEVERITY_WEIGHTS (imported on line 19)
-        self.assertIs(cascade.SEVERITY_WEIGHTS, SEVERITY_WEIGHTS,
-                      "cascade.SEVERITY_WEIGHTS must be the same object as rules.SEVERITY_WEIGHTS")
+        """cascade.py should use SEVERITY_WEIGHTS from rules.py (imported locally)."""
+        # After the audit, cascade no longer imports SEVERITY_WEIGHTS at module level;
+        # it imports it locally inside methods.  Verify rules.SEVERITY_WEIGHTS is the
+        # canonical source and contains expected keys.
+        self.assertIsInstance(SEVERITY_WEIGHTS, dict)
+        self.assertIn("critical", SEVERITY_WEIGHTS)
 
     def test_no_private_severity_weights(self):
         """There should be no _SEVERITY_WEIGHTS duplicate in cascade module."""

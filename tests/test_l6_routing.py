@@ -9,6 +9,7 @@ At least 22 tests total:
 """
 
 import os
+import threading
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -129,7 +130,7 @@ class TestPipelineStages:
     def test_complex_stages(self):
         stages = get_pipeline_stages(ComplexityLevel.COMPLEX)
         assert stages == ["whitelist", "weighted", "embedding",
-                          "late_chunking", "judge"]
+                          "judge"]
 
     def test_stages_returns_copy(self):
         """Returned list should be a copy, not a reference to internal data."""
@@ -184,7 +185,7 @@ class TestParanoidMode:
         clf._positive_validator = None
         clf._output_scanner = None
         clf._canary_manager = None
-        clf._last_l0 = None
+        clf._stats_lock = threading.Lock()
         clf._total = 0
         clf._whitelisted = 0
         clf._classified = 0
@@ -195,6 +196,14 @@ class TestParanoidMode:
         clf._positive_validated = 0
         clf._positive_validation_overrides = 0
         clf._canary_checks = 0
+        clf._layer_failures = {
+            "structural": 0, "promptguard": 0, "ensemble": 0,
+            "embedding": 0, "judge": 0, "positive_validation": 0,
+            "output_scanner": 0, "canary": 0,
+        }
+        clf._slo_enabled = False
+        clf._slo = None
+        clf._batch_lock = threading.Lock()
         clf._paranoid_mode = paranoid
         clf._stages = list(DEFAULT_STAGES)
         return clf
@@ -351,7 +360,9 @@ class TestConfigurableStages:
         assert "judge" in VALID_STAGES
         assert "embedding" in VALID_STAGES
         assert "ml_basic" in VALID_STAGES
-        assert "late_chunking" in VALID_STAGES
+        # late_chunking is an internal sub-step of the embedding pipeline
+        # (predict_embedding.py), not a standalone cascade stage.
+        assert "late_chunking" not in VALID_STAGES
 
     def test_stages_reordering_accepted(self):
         """Stages can be reordered (validation only checks names)."""

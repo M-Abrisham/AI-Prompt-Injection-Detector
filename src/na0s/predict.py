@@ -298,6 +298,20 @@ def _get_cached_models() -> Tuple:
                 )
         _cached_vectorizer = safe_load(VECTORIZER_PATH)
         _cached_model = safe_load(MODEL_PATH)
+        # Warn if sklearn version doesn't match what the model was trained on.
+        # A downgrade (e.g. trained 1.8.0, running 1.6.1) can silently alter
+        # predict_proba calibration and degrade detection accuracy.
+        _TRAINED_SKLEARN = "1.8.0"
+        try:
+            import sklearn
+            if sklearn.__version__ != _TRAINED_SKLEARN:
+                logger.warning(
+                    "Model trained on sklearn %s but running %s — "
+                    "retrain recommended to avoid silent accuracy drift",
+                    _TRAINED_SKLEARN, sklearn.__version__,
+                )
+        except Exception:
+            pass
     return _cached_vectorizer, _cached_model
 
 

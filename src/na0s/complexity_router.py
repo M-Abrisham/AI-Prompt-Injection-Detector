@@ -41,7 +41,7 @@ _STAGE_MAP: dict[ComplexityLevel, list[str]] = {
     ComplexityLevel.SIMPLE: ["whitelist", "ml_basic"],
     ComplexityLevel.MODERATE: ["whitelist", "weighted", "embedding"],
     ComplexityLevel.COMPLEX: ["whitelist", "weighted", "embedding",
-                              "late_chunking", "judge"],
+                              "judge"],
 }
 
 # ---------------------------------------------------------------------------

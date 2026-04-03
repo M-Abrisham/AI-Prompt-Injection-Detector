@@ -70,7 +70,7 @@ _pg_failure_state = {"consecutive": 0, "total": 0, "enabled": True}
 #: All recognised stage names in canonical order.
 VALID_STAGES = [
     "whitelist", "ml_basic", "weighted", "embedding",
-    "late_chunking", "judge",
+    "judge",
 ]
 
 #: Default stage list (current behavior).
@@ -139,6 +139,11 @@ except ImportError:
 
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
+
+# Pre-built lookup tables from the static RULES list.  Module-level so they
+# are constructed once at import time, not on every classify/scan call.
+_RULE_TECHNIQUES = {r.name: r.technique_ids for r in RULES}
+_RULE_SEVERITIES = {r.name: r.severity for r in RULES}
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +227,15 @@ class WhitelistFilter:
 
     MAX_LENGTH = THRESHOLDS.WHITELIST_MAX_LENGTH
     MAX_SENTENCES = THRESHOLDS.WHITELIST_MAX_SENTENCES
+
+    # Critical rule names that should block whitelisting even if the input
+    # looks like a question.  Class-level constant (not rebuilt per call).
+    _CRITICAL_RULE_NAMES = frozenset({
+        "override", "system_prompt", "exfiltration",
+        "constraint_negation", "fake_system_prompt",
+        "chat_template_injection", "named_jailbreak_persona",
+        "forget_override",
+    })
 
     # Common abbreviations whose periods are not sentence boundaries
     _ABBREV_RE = re.compile(
@@ -320,21 +334,17 @@ class WhitelistFilter:
         #    rule_score_detailed() because the latter applies context
         #    suppression -- which is exactly what an attacker exploits by
         #    prepending a question to an injection payload.
-        _CRITICAL_RULE_NAMES = frozenset({
-            "override", "system_prompt", "exfiltration",
-            "constraint_negation", "fake_system_prompt",
-            "chat_template_injection", "named_jailbreak_persona",
-            "forget_override",
-        })
         try:
             critical_hit_names = []
             for rule in RULES:
-                if rule.name in _CRITICAL_RULE_NAMES:
+                if rule.name in self._CRITICAL_RULE_NAMES:
                     if safe_search(rule._compiled, text, timeout_ms=50):
                         critical_hit_names.append(rule.name)
         except Exception:
-            _logger.debug("Critical rule check in whitelist failed", exc_info=True)
-            critical_hit_names = []
+            # FAIL CLOSED: if the critical-rule engine crashes, do NOT
+            # whitelist the input — force it through the full ML pipeline.
+            _logger.warning("Critical rule check failed; denying whitelist", exc_info=True)
+            return False, "critical rule check failed; falling through to ML"
         if critical_hit_names:
             return False, "critical rule hit despite question form: {}".format(
                 ", ".join(critical_hit_names)
@@ -410,6 +420,12 @@ class WeightedClassifier:
                     hit_names_seen.add(rh.name)
         hit_names = [h.name for h in detailed_hits]
 
+        # --- Evidence grading: remove false-positive rule hits ---
+        # filter_graded_hits uses CRAG-inspired context analysis to remove
+        # rule hits that appear inside code blocks (grade="incorrect") and
+        # keep ambiguous/correct hits.  This reduces FP from code examples.
+        hit_names = filter_graded_hits(hit_names, text)
+
         # --- Obfuscation flags ---
         obs = obfuscation_scan(text)
         obfuscation_flags = obs.get("evasion_flags", [])
@@ -441,7 +457,7 @@ class WeightedClassifier:
                 from .rules import SEVERITY_WEIGHTS as _sw
                 rule_w = 0.0
                 for hn in hit_names:
-                    sev = {r.name: r.severity for r in RULES}.get(hn, "medium")
+                    sev = _RULE_SEVERITIES.get(hn, "medium")
                     rule_w += _sw.get(sev, 0.1)
                 rrf_signals["rules"] = min(rule_w, 1.0)
             if obfuscation_flags:
@@ -517,10 +533,6 @@ class WeightedClassifier:
 
         return label, confidence, hit_names
 
-
-# ---------------------------------------------------------------------------
-# L0 stub for evaluate compatibility
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Cascade Pipeline
@@ -664,10 +676,6 @@ class CascadeClassifier:
             "output_scanner": 0,
             "canary": 0,
         }
-        # PromptGuard auto-disable after N consecutive failures
-        self._pg_consecutive_failures = 0
-        self._pg_max_consecutive_failures = 5
-
         # Layer 6: SLO tracker — enabled by NA0S_SLO_TRACKING=1
         self._slo_enabled = os.environ.get("NA0S_SLO_TRACKING") == "1"
         self._slo = SLOTracker() if self._slo_enabled else None
@@ -749,7 +757,9 @@ class CascadeClassifier:
         return result[:4]
 
     def _classify_full(self, text: str, _pre_sanitized_l0=None) -> Tuple:
-        """Internal classify that returns (label, confidence, hits, stage, l0, judge_reasoning).
+        """Internal classify returning a 7-tuple.
+
+        Returns (label, confidence, hits, stage, l0, judge_reasoning, technique_tags).
 
         All per-call state is returned explicitly so callers never need
         to read instance variables, eliminating the _last_l0 /
@@ -766,8 +776,10 @@ class CascadeClassifier:
         judge_reasoning = ""
 
         # Input type validation: reject non-string types early.
-        # Use type() check to avoid fragility from isinstance being patched.
-        if type(text) not in (str, bytes):
+        # The cascade API accepts str only; bytes should be decoded by the
+        # caller before classification.  Uses `type() is` instead of
+        # isinstance() to avoid breakage when tests patch isinstance.
+        if type(text) is not str:
             raise TypeError(
                 "classify() expects a string, got {}".format(type(text).__name__)
             )
@@ -783,6 +795,7 @@ class CascadeClassifier:
                 "blocked",
                 None,       # l0
                 "",         # judge_reasoning
+                [],         # technique_tags
             )
 
         # Layer 0: sanitize input before anything else
@@ -793,7 +806,7 @@ class CascadeClassifier:
         if l0.rejected:
             with self._stats_lock:
                 self._blocked += 1
-            return "BLOCKED", 1.0, l0.anomaly_flags, "blocked", l0, ""
+            return "BLOCKED", 1.0, l0.anomaly_flags, "blocked", l0, "", []
 
         clean = l0.sanitized_text
 
@@ -816,7 +829,7 @@ class CascadeClassifier:
             if is_safe:
                 with self._stats_lock:
                     self._whitelisted += 1
-                return "SAFE", 0.99, [], "whitelist", l0, ""
+                return "SAFE", 0.99, [], "whitelist", l0, "", []
 
         # Stage 2: weighted classifier (operates on sanitized text)
         # FIX-5: Pass raw text so rules also run on pre-normalization input
@@ -831,11 +844,18 @@ class CascadeClassifier:
             self._record_slo("weighted", (time.monotonic() - _t0) * 1000)
             with self._stats_lock:
                 self._classified += 1
+            # Build technique_tags from hit names via module-level lookup.
+            technique_tags = []
+            for h in hits:
+                for tid in _RULE_TECHNIQUES.get(h, ()):
+                    if tid not in technique_tags:
+                        technique_tags.append(tid)
         else:
             # If weighted/ml_basic not in stages, use uncertain defaults
             # so downstream stages (judge, paranoid mode) can still fire.
             # Using 0.5 confidence signals maximum uncertainty.
             label, confidence, hits = "SAFE", 0.5, []
+            technique_tags = []
 
         # ---------------------------------------------------------------
         # Layer 6: Groundedness check — verify MALICIOUS verdicts are
@@ -993,7 +1013,7 @@ class CascadeClassifier:
                                 with self._stats_lock:
                                     self._judge_overrides += 1
                             judge_reasoning = getattr(result, "rationale", "")
-                            return label, confidence, hits, "judge", l0, judge_reasoning
+                            return label, confidence, hits, "judge", l0, judge_reasoning, technique_tags
                     else:
                         # Original LLMJudge interface
                         verdict = judge.classify(clean)
@@ -1011,7 +1031,7 @@ class CascadeClassifier:
                                 with self._stats_lock:
                                     self._judge_overrides += 1
                             judge_reasoning = getattr(verdict, "reasoning", "")
-                            return label, confidence, hits, "judge", l0, judge_reasoning
+                            return label, confidence, hits, "judge", l0, judge_reasoning, technique_tags
                 except Exception:
                     _logger.debug("LLM judge (Layer 7) failed", exc_info=True)
                     with self._stats_lock:
@@ -1043,7 +1063,7 @@ class CascadeClassifier:
                         )
                         with self._stats_lock:
                             self._positive_validation_overrides += 1
-                        return label, confidence, hits, "positive_validation", l0, ""
+                        return label, confidence, hits, "positive_validation", l0, "", technique_tags
             except Exception:
                 _logger.debug("Positive validation (Layer 8) failed", exc_info=True)
                 with self._stats_lock:
@@ -1065,7 +1085,7 @@ class CascadeClassifier:
                 confidence = round(p_mal, 4)
                 hits.append("paranoid_mode:uncertain_flip")
 
-        return label, confidence, hits, "weighted", l0, judge_reasoning
+        return label, confidence, hits, "weighted", l0, judge_reasoning, technique_tags
 
     # ------------------------------------------------------------------
     # Unified scan() — returns ScanResult (same shape as predict.scan())
@@ -1100,7 +1120,7 @@ class CascadeClassifier:
         -------
         ScanResult
         """
-        label, confidence, hits, stage, l0, judge_reasoning = self._classify_full(text)
+        label, confidence, hits, stage, l0, judge_reasoning, technique_tags = self._classify_full(text)
 
         is_blocked = label == "BLOCKED"
         is_mal = label == "MALICIOUS"
@@ -1119,19 +1139,6 @@ class CascadeClassifier:
                 cascade_stage=stage,
                 model_version=_get_model_version(),
             )
-
-        # Derive technique_tags from the detailed rule hits available
-        # on the sanitized text.  We run rule_score_detailed here to
-        # get technique_ids — the overhead is minimal because most of
-        # the heavy work was already done inside classify().
-        technique_tags = []
-        if l0 is not None and not l0.rejected:
-            from .rules import rule_score_detailed as _rsd
-            detailed = _rsd(l0.sanitized_text)
-            for rh in detailed:
-                for tid in rh.technique_ids:
-                    if tid not in technique_tags:
-                        technique_tags.append(tid)
 
         # Include the cascade stage as a technique tag so it appears
         # in downstream telemetry / logging alongside MITRE-style IDs.
@@ -1279,7 +1286,7 @@ class CascadeClassifier:
         This allows CascadeClassifier to plug into the probe evaluation
         framework without modification.
         """
-        label, confidence, hits, _stage, l0, _reasoning = self._classify_full(text)
+        label, confidence, hits, _stage, l0, _reasoning, _tags = self._classify_full(text)
         return label, confidence, hits, l0
 
     # --- Stats API ---
@@ -1303,6 +1310,10 @@ class CascadeClassifier:
             # Flatten per-layer failure counts with "failures_" prefix
             for layer, count in self._layer_failures.items():
                 result["failures_{}".format(layer)] = count
+            # PromptGuard failures are tracked in a module-level dict
+            # (shared across WeightedClassifier instances), not in
+            # _layer_failures.  Override the dead counter with the real one.
+            result["failures_promptguard"] = _pg_failure_state["total"]
         return result
 
     def classify_batch(self, texts):
@@ -1329,6 +1340,13 @@ class CascadeClassifier:
                     type(texts).__name__
                 )
             )
+        for i, item in enumerate(texts):
+            if not isinstance(item, str):
+                raise TypeError(
+                    "classify_batch() element {} is {}, expected str".format(
+                        i, type(item).__name__
+                    )
+                )
         n = len(texts)
         results = [None] * n
 
@@ -1376,19 +1394,11 @@ class CascadeClassifier:
                     result = self._classify_full(text, _pre_sanitized_l0=l0)
                     label, confidence, hits, stage = result[:4]
                     is_mal = label == "MALICIOUS"
-                    # Extract technique_tags for parity with scan()
-                    technique_tags = []
-                    if l0 is not None and not l0.rejected:
-                        from .rules import rule_score_detailed as _rsd
-                        for rh in _rsd(l0.sanitized_text):
-                            for tid in rh.technique_ids:
-                                if tid not in technique_tags:
-                                    technique_tags.append(tid)
+                    technique_tags = list(result[6])
                     stage_tag = "cascade:{}".format(stage)
                     if stage_tag not in technique_tags:
                         technique_tags.append(stage_tag)
-                    # Extract judge_reasoning from _classify_full result
-                    _judge_reasoning = result[5] if len(result) > 5 else ""
+                    _judge_reasoning = result[5]
                     results[idx] = ScanResult(
                         sanitized_text=l0.sanitized_text,
                         is_malicious=is_mal,

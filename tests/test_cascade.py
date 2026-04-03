@@ -552,7 +552,7 @@ class TestCascadeClassifier:
             rejection_reason="binary payload",
         )
         cc = self._make_cascade()
-        label, conf, hits, stage = cc.classify(b"\x00\x01\x02")
+        label, conf, hits, stage = cc.classify("\x00\x01\x02")
         assert label == "BLOCKED"
         assert stage == "blocked"
         assert conf == 1.0
