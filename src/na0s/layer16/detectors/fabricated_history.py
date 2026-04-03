@@ -32,10 +32,11 @@ _TURN_MARKER = re.compile(
 )
 
 # Alternating pattern: at least 3 pairs of different speakers
+# Use [\s\S]{0,500} (bounded) instead of .*? (unbounded) to prevent ReDoS
 _ALTERNATING = re.compile(
-    r"(?:(?:User|Human)\s*:.*?\n\s*(?:Assistant|AI|Bot)\s*:)"
-    r"|(?:(?:Assistant|AI|Bot)\s*:.*?\n\s*(?:User|Human)\s*:)",
-    re.IGNORECASE | re.DOTALL,
+    r"(?:(?:User|Human)\s*:[\s\S]{0,500}?\n\s*(?:Assistant|AI|Bot)\s*:)"
+    r"|(?:(?:Assistant|AI|Bot)\s*:[\s\S]{0,500}?\n\s*(?:User|Human)\s*:)",
+    re.IGNORECASE,
 )
 
 

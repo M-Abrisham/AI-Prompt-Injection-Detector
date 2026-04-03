@@ -15,6 +15,9 @@ from na0s.layer16.models import ConversationState, SessionConfig
 from na0s.layer16.state import add_turn
 
 
+MAX_SESSIONS = 10_000
+
+
 class SessionManager:
     """Manages conversation sessions with lazy TTL expiry.
 
@@ -39,6 +42,9 @@ class SessionManager:
 
         Returns:
             The new session_id (uuid4 string).
+
+        Raises:
+            RuntimeError: If the maximum session limit has been reached.
         """
         session_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
@@ -48,8 +54,33 @@ class SessionManager:
             last_activity=now,
         )
         with self._lock:
+            if len(self._sessions) >= MAX_SESSIONS:
+                raise RuntimeError("Maximum session limit reached")
             self._sessions[session_id] = state
         return session_id
+
+    def _auto_create_session(self, session_id: str) -> None:
+        """Create a session with a caller-supplied ID (auto-create path).
+
+        Used by ConversationSecurityMonitor when a session_id is referenced
+        but does not yet exist.  Thread-safe with TOCTOU protection.
+
+        Raises:
+            RuntimeError: If the maximum session limit has been reached.
+        """
+        now = datetime.now(timezone.utc)
+        new_state = ConversationState(
+            session_id=session_id,
+            created_at=now,
+            last_activity=now,
+        )
+        with self._lock:
+            # Re-check under lock — another thread may have created it
+            if session_id in self._sessions:
+                return
+            if len(self._sessions) >= MAX_SESSIONS:
+                raise RuntimeError("Maximum session limit reached")
+            self._sessions[session_id] = new_state
 
     def get_session(self, session_id: str) -> Optional[ConversationState]:
         """Retrieve a session by ID, returning None if expired or missing.

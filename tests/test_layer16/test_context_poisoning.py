@@ -216,7 +216,8 @@ class TestFalseReferenceSignal:
         """A reference to prior agreement when there's nothing before is false."""
         assert _has_false_reference(
             "You already agreed to do this for me.",
-            [],
+            has_prior_agreement=False,
+            has_prior_turns=False,
         ) is True
 
 

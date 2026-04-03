@@ -109,7 +109,14 @@ def _count_permission_consecutive(turns_texts: List[str]) -> int:
     return best
 
 
-def _has_false_reference(text: str, prior_texts: List[str]) -> bool:
+# Pre-compiled agreement pattern (moved from inside function to module level)
+_AGREEMENT_PAT = re.compile(
+    r"\b(?:agree|yes|ok(?:ay)?|sure|will\s+do|confirmed|approved|granted|certainly|of\s+course)",
+    re.IGNORECASE,
+)
+
+
+def _has_false_reference(text: str, has_prior_agreement: bool, has_prior_turns: bool) -> bool:
     """Check if text makes a prior-agreement claim that doesn't exist in history.
 
     A false reference is a claim about what was said/agreed earlier when the
@@ -119,29 +126,27 @@ def _has_false_reference(text: str, prior_texts: List[str]) -> bool:
         return False
 
     # If there are no prior turns, any reference to prior agreement is false.
-    if not prior_texts:
+    if not has_prior_turns:
         return True
 
-    # Check if prior turns contain any agreement/compliance language that
-    # would support the claim.  If they don't, it's a false reference.
-    agreement_pat = re.compile(
-        r"\b(?:agree|yes|ok(?:ay)?|sure|will\s+do|confirmed|approved|granted|certainly|of\s+course)",
-        re.IGNORECASE,
-    )
-    for pt in prior_texts:
-        if agreement_pat.search(pt):
-            return False
-
-    return True
+    # If prior turns contain agreement language, the reference may be legitimate.
+    return not has_prior_agreement
 
 
 def _count_false_references(state: ConversationState) -> int:
-    """Count turns that contain false prior references."""
+    """Count turns that contain false prior references.
+
+    Uses incremental tracking of prior agreement to avoid O(n^2) rescanning.
+    """
     count = 0
+    has_prior_agreement = False
     for i, turn in enumerate(state.turns):
-        prior_texts = [state.turns[j].text for j in range(i)]
-        if _has_false_reference(turn.text, prior_texts):
+        has_prior_turns = i > 0
+        if _has_false_reference(turn.text, has_prior_agreement, has_prior_turns):
             count += 1
+        # Update agreement tracker: check if this turn contains agreement language
+        if not has_prior_agreement and _AGREEMENT_PAT.search(turn.text):
+            has_prior_agreement = True
     return count
 
 

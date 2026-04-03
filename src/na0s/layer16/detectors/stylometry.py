@@ -292,7 +292,7 @@ _TEMPLATE_WEIGHT = 0.35
 _TEMPLATE_PATTERNS = [
     # Numbered lists / bullet points (3+ consecutive list items)
     re.compile(
-        r"(?:^\s*(?:\d+[.)]\s|[-*]\s)\S.*\n?){3,}",
+        r"(?:^\s*(?:\d+[.)]\s|[-*]\s)\S[^\n]*\n?){3,}",
         re.MULTILINE,
     ),
     # Markdown-style headers
@@ -302,22 +302,31 @@ _TEMPLATE_PATTERNS = [
     # Uniform placeholder-style text
     re.compile(r"\[(?:INSERT|REPLACE|YOUR|PLACEHOLDER|EXAMPLE|TODO)\b", re.IGNORECASE),
     # Overly structured "Step 1: ... Step 2: ..." pattern
-    re.compile(r"(?:step\s+\d+\s*[:.].*?){2,}", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?:step\s+\d+\s*[:.][^\n]*\n?){2,}", re.IGNORECASE),
 ]
 
 # Common typo patterns (missing in automated text)
-_TYPO_PATTERNS = [
+_TYPO_PATTERNS_SIMPLE = [
     re.compile(r"\b\w*[aeiou]{3,}\w*\b"),  # triple vowels (often typos)
-    re.compile(r"\b(\w+)\s\1\b"),  # repeated word
     re.compile(r"[a-z]\s{2,}[a-z]"),  # double spaces
     re.compile(r"\b(?:teh|hte|waht|taht|adn|nad|wiht|htat)\b", re.IGNORECASE),
 ]
 
+_REPEATED_WORD = re.compile(r"\b(\w+)\s\1\b")
+
+# Common legitimate duplicate words — skip these in typo detection
+_COMMON_DUPES = {"the", "that", "had", "has", "is", "it", "in", "on", "to", "a", "an"}
+
 
 def _has_typos(text: str) -> bool:
     """Check if text contains common typo indicators."""
-    for pat in _TYPO_PATTERNS:
+    for pat in _TYPO_PATTERNS_SIMPLE:
         if pat.search(text):
+            return True
+    # Check repeated words, but skip common legitimate duplicates
+    for m in _REPEATED_WORD.finditer(text):
+        word = m.group(1).lower()
+        if word not in _COMMON_DUPES and len(word) >= 4:
             return True
     return False
 

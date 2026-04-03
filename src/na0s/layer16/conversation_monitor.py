@@ -8,19 +8,22 @@ degradation so missing deps do not break the monitor.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+import threading
 from typing import Dict, List, Optional
 
 from na0s.layer16 import config as layer16_config
 from na0s.layer16.exceptions import SessionNotFoundError
 from na0s.layer16.models import (
     Alert,
-    ConversationState,
     MultiTurnAnalysis,
     SessionConfig,
 )
 from na0s.layer16.session_manager import SessionManager
-from na0s.layer16.state import add_turn, get_risk_trend
+from na0s.layer16.state import (
+    add_turn,
+    compute_peak_accumulation,
+    get_risk_trend,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,11 @@ try:
     from na0s.layer16.detectors.stylometry import BehavioralStylometryDetector
 except ImportError:  # pragma: no cover
     BehavioralStylometryDetector = None  # type: ignore[misc,assignment]
+
+try:
+    from na0s.layer16.detectors.embedding_drift import EmbeddingDriftDetector
+except ImportError:  # pragma: no cover
+    EmbeddingDriftDetector = None  # type: ignore[misc,assignment]
 
 
 def _compute_recommendation(alerts: List[Alert]) -> str:
@@ -88,6 +96,7 @@ class ConversationSecurityMonitor:
         self._config = config or SessionConfig()
         self._session_mgr = SessionManager(config=self._config)
         self._detectors = self._init_detectors()
+        self._process_lock = threading.RLock()
         # Alert dedup: session_id -> {alert_type -> (last_turn_fired, confidence)}
         self._last_alert_turn: Dict[str, Dict[str, tuple]] = {}
         # Last deduped alerts per session (for consumers that want filtered view)
@@ -111,6 +120,8 @@ class ConversationSecurityMonitor:
             detectors.append(ContextPoisoningDetector())
         if BehavioralStylometryDetector is not None:
             detectors.append(BehavioralStylometryDetector())
+        if EmbeddingDriftDetector is not None:
+            detectors.append(EmbeddingDriftDetector())
         return detectors
 
     # ------------------------------------------------------------------
@@ -134,6 +145,11 @@ class ConversationSecurityMonitor:
         suppression_window = layer16_config.ALERT_SUPPRESSION_TURNS
 
         for alert in alerts:
+            # Never suppress high or critical severity alerts
+            if alert.severity in ("high", "critical"):
+                passed.append(alert)
+                session_history[alert.alert_type] = (current_turn, alert.confidence)
+                continue
             prev = session_history.get(alert.alert_type)
             if prev is not None:
                 prev_turn, prev_conf = prev
@@ -214,90 +230,82 @@ class ConversationSecurityMonitor:
             if flags is None and "technique_tags" in single_turn_result:
                 flags = list(single_turn_result["technique_tags"])
 
-        # 1. Get or auto-create session state (thread-safe via SessionManager's lock)
+        # 1. Get or auto-create session state
         state = self._session_mgr.get_session(session_id)
         if state is None:
-            # Auto-create: use lock-protected path to avoid TOCTOU race
-            now = datetime.now(timezone.utc)
-            new_state = ConversationState(
-                session_id=session_id,
-                created_at=now,
-                last_activity=now,
-            )
-            with self._session_mgr._lock:
-                # Re-check under lock — another thread may have created it
-                existing = self._session_mgr._sessions.get(session_id)
-                if existing is None:
-                    self._session_mgr._sessions[session_id] = new_state
+            self._session_mgr._auto_create_session(session_id)
             state = self._session_mgr.get_session(session_id)
 
-        # 2. Add the turn
-        add_turn(state, text, risk_score, label, flags)
+        with self._process_lock:
+            # 2. Add the turn
+            add_turn(state, text, risk_score, label, flags)
 
-        # 3. Run all detectors
-        all_alerts: List[Alert] = []
-        for detector in self._detectors:
-            try:
-                alerts = detector.analyze(state)
-                all_alerts.extend(alerts)
-            except Exception:
-                logger.warning(
-                    "Detector %s failed on session %s",
-                    getattr(detector, "detector_name", "unknown"),
-                    session_id,
-                    exc_info=True,
+            # 3. Run all detectors
+            all_alerts: List[Alert] = []
+            for detector in self._detectors:
+                try:
+                    alerts = detector.analyze(state)
+                    all_alerts.extend(alerts)
+                except Exception:
+                    logger.warning(
+                        "Detector %s failed on session %s",
+                        getattr(detector, "detector_name", "unknown"),
+                        session_id,
+                        exc_info=True,
+                    )
+
+            # 4. Update cumulative state (always stores full alert set)
+            state.active_alerts = all_alerts
+
+            # 4b. Alert deduplication — tracks repeated alerts and stores a
+            #     filtered view while keeping state.active_alerts intact.
+            if layer16_config.ENABLE_ALERT_DEDUP:
+                self._last_deduped[session_id] = self._dedup_alerts(
+                    all_alerts, session_id, state.turn_count,
                 )
+            else:
+                self._last_deduped[session_id] = list(all_alerts)
 
-        # 4. Update cumulative state (always stores full alert set)
-        state.active_alerts = all_alerts
-
-        # 4b. Alert deduplication — tracks repeated alerts and stores a
-        #     filtered view while keeping state.active_alerts intact.
-        if layer16_config.ENABLE_ALERT_DEDUP:
-            self._last_deduped[session_id] = self._dedup_alerts(
-                all_alerts, session_id, state.turn_count,
+            # 5. Build the analysis result
+            # Detection flags and recommendation use the full (unfiltered) state
+            # so callers always see the current threat picture.  The ``alerts``
+            # list in the returned analysis is deduped to reduce noise.
+            risk_trend = get_risk_trend(state)
+            active = state.active_alerts
+            escalation_detected = any(
+                a.alert_type == "escalation" for a in active
             )
-        else:
-            self._last_deduped[session_id] = list(all_alerts)
+            payload_assembly_detected = any(
+                a.alert_type == "payload_assembly" for a in active
+            )
+            fabricated_history_detected = any(
+                a.alert_type == "fabricated_history" for a in active
+            )
+            context_poisoning_detected = any(
+                a.alert_type == "context_poisoning" for a in active
+            )
 
-        # 5. Build the analysis result
-        # Detection flags and recommendation use the full (unfiltered) state
-        # so callers always see the current threat picture.  The ``alerts``
-        # list in the returned analysis is deduped to reduce noise.
-        risk_trend = get_risk_trend(state)
-        active = state.active_alerts
-        escalation_detected = any(
-            a.alert_type == "escalation" for a in active
-        )
-        payload_assembly_detected = any(
-            a.alert_type == "payload_assembly" for a in active
-        )
-        fabricated_history_detected = any(
-            a.alert_type == "fabricated_history" for a in active
-        )
-        context_poisoning_detected = any(
-            a.alert_type == "context_poisoning" for a in active
-        )
+            # Recommendation logic uses full state alerts
+            recommendation = _compute_recommendation(active)
 
-        # Recommendation logic uses full state alerts
-        recommendation = _compute_recommendation(active)
-
-        return MultiTurnAnalysis(
-            session_id=session_id,
-            turn_count=state.turn_count,
-            escalation_detected=escalation_detected,
-            escalation_score=max(
-                (a.confidence for a in active if a.alert_type == "escalation"),
-                default=0.0,
-            ),
-            payload_assembly_detected=payload_assembly_detected,
-            context_poisoning_detected=context_poisoning_detected,
-            fabricated_history_detected=fabricated_history_detected,
-            cumulative_risk=state.cumulative_risk,
-            risk_trend=risk_trend,
-            alerts=all_alerts,
-            recommendation=recommendation,
-        )
+            return MultiTurnAnalysis(
+                session_id=session_id,
+                turn_count=state.turn_count,
+                escalation_detected=escalation_detected,
+                escalation_score=max(
+                    (a.confidence for a in active if a.alert_type == "escalation"),
+                    default=0.0,
+                ),
+                payload_assembly_detected=payload_assembly_detected,
+                context_poisoning_detected=context_poisoning_detected,
+                fabricated_history_detected=fabricated_history_detected,
+                cumulative_risk=state.cumulative_risk,
+                peak_accumulation_score=compute_peak_accumulation(state),
+                cusum_score=state.cusum_score,
+                risk_trend=risk_trend,
+                alerts=all_alerts,
+                recommendation=recommendation,
+            )
 
     def get_session_summary(self, session_id: str) -> dict:
         """Return a summary dict for a session.
@@ -321,6 +329,9 @@ class ConversationSecurityMonitor:
             "session_id": session_id,
             "turn_count": state.turn_count,
             "cumulative_risk": state.cumulative_risk,
+            "peak_risk": state.peak_risk,
+            "cusum_score": state.cusum_score,
+            "peak_accumulation_score": compute_peak_accumulation(state),
             "risk_trend": risk_trend,
             "active_alerts": len(state.active_alerts),
             "created_at": state.created_at.isoformat(),
@@ -387,6 +398,8 @@ class ConversationSecurityMonitor:
             context_poisoning_detected=context_poisoning_detected,
             fabricated_history_detected=fabricated_history_detected,
             cumulative_risk=state.cumulative_risk,
+            peak_accumulation_score=compute_peak_accumulation(state),
+            cusum_score=state.cusum_score,
             risk_trend=risk_trend,
             alerts=all_alerts,
             recommendation=recommendation,
@@ -399,9 +412,18 @@ class ConversationSecurityMonitor:
         return analysis
 
     def cleanup(self) -> int:
-        """Remove all expired sessions.
+        """Remove all expired sessions and prune stale dedup entries.
 
         Returns:
             Count of sessions removed.
         """
-        return self._session_mgr.cleanup_expired()
+        removed = self._session_mgr.cleanup_expired()
+        # Prune dedup dicts for sessions that no longer exist
+        active_ids = set(self._session_mgr._sessions.keys())
+        self._last_alert_turn = {
+            k: v for k, v in self._last_alert_turn.items() if k in active_ids
+        }
+        self._last_deduped = {
+            k: v for k, v in self._last_deduped.items() if k in active_ids
+        }
+        return removed
