@@ -78,6 +78,7 @@ class MultiTurnAnalysis:
     context_poisoning_detected: bool = False
     poisoning_details: Optional[str] = None
     fabricated_history_detected: bool = False
+    cumulative_risk: float = 0.0
     risk_trend: List[float] = field(default_factory=list)
     alerts: List[Alert] = field(default_factory=list)
     recommendation: str = "continue_monitoring"  # "continue_monitoring" | "flag" | "block"
@@ -96,6 +97,7 @@ class MultiTurnAnalysis:
             "assembled_payload": self.assembled_payload,
             "context_poisoning_detected": self.context_poisoning_detected,
             "fabricated_history_detected": self.fabricated_history_detected,
+            "cumulative_risk": self.cumulative_risk,
             "risk_trend": self.risk_trend,
             "recommendation": self.recommendation,
             "alerts": [

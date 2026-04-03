@@ -42,7 +42,39 @@ def add_turn(
     )
     state.turns.append(turn)
     state.last_activity = datetime.now(timezone.utc)
+
+    # Update cumulative risk: EMA with decay, capped at [0.0, 1.0].
+    # Older risk decays by (1 - alpha), new turn risk added with weight alpha.
+    update_cumulative_risk(state, risk_score)
+
     return turn
+
+
+def update_cumulative_risk(
+    state: ConversationState,
+    turn_risk: float,
+    decay: float = 0.85,
+    alpha: float = 0.3,
+) -> float:
+    """Update the cumulative risk on *state* after a new turn.
+
+    Uses an exponential moving average approach:
+        new_cumulative = decay * old_cumulative + alpha * turn_risk
+
+    The result is clamped to [0.0, 1.0] so it never grows unbounded.
+
+    Args:
+        state: Conversation state to mutate.
+        turn_risk: Risk score of the newly added turn (0.0-1.0).
+        decay: Retention factor for prior cumulative risk (0 < decay < 1).
+        alpha: Weight given to the new turn's risk score.
+
+    Returns:
+        The updated cumulative_risk value.
+    """
+    raw = decay * state.cumulative_risk + alpha * turn_risk
+    state.cumulative_risk = max(0.0, min(1.0, raw))
+    return state.cumulative_risk
 
 
 def get_window(

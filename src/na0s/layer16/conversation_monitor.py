@@ -47,6 +47,11 @@ try:
 except ImportError:  # pragma: no cover
     ContextPoisoningDetector = None  # type: ignore[misc,assignment]
 
+try:
+    from na0s.layer16.detectors.stylometry import BehavioralStylometryDetector
+except ImportError:  # pragma: no cover
+    BehavioralStylometryDetector = None  # type: ignore[misc,assignment]
+
 
 def _compute_recommendation(alerts: List[Alert]) -> str:
     """Derive a recommendation string from a list of alerts.
@@ -99,6 +104,8 @@ class ConversationSecurityMonitor:
             detectors.append(FabricatedHistoryDetector())
         if ContextPoisoningDetector is not None:
             detectors.append(ContextPoisoningDetector())
+        if BehavioralStylometryDetector is not None:
+            detectors.append(BehavioralStylometryDetector())
         return detectors
 
     # ------------------------------------------------------------------
@@ -228,6 +235,7 @@ class ConversationSecurityMonitor:
             payload_assembly_detected=payload_assembly_detected,
             context_poisoning_detected=context_poisoning_detected,
             fabricated_history_detected=fabricated_history_detected,
+            cumulative_risk=state.cumulative_risk,
             risk_trend=risk_trend,
             alerts=all_alerts,
             recommendation=recommendation,
@@ -320,6 +328,7 @@ class ConversationSecurityMonitor:
             payload_assembly_detected=payload_assembly_detected,
             context_poisoning_detected=context_poisoning_detected,
             fabricated_history_detected=fabricated_history_detected,
+            cumulative_risk=state.cumulative_risk,
             risk_trend=risk_trend,
             alerts=all_alerts,
             recommendation=recommendation,

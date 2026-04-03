@@ -66,6 +66,7 @@ ENABLE_ESCALATION = True
 ENABLE_PAYLOAD_SPLITTING = True
 ENABLE_FABRICATED_HISTORY = True
 ENABLE_CONTEXT_POISONING = True
+ENABLE_BEHAVIORAL_STYLOMETRY = True
 
 # ---------------------------------------------------------------------------
 # Context Poisoning (D1.20)
@@ -74,3 +75,11 @@ ENABLE_CONTEXT_POISONING = True
 POISONING_MIN_TURNS = 3
 POISONING_CONFIDENCE_MIN = 0.25
 POISONING_MULTI_SIGNAL_BOOST = 1.5
+
+# ---------------------------------------------------------------------------
+# Behavioral Stylometry (D1.21)
+# ---------------------------------------------------------------------------
+
+STYLOMETRY_MIN_TURNS = 3
+STYLOMETRY_CONFIDENCE_MIN = 0.25
+STYLOMETRY_MULTI_SIGNAL_BOOST = 1.5
