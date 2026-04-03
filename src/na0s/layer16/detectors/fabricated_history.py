@@ -19,6 +19,7 @@ import re
 from typing import List, Optional
 
 from ..config import (
+    ENABLE_FABRICATED_HISTORY,
     FABRICATED_KEYWORDS,
     FABRICATED_TURN_MARKER_THRESHOLD,
 )
@@ -55,6 +56,8 @@ class FabricatedHistoryDetector(MultiTurnDetector):
         pass
 
     def analyze(self, state: ConversationState) -> List[Alert]:
+        if not ENABLE_FABRICATED_HISTORY:
+            return []
         if state is None or state.is_empty:
             return []
 

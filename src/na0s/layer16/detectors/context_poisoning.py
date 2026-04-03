@@ -19,6 +19,7 @@ import re
 from typing import List
 
 from ..config import (
+    ENABLE_CONTEXT_POISONING,
     POISONING_CONFIDENCE_MIN,
     POISONING_MIN_TURNS,
     POISONING_MULTI_SIGNAL_BOOST,
@@ -166,6 +167,8 @@ class ContextPoisoningDetector(MultiTurnDetector):
         pass  # stateless
 
     def analyze(self, state: ConversationState) -> List[Alert]:
+        if not ENABLE_CONTEXT_POISONING:
+            return []
         if state is None or state.is_empty:
             return []
 

@@ -26,6 +26,7 @@ from ..config import (
     ASSEMBLY_MAX_CANDIDATES,
     ASSEMBLY_RISK_GAP_THRESHOLD,
     ASSEMBLY_WINDOW,
+    ENABLE_PAYLOAD_SPLITTING,
     FRAGMENT_MARKERS,
 )
 from ..models import Alert, ConversationState
@@ -271,6 +272,8 @@ class PayloadSplittingDetector(MultiTurnDetector):
     # -----------------------------------------------------------------
 
     def analyze(self, state: ConversationState) -> List[Alert]:
+        if not ENABLE_PAYLOAD_SPLITTING:
+            return []
         if state is None or state.is_empty:
             return []
 

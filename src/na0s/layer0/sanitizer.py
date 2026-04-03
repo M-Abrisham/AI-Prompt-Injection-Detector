@@ -17,14 +17,11 @@ from .language_detector import detect_language
 from .pii_detector import scan_pii
 from .mime_parser import parse_mime_input, _looks_like_mime
 from .ocr_extractor import (
-    OCRResult,
-    ImageMetadataResult,
     detect_image_format,
     extract_text_from_image,
     extract_image_metadata,
 )
 from .doc_extractor import (
-    DocResult,
     detect_doc_type,
     detect_pdf_javascript,
     extract_text_from_document,

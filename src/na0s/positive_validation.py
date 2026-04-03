@@ -23,8 +23,6 @@ from typing import Dict, List, Optional
 
 from .rules import PERSONA_OVERRIDE_PATTERNS
 
-from .rules import PERSONA_OVERRIDE_PATTERNS
-
 
 # ---------------------------------------------------------------------------
 # Result dataclasses

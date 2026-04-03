@@ -77,13 +77,12 @@ from .layer0.timeout import (
 )
 from .layer1.context import _is_legitimate_roleplay, _has_contextual_framing
 from .layer2 import obfuscation_scan
-from .rules import rule_score_detailed, RULES, SEVERITY_WEIGHTS
+from .rules import rule_score_detailed, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
 from .config import MAX_INPUT_LENGTH
 from .safe_pickle import safe_load
 from .models import get_model_path, KNOWN_HASHES
 from ._voting import _weighted_composite
-from .signal_boost import calculate_boost_from_names
 from .safe_content import calculate_safe_content_score
 from .multilingual_intent import detect_multilingual_intents, HEURISTIC_HITS
 from ._voting import (
@@ -168,10 +167,7 @@ except ImportError:
 # MCP tool shadowing detector (T1) — optional import
 try:
     from .mcp_tool_detector import (
-        detect_tool_shadowing as _detect_tool_shadowing,
         scan_tool_manifest as _scan_tool_manifest,
-        get_mcp_tool_weight,
-        McpToolResult,
     )
     _HAS_MCP_TOOL_DETECTOR = True
 except ImportError:
@@ -1170,11 +1166,6 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         composite = composite - safe_score
         if composite < threshold:
             label = "SAFE"
-
-    # Now add obfuscation flags to hits for downstream consumers
-    # (technique_tags mapping, ScanResult.rule_hits, etc.)
-    if obs_flags:
-        hits.extend(obs_flags)
 
     # Now add obfuscation flags to hits for downstream consumers
     # (technique_tags mapping, ScanResult.rule_hits, etc.)

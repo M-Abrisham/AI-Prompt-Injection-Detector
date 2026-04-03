@@ -7,7 +7,6 @@ tests stay fast and isolated.
 
 from __future__ import annotations
 
-import uuid
 from typing import List, Optional
 
 from na0s.layer16.conversation_monitor import ConversationSecurityMonitor

@@ -90,3 +90,84 @@ POISONING_MULTI_SIGNAL_BOOST = 1.5
 STYLOMETRY_MIN_TURNS = 3
 STYLOMETRY_CONFIDENCE_MIN = 0.25
 STYLOMETRY_MULTI_SIGNAL_BOOST = 1.5
+
+# ---------------------------------------------------------------------------
+# Embedding Drift Detection (D1.23)
+# ---------------------------------------------------------------------------
+
+ENABLE_EMBEDDING_DRIFT = True
+DRIFT_MIN_TURNS = 3  # need at least 3 turns to measure drift
+DRIFT_WINDOW = 5  # last N turns to analyze
+DRIFT_SHARP_THRESHOLD = 0.3  # cosine sim below this = sharp topic pivot
+DRIFT_AVG_THRESHOLD = 0.5  # average cosine sim below this = gradual drift
+DRIFT_CONFIDENCE_MIN = 0.3
+
+# ---------------------------------------------------------------------------
+# User Risk Profiles (T3.1)
+# ---------------------------------------------------------------------------
+
+ENABLE_USER_RISK_PROFILES = True
+USER_RISK_PROFILE_DECAY = 0.7  # EMA decay for cross-session risk
+MAX_USER_PROFILES = 100_000
+MAX_TECHNIQUE_FINGERPRINTS = 200  # cap per profile to prevent unbounded growth
+
+# ---------------------------------------------------------------------------
+# Graduated Response Levels (T3.2)
+# ---------------------------------------------------------------------------
+
+THREAT_LEVEL_BLOCKED_RISK = 0.9
+THREAT_LEVEL_FLAGGED_RISK = 0.7
+THREAT_LEVEL_SUSPECT_RISK = 0.5
+THREAT_LEVEL_WATCH_RISK = 0.3
+
+# ---------------------------------------------------------------------------
+# Cross-Session Attack Pattern Bloom Filter (T3.4)
+# ---------------------------------------------------------------------------
+
+ENABLE_PATTERN_RECALL = True
+BLOOM_FILTER_CAPACITY = 10_000
+BLOOM_FILTER_FP_RATE = 0.01
+PATTERN_RECALL_THRESHOLD = 0.3
+PATTERN_RECALL_NGRAM_SIZE = 3
+
+# ---------------------------------------------------------------------------
+# Cross-Turn Mutual Information (T3.7)
+# ---------------------------------------------------------------------------
+
+ENABLE_MUTUAL_INFORMATION = True
+MI_MIN_TURNS = 3
+MI_NMI_DROP_THRESHOLD = 0.15
+MI_ENTROPY_DEVIATION_FACTOR = 2.0  # flag if turn entropy > 2x conversation mean
+MI_WINDOW = 5
+
+# ---------------------------------------------------------------------------
+# Conversation FSM / Protocol Analyzer (C1MT.4)
+# ---------------------------------------------------------------------------
+
+ENABLE_CONVERSATION_FSM = True
+FSM_MIN_TURNS = 2
+
+# ---------------------------------------------------------------------------
+# Code-Switching Detection (C1MT.5)
+# ---------------------------------------------------------------------------
+
+ENABLE_CODE_SWITCHING = True
+CODE_SWITCH_MIN_TURNS = 2
+HOMOGLYPH_MIN_COUNT = 3
+
+# ---------------------------------------------------------------------------
+# Two-Tier Memory: Hot + Warm (T3.5)
+# ---------------------------------------------------------------------------
+
+ENABLE_WARM_MEMORY = True
+WARM_MEMORY_MAX_SUMMARIES = 10
+WARM_MEMORY_BATCH_SIZE = 5
+
+# ---------------------------------------------------------------------------
+# BOCPD Change Point Detection (T3.6)
+# ---------------------------------------------------------------------------
+
+ENABLE_CHANGE_POINT = True
+BOCPD_HAZARD_RATE = 0.02  # expect change every ~50 turns
+BOCPD_CHANGE_POINT_THRESHOLD = 0.5  # alert when P(cp) > 0.5
+BOCPD_MIN_TURNS = 3

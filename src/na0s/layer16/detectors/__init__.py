@@ -8,10 +8,16 @@ from .payload_splitting import PayloadSplittingDetector
 from .stylometry import BehavioralStylometryDetector
 from .turn_analyzer import TurnAnalyzer
 
+try:
+    from .embedding_drift import EmbeddingDriftDetector
+except ImportError:
+    EmbeddingDriftDetector = None  # type: ignore[assignment,misc]
+
 __all__ = [
     "MultiTurnDetector",
     "BehavioralStylometryDetector",
     "ContextPoisoningDetector",
+    "EmbeddingDriftDetector",
     "EscalationDetector",
     "FabricatedHistoryDetector",
     "PayloadSplittingDetector",

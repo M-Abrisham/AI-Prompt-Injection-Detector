@@ -12,7 +12,6 @@ Technique mapping:
 
 import logging
 import re
-import unicodedata
 
 _logger = logging.getLogger(__name__)
 

@@ -18,12 +18,15 @@ from na0s.layer16.models import (
     MultiTurnAnalysis,
     SessionConfig,
 )
+from na0s.layer16.graduated_response import compute_threat_level, get_response_action
+from na0s.layer16.models import ThreatLevel, UserRiskProfile
 from na0s.layer16.session_manager import SessionManager
 from na0s.layer16.state import (
     add_turn,
     compute_peak_accumulation,
     get_risk_trend,
 )
+from na0s.layer16.user_risk_profile import UserRiskProfileStore
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,31 @@ try:
     from na0s.layer16.detectors.embedding_drift import EmbeddingDriftDetector
 except ImportError:  # pragma: no cover
     EmbeddingDriftDetector = None  # type: ignore[misc,assignment]
+
+try:
+    from na0s.layer16.detectors.pattern_recall import PatternRecallDetector
+except ImportError:  # pragma: no cover
+    PatternRecallDetector = None  # type: ignore[misc,assignment]
+
+try:
+    from na0s.layer16.detectors.mutual_information import MutualInformationDetector
+except ImportError:  # pragma: no cover
+    MutualInformationDetector = None  # type: ignore[misc,assignment]
+
+try:
+    from na0s.layer16.detectors.conversation_fsm import ConversationFSMDetector
+except ImportError:  # pragma: no cover
+    ConversationFSMDetector = None  # type: ignore[misc,assignment]
+
+try:
+    from na0s.layer16.detectors.code_switching import CodeSwitchingDetector
+except ImportError:  # pragma: no cover
+    CodeSwitchingDetector = None  # type: ignore[misc,assignment]
+
+try:
+    from na0s.layer16.detectors.change_point import ChangePointDetector
+except ImportError:  # pragma: no cover
+    ChangePointDetector = None  # type: ignore[misc,assignment]
 
 
 def _compute_recommendation(alerts: List[Alert]) -> str:
@@ -101,6 +129,8 @@ class ConversationSecurityMonitor:
         self._last_alert_turn: Dict[str, Dict[str, tuple]] = {}
         # Last deduped alerts per session (for consumers that want filtered view)
         self._last_deduped: Dict[str, List[Alert]] = {}
+        # Cross-session user risk profiles (T3.1)
+        self._profile_store = UserRiskProfileStore()
 
     # ------------------------------------------------------------------
     # Detector initialisation
@@ -122,6 +152,16 @@ class ConversationSecurityMonitor:
             detectors.append(BehavioralStylometryDetector())
         if EmbeddingDriftDetector is not None:
             detectors.append(EmbeddingDriftDetector())
+        if PatternRecallDetector is not None:
+            detectors.append(PatternRecallDetector())
+        if MutualInformationDetector is not None:
+            detectors.append(MutualInformationDetector())
+        if ConversationFSMDetector is not None:
+            detectors.append(ConversationFSMDetector())
+        if CodeSwitchingDetector is not None:
+            detectors.append(CodeSwitchingDetector())
+        if ChangePointDetector is not None:
+            detectors.append(ChangePointDetector())
         return detectors
 
     # ------------------------------------------------------------------
@@ -176,20 +216,30 @@ class ConversationSecurityMonitor:
         """
         return list(self._last_deduped.get(session_id, []))
 
-    def create_session(self, **metadata: object) -> str:
+    def create_session(
+        self,
+        user_hash: Optional[str] = None,
+        **metadata: object,
+    ) -> str:
         """Create a new conversation session.
 
         Args:
+            user_hash: Optional opaque hash of the user identifier for
+                cross-session risk tracking.
             **metadata: Arbitrary metadata stored on the session state.
 
         Returns:
             A new session_id (uuid4 string).
         """
         sid = self._session_mgr.create_session()
-        if metadata:
-            state = self._session_mgr.get_session(sid)
-            if state is not None:
+        state = self._session_mgr.get_session(sid)
+        if state is not None:
+            if metadata:
                 state.metadata.update(metadata)
+            if user_hash and layer16_config.ENABLE_USER_RISK_PROFILES:
+                state.metadata["user_hash"] = user_hash
+                multiplier = self._profile_store.get_risk_multiplier(user_hash)
+                state.metadata["risk_multiplier"] = multiplier
         return sid
 
     def process_turn(
@@ -200,6 +250,7 @@ class ConversationSecurityMonitor:
         risk_score: float = 0.0,
         label: str = "safe",
         flags: Optional[List[str]] = None,
+        user_hash: Optional[str] = None,
     ) -> MultiTurnAnalysis:
         """Record a turn and run all multi-turn detectors.
 
@@ -216,11 +267,19 @@ class ConversationSecurityMonitor:
             risk_score: Risk score from single-turn ``scan()``.
             label: Classification label from single-turn ``scan()``.
             flags: Optional list of flag strings from single-turn analysis.
+            user_hash: Optional opaque hash of user identifier for
+                cross-session risk tracking.
 
         Returns:
             A :class:`MultiTurnAnalysis` with aggregated alerts and
             risk trend.
         """
+        if not layer16_config.ENABLE_MULTI_TURN:
+            return MultiTurnAnalysis(
+                session_id=session_id,
+                turn_count=0,
+            )
+
         # Extract fields from single_turn_result when provided
         if single_turn_result is not None:
             if risk_score == 0.0 and "risk_score" in single_turn_result:
@@ -235,6 +294,10 @@ class ConversationSecurityMonitor:
         if state is None:
             self._session_mgr._auto_create_session(session_id)
             state = self._session_mgr.get_session(session_id)
+
+        # Store user_hash in session metadata
+        if user_hash and layer16_config.ENABLE_USER_RISK_PROFILES:
+            state.metadata.setdefault("user_hash", user_hash)
 
         with self._process_lock:
             # 2. Add the turn
@@ -288,6 +351,14 @@ class ConversationSecurityMonitor:
             # Recommendation logic uses full state alerts
             recommendation = _compute_recommendation(active)
 
+            # Graduated threat level (T3.2)
+            user_profile = None
+            session_user_hash = state.metadata.get("user_hash")
+            if session_user_hash and layer16_config.ENABLE_USER_RISK_PROFILES:
+                user_profile = self._profile_store.get_profile(session_user_hash)
+            threat_level = compute_threat_level(state, active, user_profile)
+            response_action = get_response_action(threat_level)
+
             return MultiTurnAnalysis(
                 session_id=session_id,
                 turn_count=state.turn_count,
@@ -305,6 +376,8 @@ class ConversationSecurityMonitor:
                 risk_trend=risk_trend,
                 alerts=all_alerts,
                 recommendation=recommendation,
+                threat_level=threat_level.value,
+                response_action=response_action,
             )
 
     def get_session_summary(self, session_id: str) -> dict:
@@ -386,6 +459,27 @@ class ConversationSecurityMonitor:
 
         recommendation = _compute_recommendation(all_alerts)
 
+        # Graduated threat level (T3.2)
+        user_profile = None
+        session_user_hash = state.metadata.get("user_hash")
+        if session_user_hash and layer16_config.ENABLE_USER_RISK_PROFILES:
+            user_profile = self._profile_store.get_profile(session_user_hash)
+        threat_level = compute_threat_level(state, all_alerts, user_profile)
+        response_action = get_response_action(threat_level)
+
+        # Update cross-session user risk profile (T3.1)
+        if session_user_hash and layer16_config.ENABLE_USER_RISK_PROFILES:
+            technique_tags = []
+            for turn in state.turns:
+                technique_tags.extend(turn.flags)
+            was_flagged = recommendation in ("flag", "block")
+            self._profile_store.update_from_session(
+                user_hash=session_user_hash,
+                session_risk=state.cumulative_risk,
+                technique_tags=technique_tags,
+                was_flagged=was_flagged,
+            )
+
         analysis = MultiTurnAnalysis(
             session_id=session_id,
             turn_count=state.turn_count,
@@ -403,6 +497,8 @@ class ConversationSecurityMonitor:
             risk_trend=risk_trend,
             alerts=all_alerts,
             recommendation=recommendation,
+            threat_level=threat_level.value,
+            response_action=response_action,
         )
 
         # Remove the session and dedup tracking

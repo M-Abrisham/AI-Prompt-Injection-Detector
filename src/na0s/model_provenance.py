@@ -13,7 +13,7 @@ import platform
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 
 def _is_enabled() -> bool:

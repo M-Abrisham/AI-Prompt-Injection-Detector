@@ -17,13 +17,6 @@ import logging
 
 _logger = logging.getLogger(__name__)
 
-# Optional structural features import
-try:
-    from .structural_features import extract_structural_features
-    _HAS_STRUCTURAL = True
-except ImportError:
-    _HAS_STRUCTURAL = False
-
 # Optional layer2 import for obfuscation scanning
 try:
     from .layer2 import obfuscation_scan

@@ -48,7 +48,7 @@ from .rules import rule_score
 from .layer2 import obfuscation_scan
 from .layer0 import layer0_sanitize
 from .models import get_model_path
-from .faiss_classifier import FAISSClassifier, get_faiss_classifier
+from .faiss_classifier import get_faiss_classifier
 from .scan_result import ScanResult
 from .structural_features import extract_structural_features
 

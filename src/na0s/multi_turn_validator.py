@@ -8,7 +8,7 @@ that an attacker is gradually probing or wearing down defenses.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Deque, List
 
 from .positive_validation import ValidationResult

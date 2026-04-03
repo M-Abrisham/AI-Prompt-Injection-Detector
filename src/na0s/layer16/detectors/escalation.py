@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import List
 
 from ..config import (
+    ENABLE_ESCALATION,
     ESCALATION_MIN_TURNS,
     ESCALATION_SLOPE_THRESHOLD,
 )
@@ -99,6 +100,8 @@ class EscalationDetector(MultiTurnDetector):
         pass  # stateless -- all data comes from ConversationState
 
     def analyze(self, state: ConversationState) -> List[Alert]:
+        if not ENABLE_ESCALATION:
+            return []
         if state is None or state.is_empty:
             return []
 

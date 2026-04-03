@@ -39,7 +39,7 @@ import os
 import random
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
 _log = logging.getLogger(__name__)

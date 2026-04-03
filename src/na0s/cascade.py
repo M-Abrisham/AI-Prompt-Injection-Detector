@@ -19,7 +19,6 @@ import time
 import threading
 from typing import Dict, List, Optional, Tuple
 
-from .safe_pickle import safe_load
 from .predict import _get_cached_models, _get_cached_scaler, _transform, _get_model_version
 from .rules import rule_score, rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .config import THRESHOLDS, MAX_INPUT_LENGTH
@@ -44,24 +43,10 @@ from .rrf_fusion import rrf_score as _rrf_score, rrf_decision as _rrf_decision
 # Layer 6: Groundedness check
 from .groundedness import verify_verdict_grounded as _verify_grounded
 
-# Layer 6: Bayesian fusion — optional alternative
-try:
-    from .bayesian_fusion import BayesianFusion, DEFAULT_LIKELIHOOD_RATIOS
-    _HAS_BAYESIAN = True
-except ImportError:
-    _HAS_BAYESIAN = False
-
-# Layer 6: Stacking meta-learner — optional
-try:
-    from .stacking_classifier import StackingMetaLearner
-    _HAS_STACKING = True
-except ImportError:
-    _HAS_STACKING = False
-
 # Layer 6: Performance SLO tracking
 from .performance_slo import SLOTracker
 
-# Layer 6: Evidence grading
+# Layer 6: Evidence grading (imported for test-patchability)
 from .evidence_grading import filter_graded_hits
 
 # N5: PromptGuard transformer classifier — optional
@@ -121,28 +106,28 @@ except ImportError:
 
 # Layer 7: LLM checker — optional import
 try:
-    from .llm_checker import LLMChecker, LLMCheckResult
+    from .llm_checker import LLMChecker
     _HAS_LLM_CHECKER = True
 except ImportError:
     _HAS_LLM_CHECKER = False
 
 # Layer 8: Positive validation — optional import
 try:
-    from .positive_validation import PositiveValidator, ValidationResult
+    from .positive_validation import PositiveValidator
     _HAS_POSITIVE_VALIDATION = True
 except ImportError:
     _HAS_POSITIVE_VALIDATION = False
 
 # Layer 9: Output scanner — optional import
 try:
-    from .output_scanner import OutputScanner, OutputScanResult
+    from .output_scanner import OutputScanner
     _HAS_OUTPUT_SCANNER = True
 except ImportError:
     _HAS_OUTPUT_SCANNER = False
 
 # Layer 10: Canary token detection — optional import
 try:
-    from .canary import CanaryManager, CanaryToken
+    from .canary import CanaryManager
     _HAS_CANARY = True
 except ImportError:
     _HAS_CANARY = False
@@ -381,6 +366,7 @@ class WeightedClassifier:
         #
         # Layer 6 RRF alternative: When NA0S_USE_RRF=1, use Reciprocal
         # Rank Fusion instead of the linear weighted sum.
+        ml_prob_malicious = ml_prob if ml_label == "MALICIOUS" else (1.0 - ml_prob)
         if os.environ.get("NA0S_USE_RRF") == "1":
             rrf_signals = {"ml": ml_prob_malicious}
             if hit_names:

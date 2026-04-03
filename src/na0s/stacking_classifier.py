@@ -11,7 +11,6 @@ to the current linear combination in ``_voting.py``.
 
 from __future__ import annotations
 
-import os
 import pickle
 import threading
 from typing import Any

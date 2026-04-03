@@ -12,7 +12,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+
+
+class ThreatLevel(str, Enum):
+    """Graduated threat levels for multi-turn detection response."""
+
+    NORMAL = "normal"
+    WATCH = "watch"        # Low-confidence signals, monitor closely
+    SUSPECT = "suspect"    # Medium-confidence, increase scrutiny
+    FLAGGED = "flagged"    # High-confidence, restrict actions
+    BLOCKED = "blocked"    # Critical, deny request
 
 
 @dataclass
@@ -48,6 +59,8 @@ class ConversationState:
     session_id: str
     turns: List[ConversationTurn] = field(default_factory=list)
     cumulative_risk: float = 0.0
+    peak_risk: float = 0.0  # highest single-turn risk seen in this session
+    cusum_score: float = 0.0  # CUSUM accumulator for change detection
     active_alerts: List[Alert] = field(default_factory=list)
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
@@ -80,9 +93,13 @@ class MultiTurnAnalysis:
     poisoning_details: Optional[str] = None
     fabricated_history_detected: bool = False
     cumulative_risk: float = 0.0
+    peak_accumulation_score: float = 0.0  # combined P+A score
+    cusum_score: float = 0.0
     risk_trend: List[float] = field(default_factory=list)
     alerts: List[Alert] = field(default_factory=list)
     recommendation: str = "continue_monitoring"  # "continue_monitoring" | "flag" | "block"
+    threat_level: str = "normal"
+    response_action: Dict[str, bool] = field(default_factory=dict)
 
     @property
     def has_alerts(self) -> bool:
@@ -99,8 +116,12 @@ class MultiTurnAnalysis:
             "context_poisoning_detected": self.context_poisoning_detected,
             "fabricated_history_detected": self.fabricated_history_detected,
             "cumulative_risk": self.cumulative_risk,
+            "peak_accumulation_score": self.peak_accumulation_score,
+            "cusum_score": self.cusum_score,
             "risk_trend": self.risk_trend,
             "recommendation": self.recommendation,
+            "threat_level": self.threat_level,
+            "response_action": dict(self.response_action),
             "alerts": [
                 {
                     "alert_type": a.alert_type,
@@ -128,3 +149,18 @@ class SessionConfig:
     fabricated_turn_markers: int = 6  # min User:/Assistant: pairs
     storage_backend: str = "memory"  # "memory" | "sqlite" | "redis"
     max_sessions: int = 10000
+
+
+@dataclass
+class UserRiskProfile:
+    """Cross-session persistent risk profile for a user/source."""
+
+    user_hash: str  # SHA-256 of user identifier (privacy-preserving)
+    cumulative_risk: float = 0.0  # EMA across sessions, [0.0, 1.0]
+    session_count: int = 0
+    flagged_session_count: int = 0
+    technique_fingerprints: Dict[str, int] = field(default_factory=dict)  # technique_tag -> count
+    flag_level: str = "normal"  # normal, watch, suspect, flagged, blocked
+    first_seen: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_seen: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    metadata: Dict[str, Any] = field(default_factory=dict)

@@ -23,6 +23,7 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from ..config import (
+    ENABLE_BEHAVIORAL_STYLOMETRY,
     STYLOMETRY_MIN_TURNS,
     STYLOMETRY_CONFIDENCE_MIN,
     STYLOMETRY_MULTI_SIGNAL_BOOST,
@@ -408,6 +409,8 @@ class BehavioralStylometryDetector(MultiTurnDetector):
         pass  # stateless — all data comes from ConversationState
 
     def analyze(self, state: ConversationState) -> List[Alert]:
+        if not ENABLE_BEHAVIORAL_STYLOMETRY:
+            return []
         if state is None or state.is_empty:
             return []
 

@@ -34,6 +34,8 @@ from na0s.layer16.models import (
     ConversationTurn,
     MultiTurnAnalysis,
     SessionConfig,
+    ThreatLevel,
+    UserRiskProfile,
 )
 from na0s.layer16.session_manager import SessionManager
 from na0s.layer16.sliding_window import SlidingWindow
@@ -50,4 +52,6 @@ __all__ = [
     "SessionManager",
     "SessionNotFoundError",
     "SlidingWindow",
+    "ThreatLevel",
+    "UserRiskProfile",
 ]
