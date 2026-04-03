@@ -82,13 +82,10 @@ from .scan_result import ScanResult
 from .config import MAX_INPUT_LENGTH
 from .safe_pickle import safe_load
 from .models import get_model_path, KNOWN_HASHES
-from ._voting import _weighted_composite
 from .safe_content import calculate_safe_content_score
 from .multilingual_intent import detect_multilingual_intents, HEURISTIC_HITS
 from ._voting import (
     weighted_decision as _voting_weighted_decision,
-    _weighted_composite,
-    DECISION_THRESHOLD as _VOTING_THRESHOLD,
     get_decision_threshold as _get_decision_threshold,
     FP_EXEMPT_HITS,
     RULE_SEVERITY as _VOTING_RULE_SEVERITY,
@@ -178,7 +175,6 @@ except ImportError:
 try:
     from .promptguard_classifier import (
         get_promptguard_score as _get_pg_classifier_score,
-        PromptGuardClassifier as _PromptGuardClassifier,
     )
     _HAS_PROMPTGUARD_CLASSIFIER = True
 except ImportError:
@@ -427,6 +423,8 @@ def _transform(text, vectorizer, scaler=None, char_vectorizer=None):
 
 
 # Rule name -> severity lookup — now in _voting.py (single source of truth).
+# NOTE: classify_prompt uses _local_severities (thread-safe) instead of
+# mutating this global. Kept for backward compat with test patches.
 _RULE_SEVERITY = _VOTING_RULE_SEVERITY
 
 # ---------------------------------------------------------------------------
@@ -627,6 +625,10 @@ def _weighted_decision(ml_prob: float, ml_label: str, hits: List[str],
 
 def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tuple:
     label, prob, l0 = predict(text, vectorizer, model)
+
+    # Thread-local severity overrides — avoids mutating the global
+    # RULE_SEVERITY dict from concurrent classify_prompt calls.
+    _local_severities = {}
 
     if l0.rejected:
         return label, prob, [], l0, [], {"score": 0.0, "technique_matches": []}, 0.0
@@ -864,7 +866,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                         hits.append(hit_name)
                         hit_names_seen.add(hit_name)
                         # Register severity for weighted decision
-                        _RULE_SEVERITY[hit_name] = mh.severity
+                        _local_severities[hit_name] = mh.severity
         except Exception:
             pass  # Multilingual detection failure is non-fatal
 
@@ -886,13 +888,13 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                 if hit_name not in hit_names_seen:
                     hits.append(hit_name)
                     hit_names_seen.add(hit_name)
-                    _RULE_SEVERITY[hit_name] = "high" if ff_result.has_inner_attack else "medium"
+                    _local_severities[hit_name] = "high" if ff_result.has_inner_attack else "medium"
                 if ff_result.has_inner_attack:
                     inner_name = "fictional_inner:" + ff_result.inner_attack_type
                     if inner_name not in hit_names_seen:
                         hits.append(inner_name)
                         hit_names_seen.add(inner_name)
-                        _RULE_SEVERITY[inner_name] = "high"
+                        _local_severities[inner_name] = "high"
         except Exception:
             pass  # Fictional frame detection failure is non-fatal
 
@@ -909,7 +911,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                     if hit_name not in hit_names_seen:
                         hits.append(hit_name)
                         hit_names_seen.add(hit_name)
-                        _RULE_SEVERITY[hit_name] = eh.severity
+                        _local_severities[hit_name] = eh.severity
         except Exception:
             pass  # Extraction detection failure is non-fatal
 
@@ -933,7 +935,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                 if hit_name not in hit_names_seen:
                     hits.append(hit_name)
                     hit_names_seen.add(hit_name)
-                    _RULE_SEVERITY[hit_name] = privacy_result.severity
+                    _local_severities[hit_name] = privacy_result.severity
         except Exception:
             pass  # Privacy probe detection failure is non-fatal
 
@@ -965,7 +967,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                 if hit_name not in hit_names_seen:
                     hits.append(hit_name)
                     hit_names_seen.add(hit_name)
-                    _RULE_SEVERITY[hit_name] = "high"
+                    _local_severities[hit_name] = "high"
         except Exception:
             pass  # Fragment detection failure is non-fatal
 
@@ -986,7 +988,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                 if hit_name not in hit_names_seen:
                     hits.append(hit_name)
                     hit_names_seen.add(hit_name)
-                    _RULE_SEVERITY[hit_name] = harmful_result.severity
+                    _local_severities[hit_name] = harmful_result.severity
         except Exception:
             pass  # Harmful intent detection failure is non-fatal
 
@@ -1007,7 +1009,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                         hit_names_seen.add(hit_name)
                         # Map severity: multi-category = high, single = medium
                         _sev = "high" if rag_result.details.get("category_count", 0) >= 2 else "medium"
-                        _RULE_SEVERITY[hit_name] = _sev
+                        _local_severities[hit_name] = _sev
         except Exception:
             pass  # RAG poisoning detection failure is non-fatal
 
@@ -1027,7 +1029,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                         hits.append(hit_name)
                         hit_names_seen.add(hit_name)
                         _sev = "high" if len(intent_result.intent_categories) >= 2 else "medium"
-                        _RULE_SEVERITY[hit_name] = _sev
+                        _local_severities[hit_name] = _sev
         except Exception:
             pass  # Intent analysis failure is non-fatal
 
@@ -1185,6 +1187,10 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         "score": embedding_score,
         "technique_matches": embedding_technique_matches,
     }
+
+    # Attach dynamic severities to l0 so cascade can pass them to
+    # weighted_decision without mutating the global RULE_SEVERITY dict.
+    l0.dynamic_severities = _local_severities
 
     return label, composite, hits, l0, detailed_hits, embedding_info, perplexity_score
 

@@ -1,6 +1,10 @@
 import os
 
-import chardet
+try:
+    import chardet
+    _HAS_CHARDET = True
+except ImportError:
+    _HAS_CHARDET = False
 
 # BOM markers — checked before chardet for deterministic results
 _BOM_MAP = [
@@ -60,6 +64,8 @@ def detect_encoding(raw_bytes):
             return encoding, 1.0, flags
 
     # Step 2: Use chardet for statistical detection
+    if not _HAS_CHARDET:
+        return "utf-8", 0.5, ["chardet_not_available"]
     result = chardet.detect(raw_bytes)
     encoding = result.get("encoding") or "utf-8"
     confidence = result.get("confidence", 0.0)

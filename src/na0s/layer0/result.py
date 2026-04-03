@@ -13,3 +13,4 @@ class Layer0Result:
     rejection_reason: str = ""
     source_metadata: dict = field(default_factory=dict)
     timing: dict = field(default_factory=dict)
+    dynamic_severities: dict = field(default_factory=dict)

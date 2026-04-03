@@ -1,9 +1,9 @@
-import os
+from na0s._env import safe_int_env
 
 from .result import Layer0Result
 
-MAX_INPUT_LENGTH = int(os.getenv("L0_MAX_INPUT_CHARS", 50_000))
-MAX_INPUT_BYTES = int(os.getenv("L0_MAX_INPUT_BYTES", 200_000))
+MAX_INPUT_LENGTH = safe_int_env("L0_MAX_INPUT_CHARS", 50_000, lo=1)
+MAX_INPUT_BYTES = safe_int_env("L0_MAX_INPUT_BYTES", 200_000, lo=1)
 
 
 def validate_input(raw_input):

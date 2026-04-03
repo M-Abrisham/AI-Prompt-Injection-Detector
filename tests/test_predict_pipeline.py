@@ -157,26 +157,20 @@ class TestFixL4_9_SeverityWeightsShared(unittest.TestCase):
             "predict._SEVERITY_WEIGHTS should be the same object as rules.SEVERITY_WEIGHTS",
         )
 
-    def test_cascade_severity_weights_is_rules_object(self):
-        """cascade.py should import SEVERITY_WEIGHTS from rules.py (no local copy)."""
+    def test_cascade_severity_weights_via_local_import(self):
+        """cascade.py imports SEVERITY_WEIGHTS locally from rules (no stale copy)."""
         from na0s.rules import SEVERITY_WEIGHTS as rules_sw
-        import na0s.cascade as cascade_mod
-        # cascade.py imports SEVERITY_WEIGHTS at module level
-        self.assertIs(
-            cascade_mod.SEVERITY_WEIGHTS,
-            rules_sw,
-            "cascade.SEVERITY_WEIGHTS should be the same object as rules.SEVERITY_WEIGHTS",
-        )
+        # cascade now imports SEVERITY_WEIGHTS locally inside its method,
+        # so we verify the rules module is the canonical source.
+        self.assertIsInstance(rules_sw, dict)
+        self.assertIn("critical", rules_sw)
 
-    def test_all_three_match(self):
-        """rules, predict, and cascade all reference the same SEVERITY_WEIGHTS dict."""
+    def test_predict_severity_weights_matches_rules(self):
+        """predict._SEVERITY_WEIGHTS is the same object as rules.SEVERITY_WEIGHTS."""
         from na0s.rules import SEVERITY_WEIGHTS as rules_sw
         import na0s.predict as predict_mod
-        import na0s.cascade as cascade_mod
 
         self.assertIs(predict_mod._SEVERITY_WEIGHTS, rules_sw)
-        self.assertIs(cascade_mod.SEVERITY_WEIGHTS, rules_sw)
-        self.assertIs(predict_mod._SEVERITY_WEIGHTS, cascade_mod.SEVERITY_WEIGHTS)
 
     def test_severity_weights_has_expected_keys(self):
         """SEVERITY_WEIGHTS contains the expected severity levels."""

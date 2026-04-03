@@ -205,6 +205,7 @@ def weighted_decision(
     structural=None,
     embedding_score=0.0,
     threshold=DECISION_THRESHOLD,
+    extra_severities=None,
 ):
     """Combine ML confidence, rule severity, obfuscation, structural
     features, and embedding similarity into a composite score.
@@ -242,10 +243,11 @@ def weighted_decision(
     ml_weight = ML_WEIGHT * ml_prob_malicious
 
     # --- Rule severity signal ---
+    _sev_lookup = RULE_SEVERITY if extra_severities is None else {**RULE_SEVERITY, **extra_severities}
     rule_weight = 0.0
     severities_seen = set()
     for hit_name in hits:
-        sev = RULE_SEVERITY.get(hit_name, "medium")
+        sev = _sev_lookup.get(hit_name, "medium")
         severities_seen.add(sev)
         rule_weight += SEVERITY_WEIGHTS.get(sev, 0.1)
 
@@ -302,7 +304,7 @@ def weighted_decision(
     # --- Critical E1 extraction rule floor ---
     if severities_seen & {"critical"} and structural_weight > 0.0:
         _has_e1_critical = any(
-            RULE_SEVERITY.get(h) == "critical" and any(
+            _sev_lookup.get(h) == "critical" and any(
                 "E1" in tid for tid in RULE_TECHNIQUE_IDS.get(h, [])
             )
             for h in hits

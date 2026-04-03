@@ -34,14 +34,16 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration (all from env vars with sensible defaults)
 # ---------------------------------------------------------------------------
-MAX_INPUT_CHARS = int(os.getenv("L0_MAX_INPUT_CHARS", "50000"))
-MAX_INPUT_BYTES = int(os.getenv("L0_MAX_INPUT_BYTES", "200000"))
-MAX_HTML_DEPTH = int(os.getenv("L0_MAX_HTML_DEPTH", "100"))
-MAX_EXPANSION_RATIO = float(os.getenv("L0_MAX_EXPANSION_RATIO", "10.0"))
-MEMORY_CAP_MB = float(os.getenv("L0_MEMORY_CAP_MB", "50"))
+from na0s._env import safe_int_env, safe_float_env
+
+MAX_INPUT_CHARS = safe_int_env("L0_MAX_INPUT_CHARS", 50000, lo=1)
+MAX_INPUT_BYTES = safe_int_env("L0_MAX_INPUT_BYTES", 200000, lo=1)
+MAX_HTML_DEPTH = safe_int_env("L0_MAX_HTML_DEPTH", 100, lo=1)
+MAX_EXPANSION_RATIO = safe_float_env("L0_MAX_EXPANSION_RATIO", 10.0, lo=1.0)
+MEMORY_CAP_MB = safe_float_env("L0_MEMORY_CAP_MB", 50.0, lo=1.0)
 RATE_LIMIT_ENABLED = os.getenv("L0_RATE_LIMIT_ENABLED", "0") == "1"
-RATE_LIMIT_REQUESTS = int(os.getenv("L0_RATE_LIMIT_REQUESTS", "100"))
-RATE_LIMIT_WINDOW_SEC = float(os.getenv("L0_RATE_LIMIT_WINDOW_SEC", "60"))
+RATE_LIMIT_REQUESTS = safe_int_env("L0_RATE_LIMIT_REQUESTS", 100, lo=1)
+RATE_LIMIT_WINDOW_SEC = safe_float_env("L0_RATE_LIMIT_WINDOW_SEC", 60.0, lo=1.0)
 
 
 # ---------------------------------------------------------------------------

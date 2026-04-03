@@ -89,14 +89,16 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
+from na0s._env import safe_int_env
+
 #: Maximum number of pages to process (default 100, env-configurable).
-MAX_PAGE_COUNT: int = int(os.getenv("L0_MAX_DOC_PAGES", 100))
+MAX_PAGE_COUNT: int = safe_int_env("L0_MAX_DOC_PAGES", 100, lo=1)
 
 #: Maximum extracted text size in bytes (default 1 MB, env-configurable).
-MAX_TEXT_BYTES: int = int(os.getenv("L0_MAX_DOC_TEXT_BYTES", 1 * 1024 * 1024))
+MAX_TEXT_BYTES: int = safe_int_env("L0_MAX_DOC_TEXT_BYTES", 1 * 1024 * 1024, lo=1)
 
 #: Maximum raw document size in bytes (default 50 MB, env-configurable).
-MAX_DOC_BYTES: int = int(os.getenv("L0_MAX_DOC_BYTES", 50 * 1024 * 1024))
+MAX_DOC_BYTES: int = safe_int_env("L0_MAX_DOC_BYTES", 50 * 1024 * 1024, lo=1)
 
 #: Supported document types and their magic-byte signatures.
 _DOC_SIGNATURES: dict[str, list[bytes]] = {
@@ -360,6 +362,7 @@ def _extract_pdf(data: bytes, max_pages: int) -> DocResult:
 def _extract_pdf_pymupdf(data: bytes, max_pages: int) -> DocResult:
     """Extract PDF text via pymupdf (fitz)."""
     warns: list[str] = []
+    doc = None
     try:
         doc = fitz.open(stream=data, filetype="pdf")
         total_pages = len(doc)
@@ -380,7 +383,6 @@ def _extract_pdf_pymupdf(data: bytes, max_pages: int) -> DocResult:
                 k: v for k, v in doc.metadata.items() if v
             }
 
-        doc.close()
         return DocResult(
             text="\n".join(text_parts).strip(),
             metadata=metadata,
@@ -396,11 +398,18 @@ def _extract_pdf_pymupdf(data: bytes, max_pages: int) -> DocResult:
         if _HAS_PYPDF2:
             return _extract_pdf_pypdf2(data, max_pages)
         return DocResult(engine="none", warnings=warns)
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
 
 
 def _extract_pdf_pdfplumber(data: bytes, max_pages: int) -> DocResult:
     """Extract PDF text via pdfplumber."""
     warns: list[str] = []
+    pdf = None
     try:
         pdf = pdfplumber.open(io.BytesIO(data))
         total_pages = len(pdf.pages)
@@ -422,7 +431,6 @@ def _extract_pdf_pdfplumber(data: bytes, max_pages: int) -> DocResult:
                 k: v for k, v in pdf.metadata.items() if v
             }
 
-        pdf.close()
         return DocResult(
             text="\n".join(text_parts).strip(),
             metadata=metadata,
@@ -435,6 +443,12 @@ def _extract_pdf_pdfplumber(data: bytes, max_pages: int) -> DocResult:
         if _HAS_PYPDF2:
             return _extract_pdf_pypdf2(data, max_pages)
         return DocResult(engine="none", warnings=warns)
+    finally:
+        if pdf is not None:
+            try:
+                pdf.close()
+            except Exception:
+                pass
 
 
 def _extract_pdf_pypdf2(data: bytes, max_pages: int) -> DocResult:

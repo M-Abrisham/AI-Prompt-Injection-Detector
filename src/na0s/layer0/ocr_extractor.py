@@ -56,14 +56,14 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
+from na0s._env import safe_int_env
+
 #: Maximum allowed image size in bytes (default 10 MB, env-configurable).
-MAX_IMAGE_BYTES: int = int(os.getenv("L0_MAX_IMAGE_BYTES", 10 * 1024 * 1024))
+MAX_IMAGE_BYTES: int = safe_int_env("L0_MAX_IMAGE_BYTES", 10 * 1024 * 1024, lo=1)
 
 #: Maximum metadata text bytes to extract (default 64 KB, env-configurable).
 #: Prevents DoS from images with huge EXIF/XMP metadata blocks.
-MAX_METADATA_TEXT_BYTES: int = int(
-    os.getenv("L0_MAX_METADATA_TEXT_BYTES", 65536)
-)
+MAX_METADATA_TEXT_BYTES: int = safe_int_env("L0_MAX_METADATA_TEXT_BYTES", 65536, lo=1)
 
 #: Supported image magic-byte signatures.
 _IMAGE_SIGNATURES: list[tuple[bytes, str]] = [

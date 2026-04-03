@@ -33,23 +33,21 @@ class Layer0TimeoutError(Exception):
 # ---------------------------------------------------------------------------
 # Default timeout values (read once at import, overridable per-call)
 # ---------------------------------------------------------------------------
-DEFAULT_TIMEOUT = float(os.getenv("L0_TIMEOUT_SEC", "5"))
+from na0s._env import safe_float_env
+
+DEFAULT_TIMEOUT = safe_float_env("L0_TIMEOUT_SEC", 5.0, lo=0.1)
 
 STEP_TIMEOUTS = {
-    "normalize": float(
-        os.getenv("L0_TIMEOUT_NORMALIZE", str(DEFAULT_TIMEOUT))
-    ),
-    "html": float(os.getenv("L0_TIMEOUT_HTML", str(DEFAULT_TIMEOUT))),
-    "tokenize": float(
-        os.getenv("L0_TIMEOUT_TOKENIZE", str(DEFAULT_TIMEOUT))
-    ),
+    "normalize": safe_float_env("L0_TIMEOUT_NORMALIZE", DEFAULT_TIMEOUT, lo=0.1),
+    "html": safe_float_env("L0_TIMEOUT_HTML", DEFAULT_TIMEOUT, lo=0.1),
+    "tokenize": safe_float_env("L0_TIMEOUT_TOKENIZE", DEFAULT_TIMEOUT, lo=0.1),
 }
 
 # Overall Layer 0 pipeline timeout (wraps the entire layer0_sanitize call)
-L0_PIPELINE_TIMEOUT = float(os.getenv("L0_TIMEOUT_PIPELINE", "30"))
+L0_PIPELINE_TIMEOUT = safe_float_env("L0_TIMEOUT_PIPELINE", 30.0, lo=1.0)
 
 # Overall scan/classify timeout (wraps classify_prompt in predict.py)
-SCAN_TIMEOUT = float(os.getenv("SCAN_TIMEOUT_SEC", "60"))
+SCAN_TIMEOUT = safe_float_env("SCAN_TIMEOUT_SEC", 60.0, lo=1.0)
 
 
 def get_step_timeout(step_name: str) -> float:

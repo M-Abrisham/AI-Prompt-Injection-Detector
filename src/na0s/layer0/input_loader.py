@@ -27,13 +27,15 @@ import urllib.error
 import mimetypes
 
 # Max file size: 10 MB by default, configurable via env
-MAX_FILE_SIZE = int(os.getenv("L0_MAX_FILE_SIZE", 10 * 1024 * 1024))
+from na0s._env import safe_int_env
+
+MAX_FILE_SIZE = safe_int_env("L0_MAX_FILE_SIZE", 10 * 1024 * 1024, lo=1)
 
 # URL fetch settings
-URL_TIMEOUT = int(os.getenv("L0_URL_TIMEOUT", 10))
-MAX_URL_RESPONSE_SIZE = int(os.getenv("L0_MAX_URL_RESPONSE_SIZE", 10 * 1024 * 1024))
+URL_TIMEOUT = safe_int_env("L0_URL_TIMEOUT", 10, lo=1)
+MAX_URL_RESPONSE_SIZE = safe_int_env("L0_MAX_URL_RESPONSE_SIZE", 10 * 1024 * 1024, lo=1)
 HTTPS_ONLY = os.getenv("L0_HTTPS_ONLY", "1") != "0"
-MAX_REDIRECTS = int(os.getenv("L0_MAX_REDIRECTS", 5))
+MAX_REDIRECTS = safe_int_env("L0_MAX_REDIRECTS", 5, lo=0)
 
 
 class InputLoadError(Exception):
