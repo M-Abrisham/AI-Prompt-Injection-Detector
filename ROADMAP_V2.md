@@ -1298,8 +1298,8 @@ Layer 15 provides automated synchronization with external threat intelligence so
 ## Layer 16: Multi-Turn Detection — Tasks: 17/17 (100%)
 
 **Files**: `src/na0s/layer16/` (23 modules), `src/na0s/predict.py` (+session_id), `src/na0s/scan_result.py` (+4 fields)
-**Tests**: 226 tests across 14 test files + 6 JSON fixtures (`tests/test_layer16/`)
-**Status**: **Complete** — stateful multi-turn detection with backward-compatible API; singleton monitor, 3 detectors, 3 storage backends, test harness
+**Tests**: 300+ tests across 17 test files + 6 JSON fixtures (`tests/test_layer16/`)
+**Status**: **Complete** — stateful multi-turn detection with backward-compatible API; singleton monitor, 4 detectors (+ stylometry D1.21), weighted sliding window, cumulative risk tracking, 3 storage backends, test harness. v2 baseline: 50 scenarios, F1=0.9333, 0% FPR.
 
 ### Updated Description
 Layer 16 adds conversation-level memory and stateful analysis to Na0S via a post-processor pattern. When `scan(text, session_id="...")` is called, the existing single-turn pipeline runs first, then `ConversationSecurityMonitor` records the turn and runs multi-turn detectors on accumulated state. The stateless API (`scan(text)` without session_id) is unchanged. The layer includes: `ConversationState` with sliding window, `SessionManager` with TTL expiry, 3 storage backends (memory/SQLite/Redis), 3 detectors (escalation C1.1, payload splitting D7.2, fabricated history D1.22), a `TurnAnalyzer` for per-turn risk augmentation, and a `ConversationTestHarness` for multi-turn testing. Singleton monitor uses double-checked locking matching Na0S's existing model cache pattern.
@@ -1324,6 +1324,10 @@ Layer 16 adds conversation-level memory and stateful analysis to Na0S via a post
 - [x] **Singleton monitor** — Double-checked locking, `_reset_conversation_monitor()` for test isolation. **Done**: 5 regression tests.
 - [x] **Multi-turn test framework** — `ConversationTestHarness`, `ScenarioLoader`, `DetectionMetrics`. **Done**: `testing/` (15 tests).
 - [x] **Test fixtures** — 30 scenarios across 6 JSON files (benign, attacks, edge cases, escalation, payload split, fabricated history). **Done**: `tests/test_layer16/fixtures/`.
+- [x] **Weighted sliding window** — Suspicious turns persist longer in deque via weight-based eviction. **Done** (2026-04-02): turns with risk >= 0.5 get 3x weight, 0.9 decay per turn, lowest-weight evicted first. Backward-compatible API. 20 tests in `test_weighted_sliding_window.py`.
+- [x] **Behavioral stylometry detector (D1.21)** — Detect human-to-automated-tool handoff mid-conversation via writing pattern analysis. **Done** (2026-04-02): 4 signals (vocabulary shift, structural patterns, timing, template indicators). Requires 2+ signals or single signal >= 0.35 confidence. Feature-flagged in `config.py`. 35 tests in `test_stylometry.py`.
+- [x] **cumulative_risk tracking** — Wire up the `cumulative_risk` field on `ConversationState`. **Done** (2026-04-02): EMA formula `clamp(0.85*old + 0.3*turn_risk, 0, 1)` in `state.py`, wired into `add_turn()`, exposed in `MultiTurnAnalysis`. 19 tests in `test_cumulative_risk.py`.
+- [x] **v2 baseline** — 50 scenarios, 87.5% detection, 0% FPR, F1=0.9333. 3 FN are pre-existing (sklearn-dependent rescan scenarios). Saved as `baselines/v2_baseline.json`.
 
 #### REMAINING
 - [ ] **Context poisoning detection (D1.20)** — Detect when early turns plant misleading context exploited later.
@@ -1331,7 +1335,6 @@ Layer 16 adds conversation-level memory and stateful analysis to Na0S via a post
 - [ ] **Cross-session injection correlation** — Track attack patterns across sessions (fingerprinting).
 - [ ] **cascade.py integration** — Add session_id support to `CascadeClassifier.classify()` (currently only in `predict.scan()`).
 - [ ] **CLI extensions** — Session management commands (list, inspect, expire) via `na0s` CLI.
-- [ ] **cumulative_risk tracking** — Wire up the `cumulative_risk` field on `ConversationState` (currently always 0.0).
 
 ### Implementation Plan
 **Phase 1 (P1 — POC)**: ~~ConversationState + SessionManager with in-memory storage, sliding window, basic escalation detection~~ Done
