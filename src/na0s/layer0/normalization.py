@@ -22,6 +22,13 @@ _UNICODE_WHITESPACE_RE = re.compile(
     "[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u2800\u3000\ufeff\x0b\x0c]"
 )
 
+# Normalize \r\n → \n and lone \r → \n to prevent parser differentials.
+# Some parsers treat \r as whitespace (Python \s, .split()), while line-based
+# parsers ignore it.  Lone \r can also overwrite displayed text via terminal
+# carriage-return semantics, hiding malicious content from visual inspection.
+_CR_NORMALIZE_RE = re.compile(r"\r\n?")
+
+
 # Collapse runs of multiple ASCII spaces into one
 _MULTI_SPACE_RE = re.compile(r" {2,}")
 
@@ -477,7 +484,7 @@ def _count_invisible_chars(text):
         cat = unicodedata.category(char)
         if cat == "Cs":
             count += 1
-        elif cat in ("Cf", "Cc", "Cn") and char not in "\n\r\t ":
+        elif cat in ("Cf", "Cc", "Cn") and char not in "\n\t ":
             count += 1
     return count
 
@@ -511,7 +518,7 @@ def strip_invisible_chars(text):
         cat = unicodedata.category(char)
         if cat == "Cs":
             chars_info.append((char, True))
-        elif cat in ("Cf", "Cc", "Cn") and char not in "\n\r\t ":
+        elif cat in ("Cf", "Cc", "Cn") and char not in "\n\t ":
             chars_info.append((char, True))
         else:
             chars_info.append((char, False))
@@ -586,7 +593,7 @@ def strip_invisible_chars_concat(text):
         cat = unicodedata.category(char)
         if cat == "Cs":
             continue
-        if cat in ("Cf", "Cc", "Cn") and char not in "\n\r\t ":
+        if cat in ("Cf", "Cc", "Cn") and char not in "\n\t ":
             continue
         result.append(char)
     return "".join(result)
@@ -841,6 +848,9 @@ def normalize_text(text, _idempotency_pass=False):
             flags.append("invisible_chars_found")
 
     # Step 3: Whitespace canonicalization
+    # Normalize carriage returns first to prevent parser differentials
+    text = _CR_NORMALIZE_RE.sub("\n", text)
+
     # Replace Unicode whitespace variants with ASCII space
     cleaned, count = _UNICODE_WHITESPACE_RE.subn(" ", text)
     if count > 0:
