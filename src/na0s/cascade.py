@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import threading
+import time
 from typing import Dict, List, Optional, Tuple
 
 from .predict import _get_cached_models, _get_cached_scaler, _transform, _get_model_version
@@ -31,6 +32,8 @@ from ._voting import weighted_decision as _voting_weighted_decision
 from .complexity_router import (
     assess_complexity, get_pipeline_stages, is_adaptive_routing_enabled,
 )
+
+import numpy as np
 
 _logger = logging.getLogger(__name__)
 
@@ -54,6 +57,11 @@ try:
     _HAS_PROMPTGUARD_CLASSIFIER = True
 except ImportError:
     _HAS_PROMPTGUARD_CLASSIFIER = False
+
+# PromptGuard auto-disable: module-level state so it survives across
+# WeightedClassifier instances (there is typically one per process).
+_PG_MAX_CONSECUTIVE_FAILURES = 5
+_pg_failure_state = {"consecutive": 0, "total": 0, "enabled": True}
 
 # ---------------------------------------------------------------------------
 # Valid cascade stage names and dependency ordering
@@ -148,11 +156,11 @@ def _blend_verdicts(stage2_label: str, stage2_conf: float,
     """
     stage2_p_mal = stage2_conf if stage2_label == "MALICIOUS" else 1.0 - stage2_conf
     judge_p_mal = judge_conf if judge_label == "MALICIOUS" else 1.0 - judge_conf
-    blended_p_mal = (
+    blended_p_mal = max(0.0, min(1.0,
         THRESHOLDS.STAGE2_BLEND_WEIGHT * stage2_p_mal
         + THRESHOLDS.JUDGE_BLEND_WEIGHT * judge_p_mal
-    )
-    label = judge_label
+    ))
+    label = "MALICIOUS" if blended_p_mal >= 0.5 else "SAFE"
     confidence = round(
         blended_p_mal if label == "MALICIOUS" else 1.0 - blended_p_mal, 4
     )
@@ -215,11 +223,47 @@ class WhitelistFilter:
     MAX_LENGTH = THRESHOLDS.WHITELIST_MAX_LENGTH
     MAX_SENTENCES = THRESHOLDS.WHITELIST_MAX_SENTENCES
 
-    @staticmethod
-    def _count_sentences(text: str) -> int:
-        """Rough sentence count based on terminal punctuation."""
+    # Common abbreviations whose periods are not sentence boundaries
+    _ABBREV_RE = re.compile(
+        r"\b(?:Dr|Mr|Mrs|Ms|Prof|Jr|Sr|vs|etc|approx|inc|ltd|corp"
+        r"|dept|est|govt|no|vol|rev|gen|sgt|pvt|ft|mt|st)\.",
+        re.IGNORECASE,
+    )
+    # Decimal numbers like 2.0, 3.14
+    _DECIMAL_RE = re.compile(r"\d\.\d")
+    # Domain-like patterns like example.com
+    _DOMAIN_RE = re.compile(r"\w\.\w{2,}")
+
+    # Ellipsis patterns (... or more dots)
+    _ELLIPSIS_RE = re.compile(r"\.{2,}")
+
+    @classmethod
+    def _count_sentences(cls, text: str) -> int:
+        """Rough sentence count based on terminal punctuation.
+
+        Handles common false splits: ellipses (...), abbreviations
+        (Dr., Mr., etc.), decimal numbers (2.0), and domain names
+        (example.com).
+        """
+        cleaned = text.strip()
+        # Mask ellipses first (before abbreviation check)
+        cleaned = cls._ELLIPSIS_RE.sub(
+            lambda m: "\x01" * len(m.group(0)), cleaned,
+        )
+        # Mask abbreviations so their periods don't trigger splits
+        cleaned = cls._ABBREV_RE.sub(
+            lambda m: m.group(0).replace(".", "\x01"), cleaned,
+        )
+        # Mask decimal numbers
+        cleaned = cls._DECIMAL_RE.sub(
+            lambda m: m.group(0).replace(".", "\x01"), cleaned,
+        )
+        # Mask domain-like patterns
+        cleaned = cls._DOMAIN_RE.sub(
+            lambda m: m.group(0).replace(".", "\x01"), cleaned,
+        )
         # Split on .!? followed by whitespace or end-of-string
-        parts = re.split(r"[.!?]+(?:\s|$)", text.strip())
+        parts = re.split(r"[.!?]+(?:\s|$)", cleaned)
         # Filter out empty fragments
         return len([p for p in parts if p.strip()])
 
@@ -268,6 +312,33 @@ class WhitelistFilter:
         # 6. Role assignment
         if safe_search(self.ROLE_ASSIGNMENT, text, timeout_ms=50):
             return False, "contains role-assignment language"
+
+        # 7. Critical-rule tripwire: even if the text looks like a
+        #    question, reject it if it contains high-confidence attack
+        #    patterns (override, exfiltration, constraint_negation, etc.)
+        #    NOTE: We match RULES patterns directly instead of using
+        #    rule_score_detailed() because the latter applies context
+        #    suppression -- which is exactly what an attacker exploits by
+        #    prepending a question to an injection payload.
+        _CRITICAL_RULE_NAMES = frozenset({
+            "override", "system_prompt", "exfiltration",
+            "constraint_negation", "fake_system_prompt",
+            "chat_template_injection", "named_jailbreak_persona",
+            "forget_override",
+        })
+        try:
+            critical_hit_names = []
+            for rule in RULES:
+                if rule.name in _CRITICAL_RULE_NAMES:
+                    if safe_search(rule._compiled, text, timeout_ms=50):
+                        critical_hit_names.append(rule.name)
+        except Exception:
+            _logger.debug("Critical rule check in whitelist failed", exc_info=True)
+            critical_hit_names = []
+        if critical_hit_names:
+            return False, "critical rule hit despite question form: {}".format(
+                ", ".join(critical_hit_names)
+            )
 
         # Build reason string
         reasons = ["passed all whitelist criteria"]
@@ -321,7 +392,6 @@ class WeightedClassifier:
         proba = model.predict_proba(X)[0]
         # Fix proba[1] fragility: derive ml_prob and ml_label correctly
         # from the model's own prediction rather than assuming class index 1.
-        import numpy as np
         if isinstance(prediction, (int, np.integer)):
             prediction = int(prediction)
             ml_label = "MALICIOUS" if prediction == 1 else "SAFE"
@@ -354,6 +424,7 @@ class WeightedClassifier:
             try:
                 structural = extract_structural_features(text)
             except Exception:
+                _logger.debug("Structural features (Layer 3) failed", exc_info=True)
                 structural = None
 
         # --- Delegate to canonical weighted voting logic ---
@@ -399,9 +470,11 @@ class WeightedClassifier:
 
         # --- N5: PromptGuard transformer classifier signal ---
         # When enabled, blend the mDeBERTa signal with weight 0.35.
-        if _HAS_PROMPTGUARD_CLASSIFIER:
+        # Auto-disables after _PG_MAX_CONSECUTIVE_FAILURES consecutive errors.
+        if _HAS_PROMPTGUARD_CLASSIFIER and _pg_failure_state["enabled"]:
             try:
                 _pg_score = _get_pg_classifier_score(text)
+                _pg_failure_state["consecutive"] = 0  # reset on success
                 if _pg_score > 0:
                     _pg_weight = 0.35 * _pg_score
                     composite = min(composite + _pg_weight, 1.0)
@@ -412,7 +485,18 @@ class WeightedClassifier:
                     if composite >= self.threshold and label == "SAFE":
                         label = "MALICIOUS"
             except Exception:
-                pass  # PromptGuard failure is non-fatal
+                _pg_failure_state["consecutive"] += 1
+                _pg_failure_state["total"] += 1
+                _logger.warning(
+                    "PromptGuard (N5) failed (%d consecutive)",
+                    _pg_failure_state["consecutive"],
+                )
+                if _pg_failure_state["consecutive"] >= _PG_MAX_CONSECUTIVE_FAILURES:
+                    _pg_failure_state["enabled"] = False
+                    _logger.error(
+                        "PromptGuard auto-disabled after %d consecutive failures",
+                        _pg_failure_state["consecutive"],
+                    )
 
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
@@ -437,17 +521,6 @@ class WeightedClassifier:
 # ---------------------------------------------------------------------------
 # L0 stub for evaluate compatibility
 # ---------------------------------------------------------------------------
-
-class _L0Stub:
-    """Minimal stand-in for the Layer-0 result object.
-
-    Provides the `rejected` and `anomaly_flags` attributes that
-    ClassifierOutput.from_tuple() reads from the l0 element.
-    """
-    def __init__(self):
-        self.rejected = False
-        self.anomaly_flags = []
-
 
 # ---------------------------------------------------------------------------
 # Cascade Pipeline
@@ -546,6 +619,7 @@ class CascadeClassifier:
             try:
                 self._positive_validator = PositiveValidator(task_type="general")
             except Exception:
+                _logger.warning("Failed to init PositiveValidator (Layer 8)", exc_info=True)
                 self._positive_validator = None
 
         # Layer 9: Output scanner — optional
@@ -554,6 +628,7 @@ class CascadeClassifier:
             try:
                 self._output_scanner = OutputScanner(sensitivity="medium")
             except Exception:
+                _logger.warning("Failed to init OutputScanner (Layer 9)", exc_info=True)
                 self._output_scanner = None
 
         # Layer 10: Canary token manager — optional
@@ -562,14 +637,11 @@ class CascadeClassifier:
             try:
                 self._canary_manager = CanaryManager()
             except Exception:
+                _logger.warning("Failed to init CanaryManager (Layer 10)", exc_info=True)
                 self._canary_manager = None
 
-        # Last L0 result from classify() — reused by classify_for_evaluate()
-        # to avoid running layer0_sanitize() twice on the same input.
-        self._last_l0 = None
-        self._last_judge_reasoning = ""  # BUG-L7-5: persist judge reasoning
-
-        # Stats counters
+        # Stats counters (protected by _stats_lock for thread safety)
+        self._stats_lock = threading.Lock()
         self._total = 0
         self._whitelisted = 0
         self._classified = 0
@@ -580,6 +652,21 @@ class CascadeClassifier:
         self._positive_validated = 0
         self._positive_validation_overrides = 0
         self._canary_checks = 0
+
+        # Per-layer failure counters for observability (Issue 9)
+        self._layer_failures = {
+            "structural": 0,
+            "promptguard": 0,
+            "ensemble": 0,
+            "embedding": 0,
+            "judge": 0,
+            "positive_validation": 0,
+            "output_scanner": 0,
+            "canary": 0,
+        }
+        # PromptGuard auto-disable after N consecutive failures
+        self._pg_consecutive_failures = 0
+        self._pg_max_consecutive_failures = 5
 
         # Layer 6: SLO tracker — enabled by NA0S_SLO_TRACKING=1
         self._slo_enabled = os.environ.get("NA0S_SLO_TRACKING") == "1"
@@ -616,6 +703,7 @@ class CascadeClassifier:
             try:
                 self._embedding_model, self._embedding_classifier = _load_embedding_models()
             except Exception:
+                _logger.warning("Failed to load embedding models (Layer 5)", exc_info=True)
                 self._enable_embedding = False
                 return False
         return True
@@ -638,6 +726,7 @@ class CascadeClassifier:
             self._llm_checker = LLMChecker()
             return self._llm_checker
         except Exception:
+            _logger.warning("Failed to init LLMChecker (Layer 7)", exc_info=True)
             return None
 
     def classify(self, text: str) -> Tuple[str, float, List[str], str]:
@@ -650,27 +739,61 @@ class CascadeClassifier:
             hits: list of matched rule/flag names
             stage: 'whitelist', 'weighted', 'embedding', 'judge',
                    'positive_validation', or 'blocked'
+
+        Thread-safe: all per-call state (l0, judge_reasoning) is stored
+        in the returned tuple via ``_classify_full()`` and never read
+        from instance variables by ``scan()`` or ``classify_for_evaluate()``.
         """
-        self._total += 1
-        self._last_judge_reasoning = ""  # BUG-L7-5: reset per call
+        result = self._classify_full(text)
+        # Unpack to the public 4-tuple for backward compatibility
+        return result[:4]
+
+    def _classify_full(self, text: str, _pre_sanitized_l0=None) -> Tuple:
+        """Internal classify that returns (label, confidence, hits, stage, l0, judge_reasoning).
+
+        All per-call state is returned explicitly so callers never need
+        to read instance variables, eliminating the _last_l0 /
+        _last_judge_reasoning race condition.
+
+        Parameters
+        ----------
+        _pre_sanitized_l0 : Layer0Result or None
+            When provided, skip Layer 0 sanitization and use this result
+            directly.  Used by classify_batch() to avoid double-sanitizing.
+        """
+        with self._stats_lock:
+            self._total += 1
+        judge_reasoning = ""
+
+        # Input type validation: reject non-string types early.
+        # Use type() check to avoid fragility from isinstance being patched.
+        if type(text) not in (str, bytes):
+            raise TypeError(
+                "classify() expects a string, got {}".format(type(text).__name__)
+            )
 
         # Defense-in-depth: reject oversized input before any expensive processing
-        if isinstance(text, str) and len(text) > MAX_INPUT_LENGTH:
-            self._blocked += 1
-            self._last_l0 = None  # no L0 result — guard fired first
+        if _pre_sanitized_l0 is None and isinstance(text, str) and len(text) > MAX_INPUT_LENGTH:
+            with self._stats_lock:
+                self._blocked += 1
             return (
                 "BLOCKED",
                 1.0,
                 ["input_length_exceeded"],
                 "blocked",
+                None,       # l0
+                "",         # judge_reasoning
             )
 
         # Layer 0: sanitize input before anything else
-        l0 = layer0_sanitize(text)
-        self._last_l0 = l0  # cache for classify_for_evaluate()
+        if _pre_sanitized_l0 is not None:
+            l0 = _pre_sanitized_l0
+        else:
+            l0 = layer0_sanitize(text)
         if l0.rejected:
-            self._blocked += 1
-            return "BLOCKED", 1.0, l0.anomaly_flags, "blocked"
+            with self._stats_lock:
+                self._blocked += 1
+            return "BLOCKED", 1.0, l0.anomaly_flags, "blocked", l0, ""
 
         clean = l0.sanitized_text
 
@@ -687,10 +810,13 @@ class CascadeClassifier:
 
         # Stage 1: whitelist filter (operates on sanitized text)
         if "whitelist" in active_stages:
+            _t0 = time.monotonic()
             is_safe, reason = self._whitelist.is_whitelisted(clean)
+            self._record_slo("whitelist", (time.monotonic() - _t0) * 1000)
             if is_safe:
-                self._whitelisted += 1
-                return "SAFE", 0.99, [], "whitelist"
+                with self._stats_lock:
+                    self._whitelisted += 1
+                return "SAFE", 0.99, [], "whitelist", l0, ""
 
         # Stage 2: weighted classifier (operates on sanitized text)
         # FIX-5: Pass raw text so rules also run on pre-normalization input
@@ -698,13 +824,18 @@ class CascadeClassifier:
         # the SIMPLE complexity path name; both mean "run ML".
         if "weighted" in active_stages or "ml_basic" in active_stages:
             self._ensure_model()
+            _t0 = time.monotonic()
             label, confidence, hits = self._weighted.classify(
                 clean, self._vectorizer, self._model, raw_text=text,
             )
-            self._classified += 1
+            self._record_slo("weighted", (time.monotonic() - _t0) * 1000)
+            with self._stats_lock:
+                self._classified += 1
         else:
-            # If weighted/ml_basic not in stages, return SAFE by default
-            label, confidence, hits = "SAFE", 0.99, []
+            # If weighted/ml_basic not in stages, use uncertain defaults
+            # so downstream stages (judge, paranoid mode) can still fire.
+            # Using 0.5 confidence signals maximum uncertainty.
+            label, confidence, hits = "SAFE", 0.5, []
 
         # ---------------------------------------------------------------
         # Layer 6: Groundedness check — verify MALICIOUS verdicts are
@@ -756,14 +887,17 @@ class CascadeClassifier:
                     model=self._model,
                 )
                 if not ensemble_result.rejected:
-                    self._ensemble_used += 1
+                    with self._stats_lock:
+                        self._ensemble_used += 1
                     label = "MALICIOUS" if ensemble_result.is_malicious else "SAFE"
                     confidence = ensemble_result.risk_score
                     for h in ensemble_result.rule_hits:
                         if h not in hits:
                             hits.append(h)
             except Exception:
-                pass  # Ensemble failure is non-fatal
+                _logger.debug("Ensemble (Layer 5) failed", exc_info=True)
+                with self._stats_lock:
+                    self._layer_failures["ensemble"] += 1
 
         # Path B (LEGACY): Embedding classifier with ad-hoc blending.
         # Only used when ensemble is NOT enabled but embedding IS enabled.
@@ -774,7 +908,8 @@ class CascadeClassifier:
                     emb_label, emb_conf, emb_hits, _ = classify_prompt_embedding(
                         clean, self._embedding_model, self._embedding_classifier,
                     )
-                    self._embedding_used += 1
+                    with self._stats_lock:
+                        self._embedding_used += 1
                     # Blend embedding result with weighted result.
                     # Embedding gets 40% weight; original keeps 60%.
                     blended_confidence = round(
@@ -793,7 +928,9 @@ class CascadeClassifier:
                                 label = "SAFE"
                                 confidence = blended_confidence
                                 hits.extend(emb_hits)
-                                return label, confidence, hits, "embedding"
+                                # Do NOT early-return here: let the input
+                                # flow through judge, positive validation,
+                                # and paranoid mode for defense in depth.
                         # If embedding says MALICIOUS and weighted says SAFE,
                         # upgrade only if embedding is very confident.
                         elif emb_label == "MALICIOUS" and label == "SAFE":
@@ -806,7 +943,9 @@ class CascadeClassifier:
                         if h not in hits:
                             hits.append(h)
             except Exception:
-                pass  # Layer 5 failure is non-fatal
+                _logger.debug("Embedding (Layer 5 legacy) failed", exc_info=True)
+                with self._stats_lock:
+                    self._layer_failures["embedding"] += 1
 
         # Layer 7: LLM judge for ambiguous cases
         # Only run if "judge" is in the active stage list.
@@ -818,9 +957,13 @@ class CascadeClassifier:
                 judge = self._ensure_llm_checker()
 
         if judge is not None:
+            # Convert to P(malicious) for consistent threshold comparison.
+            # confidence has P(label correct) semantics, so for SAFE labels
+            # a low confidence actually means HIGH P(malicious).
+            p_mal_for_routing = confidence if label == "MALICIOUS" else 1.0 - confidence
             needs_judge = (
                 self.JUDGE_LOWER_THRESHOLD
-                <= confidence
+                <= p_mal_for_routing
                 <= self.JUDGE_UPPER_THRESHOLD
             )
             # Also escalate when ML says MALICIOUS but confidence is moderate
@@ -829,6 +972,7 @@ class CascadeClassifier:
                 needs_judge = True
 
             if needs_judge:
+                _t0_judge = time.monotonic()
                 try:
                     # Layer 7: LLM checker uses classify_prompt() and
                     # returns LLMCheckResult(label, confidence, rationale).
@@ -837,21 +981,25 @@ class CascadeClassifier:
                     # Handle both interfaces.
                     if _HAS_LLM_CHECKER and isinstance(judge, LLMChecker):
                         result = judge.classify_prompt(clean)
-                        self._judged += 1
+                        self._record_slo("judge", (time.monotonic() - _t0_judge) * 1000)
+                        with self._stats_lock:
+                            self._judged += 1
                         if result.label in ("SAFE", "MALICIOUS"):
                             original_label = label
                             label, confidence = _blend_verdicts(
                                 label, confidence, result.label, result.confidence,
                             )
                             if label != original_label:
-                                self._judge_overrides += 1
-                            # BUG-L7-5: persist judge reasoning
-                            self._last_judge_reasoning = getattr(result, "rationale", "")
-                            return label, confidence, hits, "judge"
+                                with self._stats_lock:
+                                    self._judge_overrides += 1
+                            judge_reasoning = getattr(result, "rationale", "")
+                            return label, confidence, hits, "judge", l0, judge_reasoning
                     else:
                         # Original LLMJudge interface
                         verdict = judge.classify(clean)
-                        self._judged += 1
+                        self._record_slo("judge", (time.monotonic() - _t0_judge) * 1000)
+                        with self._stats_lock:
+                            self._judged += 1
                         if (hasattr(verdict, "error") and verdict.error is None
                                 and hasattr(verdict, "verdict")
                                 and verdict.verdict != "UNKNOWN"):
@@ -860,12 +1008,14 @@ class CascadeClassifier:
                                 label, confidence, verdict.verdict, verdict.confidence,
                             )
                             if label != original_label:
-                                self._judge_overrides += 1
-                            # BUG-L7-5: persist judge reasoning
-                            self._last_judge_reasoning = getattr(verdict, "reasoning", "")
-                            return label, confidence, hits, "judge"
+                                with self._stats_lock:
+                                    self._judge_overrides += 1
+                            judge_reasoning = getattr(verdict, "reasoning", "")
+                            return label, confidence, hits, "judge", l0, judge_reasoning
                 except Exception:
-                    pass  # Layer 7 failure is non-fatal
+                    _logger.debug("LLM judge (Layer 7) failed", exc_info=True)
+                    with self._stats_lock:
+                        self._layer_failures["judge"] += 1
 
         # Layer 8: Positive validation — post-classification FP reduction
         # If the classifier says MALICIOUS but positive validation says
@@ -879,7 +1029,8 @@ class CascadeClassifier:
                 validation = self._positive_validator.validate(
                     text, sanitized_text=clean,
                 )
-                self._positive_validated += 1
+                with self._stats_lock:
+                    self._positive_validated += 1
                 if validation.is_valid and validation.confidence > 0.7:
                     # Input passes positive validation with high confidence
                     # -- likely a false positive.  Downgrade if ML confidence
@@ -890,10 +1041,13 @@ class CascadeClassifier:
                         confidence = round(
                             0.4 * (1.0 - confidence) + 0.6 * validation.confidence, 4
                         )
-                        self._positive_validation_overrides += 1
-                        return label, confidence, hits, "positive_validation"
+                        with self._stats_lock:
+                            self._positive_validation_overrides += 1
+                        return label, confidence, hits, "positive_validation", l0, ""
             except Exception:
-                pass  # Layer 8 failure is non-fatal
+                _logger.debug("Positive validation (Layer 8) failed", exc_info=True)
+                with self._stats_lock:
+                    self._layer_failures["positive_validation"] += 1
 
         # Layer 6: Paranoid confidence mode — if the composite score
         # lands in the uncertain zone, default to MALICIOUS.
@@ -911,7 +1065,7 @@ class CascadeClassifier:
                 confidence = round(p_mal, 4)
                 hits.append("paranoid_mode:uncertain_flip")
 
-        return label, confidence, hits, "weighted"
+        return label, confidence, hits, "weighted", l0, judge_reasoning
 
     # ------------------------------------------------------------------
     # Unified scan() — returns ScanResult (same shape as predict.scan())
@@ -946,10 +1100,7 @@ class CascadeClassifier:
         -------
         ScanResult
         """
-        label, confidence, hits, stage = self.classify(text)
-
-        # Retrieve the L0 result cached by classify()
-        l0 = self._last_l0
+        label, confidence, hits, stage, l0, judge_reasoning = self._classify_full(text)
 
         is_blocked = label == "BLOCKED"
         is_mal = label == "MALICIOUS"
@@ -1000,7 +1151,7 @@ class CascadeClassifier:
             anomaly_flags=l0.anomaly_flags if l0 else [],
             cascade_stage=stage,
             model_version=_get_model_version(),
-            judge_reasoning=self._last_judge_reasoning,  # BUG-L7-5
+            judge_reasoning=judge_reasoning,
         )
 
     # ------------------------------------------------------------------
@@ -1038,7 +1189,10 @@ class CascadeClassifier:
                 system_prompt=system_prompt,
             )
         except Exception:
-            return None  # Layer 9 failure is non-fatal
+            _logger.debug("Output scanner (Layer 9) failed", exc_info=True)
+            with self._stats_lock:
+                self._layer_failures["output_scanner"] += 1
+            return None
 
     # ------------------------------------------------------------------
     # Layer 10: Canary token management
@@ -1071,6 +1225,9 @@ class CascadeClassifier:
                 system_prompt, prefix=prefix, length=length,
             )
         except Exception:
+            _logger.debug("Canary injection (Layer 10) failed", exc_info=True)
+            with self._stats_lock:
+                self._layer_failures["canary"] += 1
             return system_prompt, None
 
     def check_canary(self, output_text: str) -> List:
@@ -1090,9 +1247,13 @@ class CascadeClassifier:
         if self._canary_manager is None:
             return []
         try:
-            self._canary_checks += 1
+            with self._stats_lock:
+                self._canary_checks += 1
             return self._canary_manager.check_output(output_text)
         except Exception:
+            _logger.debug("Canary check (Layer 10) failed", exc_info=True)
+            with self._stats_lock:
+                self._layer_failures["canary"] += 1
             return []
 
     def canary_report(self) -> Optional[Dict]:
@@ -1108,6 +1269,7 @@ class CascadeClassifier:
         try:
             return self._canary_manager.report()
         except Exception:
+            _logger.debug("Canary report (Layer 10) failed", exc_info=True)
             return None
 
     def classify_for_evaluate(self, text: str) -> Tuple:
@@ -1117,29 +1279,31 @@ class CascadeClassifier:
         This allows CascadeClassifier to plug into the probe evaluation
         framework without modification.
         """
-        label, confidence, hits, _stage = self.classify(text)
-        # Reuse the Layer 0 result already computed inside classify()
-        # instead of running layer0_sanitize() a second time.
-        l0 = self._last_l0
+        label, confidence, hits, _stage, l0, _reasoning = self._classify_full(text)
         return label, confidence, hits, l0
 
     # --- Stats API ---
 
-    def stats(self) -> Dict[str, int]:
+    def stats(self) -> Dict:
         """Return a dict summarising how prompts flowed through the cascade."""
-        return {
-            "total": self._total,
-            "whitelisted": self._whitelisted,
-            "classified": self._classified,
-            "judged": self._judged,
-            "judge_overrides": self._judge_overrides,
-            "blocked": self._blocked,
-            "embedding_used": self._embedding_used,
-            "ensemble_used": self._ensemble_used,
-            "positive_validated": self._positive_validated,
-            "positive_validation_overrides": self._positive_validation_overrides,
-            "canary_checks": self._canary_checks,
-        }
+        with self._stats_lock:
+            result = {
+                "total": self._total,
+                "whitelisted": self._whitelisted,
+                "classified": self._classified,
+                "judged": self._judged,
+                "judge_overrides": self._judge_overrides,
+                "blocked": self._blocked,
+                "embedding_used": self._embedding_used,
+                "ensemble_used": self._ensemble_used,
+                "positive_validated": self._positive_validated,
+                "positive_validation_overrides": self._positive_validation_overrides,
+                "canary_checks": self._canary_checks,
+            }
+            # Flatten per-layer failure counts with "failures_" prefix
+            for layer, count in self._layer_failures.items():
+                result["failures_{}".format(layer)] = count
+        return result
 
     def classify_batch(self, texts):
         """Classify a batch of texts, returning results in input order.
@@ -1159,6 +1323,12 @@ class CascadeClassifier:
         Thread-safe.  Whitelist filtering is applied in batch before
         running the ML pipeline on remaining texts.
         """
+        if not isinstance(texts, list):
+            raise TypeError(
+                "classify_batch() expects a list of strings, got {}".format(
+                    type(texts).__name__
+                )
+            )
         n = len(texts)
         results = [None] * n
 
@@ -1188,6 +1358,7 @@ class CascadeClassifier:
                     is_malicious=False,
                     risk_score=0.01,
                     label="safe",
+                    technique_tags=["cascade:whitelist"],
                     ml_confidence=0.99,
                     ml_label="safe",
                     cascade_stage="whitelist",
@@ -1201,38 +1372,56 @@ class CascadeClassifier:
             self._ensure_model()
             with self._batch_lock:
                 for idx, text, l0 in needs_ml:
-                    # Re-use the single-item classify path for correctness
-                    self._last_l0 = l0
-                    label, confidence, hits, stage = self.classify(text)
+                    # Pass pre-sanitized l0 to avoid double layer0_sanitize()
+                    result = self._classify_full(text, _pre_sanitized_l0=l0)
+                    label, confidence, hits, stage = result[:4]
                     is_mal = label == "MALICIOUS"
+                    # Extract technique_tags for parity with scan()
+                    technique_tags = []
+                    if l0 is not None and not l0.rejected:
+                        from .rules import rule_score_detailed as _rsd
+                        for rh in _rsd(l0.sanitized_text):
+                            for tid in rh.technique_ids:
+                                if tid not in technique_tags:
+                                    technique_tags.append(tid)
+                    stage_tag = "cascade:{}".format(stage)
+                    if stage_tag not in technique_tags:
+                        technique_tags.append(stage_tag)
+                    # Extract judge_reasoning from _classify_full result
+                    _judge_reasoning = result[5] if len(result) > 5 else ""
                     results[idx] = ScanResult(
                         sanitized_text=l0.sanitized_text,
                         is_malicious=is_mal,
                         risk_score=round(confidence, 4),
                         label="malicious" if is_mal else "safe",
+                        technique_tags=technique_tags,
                         rule_hits=hits,
                         ml_confidence=round(confidence, 4),
                         ml_label="malicious" if is_mal else "safe",
                         anomaly_flags=l0.anomaly_flags if l0 else [],
                         cascade_stage=stage,
                         model_version=_get_model_version(),
+                        judge_reasoning=_judge_reasoning,
                     )
 
         return results
 
     def reset_stats(self) -> None:
         """Zero all counters."""
-        self._total = 0
-        self._whitelisted = 0
-        self._classified = 0
-        self._judged = 0
-        self._judge_overrides = 0
-        self._blocked = 0
-        self._embedding_used = 0
-        self._ensemble_used = 0
-        self._positive_validated = 0
-        self._positive_validation_overrides = 0
-        self._canary_checks = 0
+        with self._stats_lock:
+            self._total = 0
+            self._whitelisted = 0
+            self._classified = 0
+            self._judged = 0
+            self._judge_overrides = 0
+            self._blocked = 0
+            self._embedding_used = 0
+            self._ensemble_used = 0
+            self._positive_validated = 0
+            self._positive_validation_overrides = 0
+            self._canary_checks = 0
+            for k in self._layer_failures:
+                self._layer_failures[k] = 0
 
 
 # ---------------------------------------------------------------------------
