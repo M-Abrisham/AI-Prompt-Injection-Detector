@@ -146,6 +146,8 @@ class DualDirectionScanner:
         if output_scan.get("is_suspicious", False):
             flags = output_scan.get("flags", [])
             for flag in flags:
+                if not isinstance(flag, str):
+                    continue
                 if "Role break" in flag or "Compliance" in flag:
                     evidence.append(f"Output shows injection compliance: {flag}")
                     cross_ref_score = max(cross_ref_score, 0.7)
