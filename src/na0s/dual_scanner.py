@@ -13,6 +13,7 @@ from typing import Optional
 
 from na0s.output_scanner import OutputScanner, OutputScanResult
 from na0s.propagation_scanner import PropagationScanner
+from na0s.replication_similarity import replication_similarity
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +90,7 @@ class DualDirectionScanner:
             output_result={
                 "output_scan": output_result.to_dict(),
                 "propagation_scan": propagation_result,
+                "output_text": output_text,
             },
         )
 
@@ -137,6 +139,8 @@ class DualDirectionScanner:
 
         output_scan = output_result.get("output_scan", {})
         propagation_scan = output_result.get("propagation_scan", {})
+        output_text = output_result.get("output_text", "")
+        input_text = input_result.get("input_text", "")
 
         # Check 1: Output scanner detected suspicious content
         if output_scan.get("is_suspicious", False):
@@ -168,7 +172,26 @@ class DualDirectionScanner:
                 )
                 cross_ref_score = max(cross_ref_score, 0.95)
 
-        # Check 3: Both scanners flagged — very high confidence
+        # Check 3: Input-output replication similarity (BLEU/ROUGE-L)
+        if input_text and output_text:
+            sim = replication_similarity(output_text, input_text)
+            combined = sim["combined"]
+            if combined >= 0.7:
+                evidence.append(
+                    "High input-output replication similarity "
+                    f"(combined={combined:.2f}, BLEU={sim['bleu']:.2f}, "
+                    f"ROUGE-L={sim['rouge_l']:.2f})"
+                )
+                cross_ref_score = max(cross_ref_score, 0.9)
+            elif combined >= 0.55:
+                evidence.append(
+                    "Moderate replication similarity "
+                    f"(combined={combined:.2f}, BLEU={sim['bleu']:.2f}, "
+                    f"ROUGE-L={sim['rouge_l']:.2f})"
+                )
+                cross_ref_score = max(cross_ref_score, 0.75)
+
+        # Check 4: Both scanners flagged — very high confidence
         both_flagged = (
             output_scan.get("is_suspicious", False)
             and propagation_scan.get("is_propagation_risk", False)
