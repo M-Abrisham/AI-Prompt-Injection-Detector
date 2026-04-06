@@ -128,5 +128,7 @@ class PropagationScanner:
                 "is_worm": False,
                 "confidence": 0.0,
                 "matched_patterns": [],
+                "matched_components": [],
+                "advanced_signals": {},
             },
         }

@@ -353,9 +353,46 @@ class WormSignatureDetector:
     itself to other systems, conversations, or users.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, reconstruction_window: int = 6, max_reconstruction_chars: int = 12000) -> None:
         self._lock = threading.Lock()
         self._semantic = _LightweightSemanticClassifier()
+        self._reconstruction_window = max(1, int(reconstruction_window))
+        # Keep a bounded recent-turn buffer used to reconstruct split payloads.
+        self._history_limit = max(0, self._reconstruction_window - 1)
+        self._max_reconstruction_chars = max(200, int(max_reconstruction_chars))
+        self._turn_buffer: List[str] = []
+
+    def reset_history(self) -> None:
+        """Clear in-memory turn history used for cross-turn reconstruction."""
+        with self._lock:
+            self._turn_buffer.clear()
+
+    def _append_turn(self, text: str) -> None:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return
+        if self._history_limit <= 0:
+            return
+        self._turn_buffer.append(cleaned)
+        if len(self._turn_buffer) > self._history_limit:
+            self._turn_buffer = self._turn_buffer[-self._history_limit :]
+
+    def _reconstruct_recent_turns(self, current_text: str) -> str:
+        if self._history_limit <= 0 or not self._turn_buffer:
+            return current_text
+        joined = " ".join(self._turn_buffer + [current_text])
+        if len(joined) > self._max_reconstruction_chars:
+            joined = joined[-self._max_reconstruction_chars :]
+        return joined
+
+    def _scan_text(self, text: str) -> Tuple[List[str], Dict[str, float]]:
+        matches: List[str] = []
+        for pat in WORM_PATTERNS:
+            match = pat.search(text)
+            if match:
+                matches.append(match.group())
+        semantic = self._semantic.score(text)
+        return matches, semantic
 
     def scan(self, text: str | None) -> dict:
         """Scan *text* for worm-like self-replication signatures.
@@ -367,7 +404,13 @@ class WormSignatureDetector:
             ``confidence``       – float in [0.0, 1.0].
             ``matched_patterns`` – list of pattern descriptions that matched.
         """
-        if not text or not text.strip():
+        if text is None:
+            text = ""
+        if not isinstance(text, str):
+            text = str(text)
+        text = text.strip()
+
+        if not text:
             return {
                 "is_worm": False,
                 "confidence": 0.0,
@@ -380,23 +423,51 @@ class WormSignatureDetector:
                 },
             }
 
-        matched: List[str] = []
-
         with self._lock:
-            for pat in WORM_PATTERNS:
-                match = pat.search(text)
-                if match:
-                    matched.append(match.group())
-            semantic = self._semantic.score(text)
+            direct_matches, direct_semantic = self._scan_text(text)
+            reconstructed_text = self._reconstruct_recent_turns(text)
 
-        regex_confidence = _regex_confidence(len(matched))
-        semantic_confidence = semantic.get("score", 0.0)
+            reconstructed_matches: List[str] = []
+            reconstructed_semantic = direct_semantic
+            if reconstructed_text != text:
+                reconstructed_matches, reconstructed_semantic = self._scan_text(reconstructed_text)
+
+            # Always append current turn to history after evaluating this turn.
+            self._append_turn(text)
+
+        matched: List[str] = list(direct_matches)
+        for phrase in reconstructed_matches:
+            if phrase not in matched:
+                matched.append(phrase)
+
+        regex_confidence = max(
+            _regex_confidence(len(direct_matches)),
+            _regex_confidence(len(reconstructed_matches)),
+        )
+
+        direct_semantic_conf = direct_semantic.get("score", 0.0)
+        reconstructed_semantic_conf = reconstructed_semantic.get("score", 0.0)
+        semantic_confidence = max(direct_semantic_conf, reconstructed_semantic_conf)
+
+        if len(reconstructed_matches) > len(direct_matches):
+            matched.append("cross_turn_reconstruction")
 
         if semantic_confidence >= 0.55:
-            matched.append("semantic_propagation_intent")
+            if reconstructed_semantic_conf > direct_semantic_conf:
+                matched.append("cross_turn_semantic_propagation_intent")
+            else:
+                matched.append("semantic_propagation_intent")
+
+        # Deduplicate while keeping deterministic insertion order.
+        seen = set()
+        matched = [m for m in matched if not (m in seen or seen.add(m))]
 
         is_worm = bool(matched)
         confidence = min(1.0, max(regex_confidence, semantic_confidence)) if is_worm else 0.0
+
+        dominant_semantic = (
+            reconstructed_semantic if reconstructed_semantic_conf >= direct_semantic_conf else direct_semantic
+        )
 
         return {
             "is_worm": is_worm,
@@ -404,8 +475,8 @@ class WormSignatureDetector:
             "matched_patterns": matched,
             "semantic_score": round(semantic_confidence, 4),
             "semantic_details": {
-                "worm_similarity": semantic.get("worm_similarity", 0.0),
-                "benign_similarity": semantic.get("benign_similarity", 0.0),
-                "concept_score": semantic.get("concept_score", 0.0),
+                "worm_similarity": dominant_semantic.get("worm_similarity", 0.0),
+                "benign_similarity": dominant_semantic.get("benign_similarity", 0.0),
+                "concept_score": dominant_semantic.get("concept_score", 0.0),
             },
         }
