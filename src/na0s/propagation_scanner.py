@@ -12,10 +12,22 @@ because running the full input classifier on every output is expensive.
 
 from __future__ import annotations
 
+import logging
 import os
-import threading
 
 from na0s.worm_detector import WormSignatureDetector
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+WORM_BOOST_FACTOR = 0.3
+"""How much worm confidence contributes to overall risk score."""
+
+PAYLOAD_SNIPPET_LEN = 200
+"""Max characters captured for the detected_payload field."""
 
 
 # ---------------------------------------------------------------------------
@@ -34,9 +46,10 @@ class PropagationScanner:
 
     def __init__(self, threshold: float = 0.5) -> None:
         self.threshold = threshold
-        # Enable optional runtime adaptation for signatures learned from attacks.
-        self._worm_detector = WormSignatureDetector(auto_adapt=True)
-        self._lock = threading.Lock()
+        # auto_adapt=False: attacker-controlled output must NOT train the
+        # detector — that's a poisoning vector.  Auto-adapt should only run
+        # on *confirmed* malicious input after human review.
+        self._worm_detector = WormSignatureDetector(auto_adapt=False)
 
     # ---- public API -------------------------------------------------------
 
@@ -69,8 +82,9 @@ class PropagationScanner:
         if not output_text or not output_text.strip():
             return self._empty_result()
 
-        with self._lock:
-            return self._scan_impl(output_text, source_input_text=source_input_text)
+        # No global lock needed: WormSignatureDetector handles its own
+        # thread safety, and _run_input_classifier is stateless.
+        return self._scan_impl(output_text, source_input_text=source_input_text)
 
     # ---- internals --------------------------------------------------------
 
@@ -88,12 +102,14 @@ class PropagationScanner:
 
         # Boost risk score if worm patterns are detected
         if worm_result["is_worm"]:
-            worm_boost = worm_result["confidence"] * 0.3
+            worm_boost = worm_result["confidence"] * WORM_BOOST_FACTOR
             risk_score = min(1.0, risk_score + worm_boost)
-            technique_tags = list(technique_tags)  # copy
             technique_tags.append("worm_propagation")
 
-        is_propagation_risk = risk_score >= self.threshold or worm_result["is_worm"]
+        # Single decision criterion: boosted risk_score only.
+        # No separate `or worm_result["is_worm"]` — that double-counted
+        # the worm signal and made the threshold meaningless.
+        is_propagation_risk = risk_score >= self.threshold
 
         return {
             "is_propagation_risk": is_propagation_risk,
@@ -104,58 +120,45 @@ class PropagationScanner:
         }
 
     def _run_input_classifier(self, text: str) -> dict:
-        """Run predict.scan() on the text and extract relevant fields."""
+        """Run predict.scan() on the text and extract relevant fields.
+
+        Fail-closed: if the classifier errors, return high risk with an
+        error flag so the caller doesn't silently pass through attacks.
+        """
         try:
             from na0s.predict import scan as input_scan
 
             result = input_scan(text)
+
+            # Use rule_hits for payload snippet if available, otherwise
+            # fall back to text prefix.
+            if result.is_malicious and result.rule_hits:
+                detected_payload = str(result.rule_hits[0])[:PAYLOAD_SNIPPET_LEN]
+            elif result.is_malicious:
+                detected_payload = text[:PAYLOAD_SNIPPET_LEN]
+            else:
+                detected_payload = ""
+
             return {
                 "risk_score": result.risk_score,
                 "technique_tags": list(result.technique_tags),
-                "detected_payload": text[:200] if result.is_malicious else "",
+                "detected_payload": detected_payload,
             }
         except Exception:
-            # If the model isn't available, fall back to empty
+            # Fail-closed: classifier unavailable = assume risk, not safety.
+            logger.exception("Input classifier failed on propagation scan")
             return {
-                "risk_score": 0.0,
-                "technique_tags": [],
+                "risk_score": 1.0,
+                "technique_tags": ["classifier_error"],
                 "detected_payload": "",
             }
 
-    def _empty_result(self) -> dict:
+    @staticmethod
+    def _empty_result() -> dict:
         return {
             "is_propagation_risk": False,
             "risk_score": 0.0,
             "technique_tags": [],
             "detected_payload": "",
-            "worm_analysis": {
-                "is_worm": False,
-                "confidence": 0.0,
-                "matched_patterns": [],
-                "semantic_score": 0.0,
-                "semantic_details": {
-                    "worm_similarity": 0.0,
-                    "benign_similarity": 0.0,
-                    "concept_score": 0.0,
-                },
-                "replication_score": 0.0,
-                "replication_details": {
-                    "bleu": 0.0,
-                    "rouge_l": 0.0,
-                    "combined": 0.0,
-                },
-                "code_score": 0.0,
-                "code_details": {
-                    "decoded_payload_hit": False,
-                    "decoded_payloads": 0.0,
-                },
-                "embedding_score": 0.0,
-                "embedding_details": {
-                    "worm_similarity": 0.0,
-                    "benign_similarity": 0.0,
-                },
-                "corpus_classifier_score": 0.0,
-                "bayes_score": 0.0,
-                "auto_signature_score": 0.0,
-            },
+            "worm_analysis": WormSignatureDetector.empty_result(),
         }

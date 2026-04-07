@@ -1455,6 +1455,44 @@ class WormSignatureDetector:
 
         return matches, semantic, code_signal
 
+    @staticmethod
+    def empty_result() -> dict:
+        """Return a zero-valued result dict matching the ``scan()`` return schema.
+
+        Canonical source of truth for the worm analysis shape.  Used by both
+        ``scan()`` (for empty input) and ``PropagationScanner._empty_result()``.
+        """
+        return {
+            "is_worm": False,
+            "confidence": 0.0,
+            "matched_patterns": [],
+            "semantic_score": 0.0,
+            "semantic_details": {
+                "worm_similarity": 0.0,
+                "benign_similarity": 0.0,
+                "concept_score": 0.0,
+            },
+            "replication_score": 0.0,
+            "replication_details": {
+                "bleu": 0.0,
+                "rouge_l": 0.0,
+                "combined": 0.0,
+            },
+            "code_score": 0.0,
+            "code_details": {
+                "decoded_payload_hit": False,
+                "decoded_payloads": 0.0,
+            },
+            "embedding_score": 0.0,
+            "embedding_details": {
+                "worm_similarity": 0.0,
+                "benign_similarity": 0.0,
+            },
+            "corpus_classifier_score": 0.0,
+            "bayes_score": 0.0,
+            "auto_signature_score": 0.0,
+        }
+
     def scan(self, text: str | None, source_text: str | None = None) -> dict:
         """Scan *text* for worm-like self-replication signatures.
 
@@ -1472,36 +1510,7 @@ class WormSignatureDetector:
         text = text.strip()
 
         if not text:
-            return {
-                "is_worm": False,
-                "confidence": 0.0,
-                "matched_patterns": [],
-                "semantic_score": 0.0,
-                "semantic_details": {
-                    "worm_similarity": 0.0,
-                    "benign_similarity": 0.0,
-                    "concept_score": 0.0,
-                },
-                "replication_score": 0.0,
-                "replication_details": {
-                    "bleu": 0.0,
-                    "rouge_l": 0.0,
-                    "combined": 0.0,
-                },
-                "code_score": 0.0,
-                "code_details": {
-                    "decoded_payload_hit": False,
-                    "decoded_payloads": 0.0,
-                },
-                "embedding_score": 0.0,
-                "embedding_details": {
-                    "worm_similarity": 0.0,
-                    "benign_similarity": 0.0,
-                },
-                "corpus_classifier_score": 0.0,
-                "bayes_score": 0.0,
-                "auto_signature_score": 0.0,
-            }
+            return self.empty_result()
 
         source_text_norm = str(source_text).strip() if source_text is not None else ""
 
