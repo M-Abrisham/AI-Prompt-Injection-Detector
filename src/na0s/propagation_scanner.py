@@ -154,5 +154,8 @@ class PropagationScanner:
                     "worm_similarity": 0.0,
                     "benign_similarity": 0.0,
                 },
+                "corpus_classifier_score": 0.0,
+                "bayes_score": 0.0,
+                "auto_signature_score": 0.0,
             },
         }

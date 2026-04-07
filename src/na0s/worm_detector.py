@@ -49,6 +49,30 @@ try:
 except ImportError:
     pass
 
+# ---------------------------------------------------------------------------
+# Optional: sklearn (for corpus classifier)
+# ---------------------------------------------------------------------------
+_HAS_SKLEARN = False
+
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import Pipeline
+    from sklearn.decomposition import PCA as _SklearnPCA
+
+    _HAS_SKLEARN = True
+except ImportError:
+    pass
+
+_HAS_JOBLIB = False
+
+try:
+    import joblib
+
+    _HAS_JOBLIB = True
+except ImportError:
+    pass
+
 
 # ---------------------------------------------------------------------------
 # Self-replication patterns
@@ -414,7 +438,8 @@ class _EmbeddingSimilarity:
     @classmethod
     def _reset_instance(cls) -> None:
         """Reset the singleton instance (for test teardown only)."""
-        cls._instance = None
+        with cls._instance_lock:
+            cls._instance = None
 
     @staticmethod
     def _is_model_cached(model_name: str) -> bool:
@@ -520,6 +545,356 @@ class _EmbeddingSimilarity:
                 "embedding_benign_similarity": 0.0,
                 "embedding_score": 0.0,
             }
+
+
+# ---------------------------------------------------------------------------
+# Worm corpus classifier (sklearn TF-IDF + LogisticRegression, optional)
+# ---------------------------------------------------------------------------
+
+
+class _WormCorpusClassifier:
+    """Lightweight TF-IDF + LogisticRegression worm classifier.
+
+    Trained offline on a labeled worm corpus (e.g. StavC/Here-Comes-the-AI-Worm).
+    When no trained model file is present, ``predict_proba`` returns 0.0 so the
+    rest of the pipeline is unaffected.
+    """
+
+    _instance: Optional["_WormCorpusClassifier"] = None
+    _instance_lock = threading.Lock()
+
+    _DEFAULT_MODEL_PATH = os.path.join(
+        os.path.expanduser("~"), ".na0s", "models", "worm_classifier.joblib",
+    )
+
+    def __init__(self, model_path: str | None = None) -> None:
+        self._pipeline = None
+        self._model_path = model_path or self._DEFAULT_MODEL_PATH
+        self._op_lock = threading.Lock()
+        self._load_model()
+
+    @staticmethod
+    def _hash_file(path: str) -> str:
+        """Return SHA-256 hex digest of a file."""
+        import hashlib
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    def _load_model(self) -> None:
+        """Attempt to load a pre-trained pipeline from disk.
+
+        Security: joblib.load uses pickle internally, so we verify the model
+        file's SHA-256 against a companion ``.sha256`` sidecar before loading.
+        If the sidecar is missing or the hash doesn't match, loading is refused.
+        """
+        if not _HAS_JOBLIB:
+            logger.debug("joblib not available; corpus classifier disabled")
+            return
+        path = self._model_path
+        if not os.path.isfile(path):
+            logger.debug("Worm corpus model not found at %s", path)
+            return
+
+        # --- Integrity check: require a .sha256 sidecar file ----------------
+        hash_path = path + ".sha256"
+        if not os.path.isfile(hash_path):
+            logger.warning(
+                "Refusing to load %s: no .sha256 sidecar found. "
+                "Re-train with train() to generate one.",
+                path,
+            )
+            return
+        try:
+            expected_hash = open(hash_path, "r").read().strip().split()[0]
+            actual_hash = self._hash_file(path)
+            if actual_hash != expected_hash:
+                logger.warning(
+                    "Refusing to load %s: SHA-256 mismatch "
+                    "(expected %s, got %s). File may be corrupted or tampered.",
+                    path, expected_hash[:16], actual_hash[:16],
+                )
+                return
+        except Exception:
+            logger.warning(
+                "Refusing to load %s: failed to verify integrity",
+                path, exc_info=True,
+            )
+            return
+
+        try:
+            obj = joblib.load(path)
+            # Minimal validation: must expose predict_proba
+            if not callable(getattr(obj, "predict_proba", None)):
+                logger.warning("Loaded object at %s lacks predict_proba; ignoring", path)
+                return
+            self._pipeline = obj
+            logger.debug("Worm corpus classifier loaded from %s", path)
+        except Exception:
+            logger.warning(
+                "Failed to load worm corpus model from %s", path, exc_info=True,
+            )
+            self._pipeline = None
+
+    @classmethod
+    def get_instance(cls, model_path: str | None = None) -> "_WormCorpusClassifier":
+        """Thread-safe singleton."""
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls(model_path)
+        return cls._instance
+
+    @classmethod
+    def _reset_instance(cls) -> None:
+        """Reset the singleton (for test teardown only)."""
+        with cls._instance_lock:
+            cls._instance = None
+
+    def predict_proba(self, text: str | None) -> float:
+        """Return probability that *text* is a worm payload.
+
+        Returns 0.0 when no model is loaded, or if *text* is empty/None.
+        """
+        if self._pipeline is None:
+            return 0.0
+        if not text or not isinstance(text, str) or not text.strip():
+            return 0.0
+        with self._op_lock:
+            try:
+                probs = self._pipeline.predict_proba([text.strip()[:4000]])
+                # Class 1 = worm
+                classes = list(self._pipeline.classes_)
+                if 1 in classes:
+                    idx = classes.index(1)
+                else:
+                    return 0.0
+                return float(probs[0][idx])
+            except Exception:
+                logger.debug("Corpus classifier predict_proba failed", exc_info=True)
+                return 0.0
+
+    def train(self, texts: List[str], labels: List[int]) -> None:
+        """Fit TF-IDF + LogisticRegression on *texts*/*labels* and persist.
+
+        This is for **offline** use — NOT called during scan().
+
+        Parameters
+        ----------
+        texts : list of str
+            Training documents.
+        labels : list of int
+            Binary labels (1 = worm, 0 = benign).
+        """
+        if not _HAS_SKLEARN:
+            raise RuntimeError("scikit-learn is required for training the worm corpus classifier")
+        if not _HAS_JOBLIB:
+            raise RuntimeError("joblib is required for persisting the worm corpus classifier")
+
+        pipeline = Pipeline([
+            ("tfidf", TfidfVectorizer(max_features=10000, sublinear_tf=True, ngram_range=(1, 2))),
+            ("clf", LogisticRegression(max_iter=1000, C=1.0, solver="lbfgs")),
+        ])
+        pipeline.fit(texts, labels)
+        with self._op_lock:
+            self._pipeline = pipeline
+
+        # Persist with integrity sidecar
+        model_dir = os.path.dirname(self._model_path)
+        os.makedirs(model_dir, exist_ok=True)
+        joblib.dump(pipeline, self._model_path)
+        file_hash = self._hash_file(self._model_path)
+        with open(self._model_path + ".sha256", "w") as f:
+            f.write(file_hash + "\n")
+        logger.info("Worm corpus classifier saved to %s (sha256: %s)", self._model_path, file_hash[:16])
+
+
+# ---------------------------------------------------------------------------
+# Bayesian worm scorer — noise-resistant signal fusion
+# ---------------------------------------------------------------------------
+
+
+class _BayesWormScorer:
+    """Combine multiple detection signals into a calibrated posterior via log-odds Bayesian fusion.
+
+    Each signal is converted to a likelihood ratio (LR) and combined in
+    log-odds space.  Individual LR contributions are capped to prevent a
+    single extreme signal from dominating (noise resistance).
+
+    Design note: LR is always >= 1.0 (or neutral at 1.0 when signal is 0).
+    This means the Bayes scorer can only RAISE the posterior above the prior,
+    never lower it.  This is intentional for a security detector: absent
+    signals should not exonerate — they are simply non-evidence.  The prior
+    (default 0.01) already reflects the rarity of worms.
+    """
+
+    # Signal name -> LR multiplier.  LR = 1 + multiplier * confidence.
+    _LR_MULTIPLIERS: Dict[str, float] = {
+        "regex_confidence": 50.0,
+        "semantic_confidence": 30.0,
+        "embedding_confidence": 25.0,
+        "replication_confidence": 40.0,
+        "code_confidence": 35.0,
+        "corpus_classifier_score": 45.0,
+        "auto_signature_score": 20.0,
+    }
+
+    def __init__(self, prior: float = 0.01, max_lr_cap: float = 20.0) -> None:
+        if not (0.0 < prior < 1.0):
+            raise ValueError("prior must be in (0, 1)")
+        if max_lr_cap < 1.0:
+            raise ValueError("max_lr_cap must be >= 1.0")
+        self._prior = prior
+        self._max_lr_cap = max_lr_cap
+
+    def score(self, signals: Dict[str, float]) -> float:
+        """Return posterior P(worm | signals) in [0, 1].
+
+        Parameters
+        ----------
+        signals : dict
+            Mapping of signal name -> confidence value (0..1).
+            Unknown keys are silently ignored.  Missing keys are treated as 0.
+        """
+        prior = self._prior
+        # Start with log-odds of the prior.
+        log_odds = math.log(prior / (1.0 - prior))
+
+        for name, multiplier in self._LR_MULTIPLIERS.items():
+            conf = float(signals.get(name, 0.0))
+            if conf <= 0.0:
+                # LR = 1.0 -> contributes 0 in log-odds space.
+                continue
+            lr = 1.0 + multiplier * conf
+            # Cap to prevent one extreme signal from dominating.
+            lr = min(lr, self._max_lr_cap)
+            log_odds += math.log(lr)
+
+        # Guard against overflow in exp().
+        if log_odds > 500.0:
+            return 1.0
+        if log_odds < -500.0:
+            return 0.0
+        return 1.0 / (1.0 + math.exp(-log_odds))
+
+
+# ---------------------------------------------------------------------------
+# PCA-based auto-signature extraction
+# ---------------------------------------------------------------------------
+
+
+class _PCASignatureExtractor:
+    """Extract dominant attack patterns from observed texts via TF-IDF + PCA.
+
+    Uses character n-grams (range 3-6) since worm payloads may use unusual
+    tokenization that defeats word-level TF-IDF.  When sklearn is unavailable
+    or too few samples are provided, gracefully returns empty results.
+    """
+
+    _MIN_SAMPLES = 5
+
+    def extract_signatures(
+        self,
+        texts: List[str],
+        top_k: int = 3,
+        n_terms: int = 10,
+    ) -> List[Dict]:
+        """Extract *top_k* PCA-based signatures from *texts*.
+
+        Returns a list of dicts, each with:
+            terms             - list of highest-loading character n-gram terms
+            explained_variance - variance explained by this component (float)
+            pattern           - human-readable regex-like description string
+        """
+        if not _HAS_SKLEARN or not _HAS_NUMPY:
+            return []
+        if not texts or len(texts) < self._MIN_SAMPLES:
+            return []
+
+        try:
+            n_components = min(top_k, len(texts))
+            vectorizer = TfidfVectorizer(
+                analyzer="char",
+                ngram_range=(3, 6),
+                max_features=2000,
+                sublinear_tf=True,
+            )
+            tfidf_matrix = vectorizer.fit_transform(texts)
+            feature_names = vectorizer.get_feature_names_out()
+
+            pca = _SklearnPCA(n_components=n_components)
+            pca.fit(tfidf_matrix.toarray())
+
+            signatures: List[Dict] = []
+            for i in range(n_components):
+                component = pca.components_[i]
+                top_indices = np.argsort(np.abs(component))[::-1][:n_terms]
+                terms = [str(feature_names[idx]) for idx in top_indices]
+                explained_var = float(pca.explained_variance_ratio_[i])
+
+                escaped = [re.escape(t) for t in terms[:5]]
+                pattern_desc = "(?:" + "|".join(escaped) + ")"
+
+                signatures.append({
+                    "terms": terms,
+                    "explained_variance": round(explained_var, 6),
+                    "pattern": pattern_desc,
+                })
+            return signatures
+        except Exception:
+            logger.debug("PCA signature extraction failed", exc_info=True)
+            return []
+
+    def score_text(
+        self,
+        text: str,
+        texts: List[str],
+        top_k: int = 3,
+    ) -> float:
+        """Score *text* against PCA components derived from *texts*.
+
+        Returns a float in [0.0, 1.0]: the max cosine of the text's TF-IDF
+        vector projected onto any principal component, normalized.
+        Returns 0.0 when sklearn/numpy are unavailable or too few samples.
+        """
+        if not _HAS_SKLEARN or not _HAS_NUMPY:
+            return 0.0
+        if not text or not text.strip():
+            return 0.0
+        if not texts or len(texts) < self._MIN_SAMPLES:
+            return 0.0
+
+        try:
+            n_components = min(top_k, len(texts))
+            vectorizer = TfidfVectorizer(
+                analyzer="char",
+                ngram_range=(3, 6),
+                max_features=2000,
+                sublinear_tf=True,
+            )
+            tfidf_matrix = vectorizer.fit_transform(texts)
+
+            pca = _SklearnPCA(n_components=n_components)
+            pca.fit(tfidf_matrix.toarray())
+
+            text_vec = vectorizer.transform([text.strip()[:4000]]).toarray()[0]
+
+            max_score = 0.0
+            for i in range(n_components):
+                component = pca.components_[i]
+                dot = float(np.dot(text_vec, component))
+                norm_t = float(np.linalg.norm(text_vec))
+                norm_c = float(np.linalg.norm(component))
+                if norm_t > 0.0 and norm_c > 0.0:
+                    cos_sim = abs(dot) / (norm_t * norm_c)
+                    max_score = max(max_score, cos_sim)
+
+            return min(1.0, max(0.0, max_score))
+        except Exception:
+            logger.debug("PCA auto-signature scoring failed", exc_info=True)
+            return 0.0
 
 
 _ACTION_TOKENS = {
@@ -793,6 +1168,8 @@ class WormSignatureDetector:
         self._lock = threading.Lock()
         self._semantic = _LightweightSemanticClassifier()
         self._embedding = _EmbeddingSimilarity.get_instance(embedding_model)
+        self._corpus_classifier = _WormCorpusClassifier.get_instance()
+        self._bayes = _BayesWormScorer()
         self._reconstruction_window = max(1, int(reconstruction_window))
         # Keep a bounded recent-turn buffer used to reconstruct split payloads.
         self._history_limit = max(0, self._reconstruction_window - 1)
@@ -805,6 +1182,7 @@ class WormSignatureDetector:
         self._observed_attack_limit = 64
         self._auto_adapt = bool(auto_adapt)
         self._auto_adapt_min_samples = max(2, int(auto_adapt_min_samples))
+        self._pca_extractor = _PCASignatureExtractor()
 
     def reset_history(self) -> None:
         """Clear in-memory turn history used for cross-turn reconstruction."""
@@ -922,6 +1300,25 @@ class WormSignatureDetector:
                 stride=None if stride is None else max(1, int(stride)),
                 min_fragment_len=max(8, int(min_fragment_len)),
             )
+
+    def get_auto_signatures(self) -> List[Dict]:
+        """Return PCA-extracted signatures from observed attack texts."""
+        with self._lock:
+            return self._pca_extractor.extract_signatures(
+                list(self._observed_attack_texts),
+            )
+
+    def _check_auto_signatures(self, text: str) -> float:
+        """Score *text* against PCA auto-signatures from observed attacks.
+
+        Returns a float in [0.0, 1.0].  Returns 0.0 when no attacks have been
+        observed or when sklearn is unavailable.
+        """
+        # Lock is assumed to be held by caller (scan).
+        return self._pca_extractor.score_text(
+            text,
+            list(self._observed_attack_texts),
+        )
 
     def observe_attack(self, text: str | None) -> dict:
         """Store observed attack text and optionally auto-learn runtime signatures."""
@@ -1101,6 +1498,9 @@ class WormSignatureDetector:
                     "worm_similarity": 0.0,
                     "benign_similarity": 0.0,
                 },
+                "corpus_classifier_score": 0.0,
+                "bayes_score": 0.0,
+                "auto_signature_score": 0.0,
             }
 
         source_text_norm = str(source_text).strip() if source_text is not None else ""
@@ -1130,6 +1530,10 @@ class WormSignatureDetector:
             if source_text_norm:
                 source_matches, source_semantic, source_code = self._scan_text(source_text_norm)
                 replication = replication_similarity(source_text_norm, text)
+
+            # PCA auto-signatures: score against observed attacks while lock is held
+            # (reads _observed_attack_texts which can be mutated by observe_attack)
+            auto_sig_score = self._check_auto_signatures(text)
 
             # Always append current turn to history after evaluating this turn.
             self._append_turn(text)
@@ -1166,6 +1570,11 @@ class WormSignatureDetector:
         if embedding_confidence >= 0.55:
             matched.append("embedding_similarity")
 
+        # Corpus classifier (optional, only when a trained model is loaded)
+        corpus_classifier_score = self._corpus_classifier.predict_proba(text)
+        if corpus_classifier_score >= 0.6:
+            matched.append("corpus_classifier")
+
         if len(reconstructed_matches) > len(direct_matches):
             matched.append("cross_turn_reconstruction")
 
@@ -1184,17 +1593,30 @@ class WormSignatureDetector:
                 matched.append("input_output_high_similarity")
                 replication_confidence = replication_score * 0.9
 
+        if auto_sig_score >= 0.5:
+            matched.append("auto_pca_signature")
+
         # Deduplicate while keeping deterministic insertion order.
         seen = set()
         matched = [m for m in matched if not (m in seen or seen.add(m))]
 
         is_worm = bool(matched)
+        old_max = max(
+            regex_confidence, semantic_confidence, replication_confidence,
+            code_confidence, embedding_confidence, corpus_classifier_score,
+            auto_sig_score,
+        )
+        bayes_score = self._bayes.score({
+            "regex_confidence": regex_confidence,
+            "semantic_confidence": semantic_confidence,
+            "embedding_confidence": embedding_confidence,
+            "replication_confidence": replication_confidence,
+            "code_confidence": code_confidence,
+            "corpus_classifier_score": corpus_classifier_score,
+            "auto_signature_score": auto_sig_score,
+        }) if is_worm else 0.0
         confidence = (
-            min(
-                1.0,
-                max(regex_confidence, semantic_confidence, replication_confidence,
-                    code_confidence, embedding_confidence),
-            )
+            min(1.0, max(old_max, bayes_score))
             if is_worm
             else 0.0
         )
@@ -1238,4 +1660,7 @@ class WormSignatureDetector:
                 "worm_similarity": embedding_result.get("embedding_worm_similarity", 0.0),
                 "benign_similarity": embedding_result.get("embedding_benign_similarity", 0.0),
             },
+            "corpus_classifier_score": round(corpus_classifier_score, 4),
+            "bayes_score": round(bayes_score, 4),
+            "auto_signature_score": round(auto_sig_score, 4),
         }
