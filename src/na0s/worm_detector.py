@@ -16,6 +16,8 @@ import threading
 from collections import Counter
 from typing import Dict, List, Tuple
 
+from na0s.replication_similarity import replication_similarity
+
 
 # ---------------------------------------------------------------------------
 # Self-replication patterns
@@ -353,7 +355,13 @@ class WormSignatureDetector:
     itself to other systems, conversations, or users.
     """
 
-    def __init__(self, reconstruction_window: int = 6, max_reconstruction_chars: int = 12000) -> None:
+    def __init__(
+        self,
+        reconstruction_window: int = 6,
+        max_reconstruction_chars: int = 12000,
+        auto_adapt: bool = False,
+        auto_adapt_min_samples: int = 3,
+    ) -> None:
         self._lock = threading.Lock()
         self._semantic = _LightweightSemanticClassifier()
         self._reconstruction_window = max(1, int(reconstruction_window))
@@ -361,11 +369,30 @@ class WormSignatureDetector:
         self._history_limit = max(0, self._reconstruction_window - 1)
         self._max_reconstruction_chars = max(200, int(max_reconstruction_chars))
         self._turn_buffer: List[str] = []
+        self._runtime_signature_patterns: List[re.Pattern] = []
+        self._runtime_signature_fragments: List[str] = []
+        self._runtime_signature_keys: set[str] = set()
+        self._observed_attack_texts: List[str] = []
+        self._observed_attack_limit = 64
+        self._auto_adapt = bool(auto_adapt)
+        self._auto_adapt_min_samples = max(2, int(auto_adapt_min_samples))
 
     def reset_history(self) -> None:
         """Clear in-memory turn history used for cross-turn reconstruction."""
         with self._lock:
             self._turn_buffer.clear()
+
+    def clear_runtime_signatures(self) -> None:
+        """Drop all runtime-learned signatures."""
+        with self._lock:
+            self._runtime_signature_patterns.clear()
+            self._runtime_signature_fragments.clear()
+            self._runtime_signature_keys.clear()
+
+    def get_runtime_signatures(self) -> List[str]:
+        """Return currently active runtime signature fragments."""
+        with self._lock:
+            return list(self._runtime_signature_fragments)
 
     def _append_turn(self, text: str) -> None:
         cleaned = (text or "").strip()
@@ -385,16 +412,134 @@ class WormSignatureDetector:
             joined = joined[-self._max_reconstruction_chars :]
         return joined
 
+    @staticmethod
+    def _compile_runtime_signature(fragment: str) -> re.Pattern | None:
+        normalized = " ".join((fragment or "").strip().split())
+        if not normalized:
+            return None
+        parts = [re.escape(piece) for piece in normalized.split()]
+        if not parts:
+            return None
+        pattern = r"(?i)" + r"\s+".join(parts)
+        return re.compile(pattern)
+
+    def _learn_runtime_signatures_locked(
+        self,
+        observed_texts: List[str],
+        top_k: int,
+        block_size: int,
+        stride: int | None,
+        min_fragment_len: int,
+    ) -> dict:
+        from na0s.worm_advanced import copp_signatures
+
+        fragments = copp_signatures(
+            observed_texts,
+            top_k=top_k,
+            block_size=block_size,
+            stride=stride,
+        )
+        added: List[str] = []
+        for fragment in fragments:
+            normalized = " ".join((fragment or "").strip().split())
+            if len(normalized) < min_fragment_len:
+                continue
+            key = normalized.lower()
+            if key in self._runtime_signature_keys:
+                continue
+            compiled = self._compile_runtime_signature(normalized)
+            if compiled is None:
+                continue
+            self._runtime_signature_patterns.append(compiled)
+            self._runtime_signature_fragments.append(normalized)
+            self._runtime_signature_keys.add(key)
+            added.append(normalized)
+
+        return {
+            "generated": len(fragments),
+            "added": len(added),
+            "fragments": added,
+            "total_runtime_signatures": len(self._runtime_signature_patterns),
+        }
+
+    def learn_runtime_signatures(
+        self,
+        observed_texts: List[str],
+        *,
+        top_k: int = 3,
+        block_size: int = 80,
+        stride: int | None = None,
+        min_fragment_len: int = 24,
+    ) -> dict:
+        """Generate and activate runtime signatures from observed attack texts."""
+        cleaned = [
+            str(t).strip()
+            for t in (observed_texts or [])
+            if t is not None and str(t).strip()
+        ]
+        if not cleaned:
+            return {
+                "generated": 0,
+                "added": 0,
+                "fragments": [],
+                "total_runtime_signatures": 0,
+            }
+
+        with self._lock:
+            return self._learn_runtime_signatures_locked(
+                observed_texts=cleaned,
+                top_k=max(1, int(top_k)),
+                block_size=max(8, int(block_size)),
+                stride=None if stride is None else max(1, int(stride)),
+                min_fragment_len=max(8, int(min_fragment_len)),
+            )
+
+    def observe_attack(self, text: str | None) -> dict:
+        """Store observed attack text and optionally auto-learn runtime signatures."""
+        cleaned = str(text or "").strip()
+        if not cleaned:
+            return {
+                "observed_samples": 0,
+                "runtime_signatures": len(self.get_runtime_signatures()),
+                "added": 0,
+            }
+
+        with self._lock:
+            self._observed_attack_texts.append(cleaned)
+            if len(self._observed_attack_texts) > self._observed_attack_limit:
+                self._observed_attack_texts = self._observed_attack_texts[-self._observed_attack_limit :]
+
+            added = 0
+            if self._auto_adapt and len(self._observed_attack_texts) >= self._auto_adapt_min_samples:
+                learn = self._learn_runtime_signatures_locked(
+                    observed_texts=self._observed_attack_texts[-self._observed_attack_limit :],
+                    top_k=2,
+                    block_size=72,
+                    stride=18,
+                    min_fragment_len=24,
+                )
+                added = int(learn.get("added", 0))
+
+            return {
+                "observed_samples": len(self._observed_attack_texts),
+                "runtime_signatures": len(self._runtime_signature_patterns),
+                "added": added,
+            }
+
     def _scan_text(self, text: str) -> Tuple[List[str], Dict[str, float]]:
         matches: List[str] = []
         for pat in WORM_PATTERNS:
             match = pat.search(text)
             if match:
                 matches.append(match.group())
+        for idx, runtime_pat in enumerate(self._runtime_signature_patterns):
+            if runtime_pat.search(text):
+                frag_preview = self._runtime_signature_fragments[idx][:64]
+                matches.append(f"runtime_signature:{frag_preview}")
         semantic = self._semantic.score(text)
         return matches, semantic
 
-    def scan(self, text: str | None) -> dict:
+    def scan(self, text: str | None, source_text: str | None = None) -> dict:
         """Scan *text* for worm-like self-replication signatures.
 
         Returns
@@ -421,7 +566,15 @@ class WormSignatureDetector:
                     "benign_similarity": 0.0,
                     "concept_score": 0.0,
                 },
+                "replication_score": 0.0,
+                "replication_details": {
+                    "bleu": 0.0,
+                    "rouge_l": 0.0,
+                    "combined": 0.0,
+                },
             }
+
+        source_text_norm = str(source_text).strip() if source_text is not None else ""
 
         with self._lock:
             direct_matches, direct_semantic = self._scan_text(text)
@@ -431,6 +584,17 @@ class WormSignatureDetector:
             reconstructed_semantic = direct_semantic
             if reconstructed_text != text:
                 reconstructed_matches, reconstructed_semantic = self._scan_text(reconstructed_text)
+
+            source_matches: List[str] = []
+            source_semantic = {"score": 0.0}
+            replication = {
+                "bleu": 0.0,
+                "rouge_l": 0.0,
+                "combined": 0.0,
+            }
+            if source_text_norm:
+                source_matches, source_semantic = self._scan_text(source_text_norm)
+                replication = replication_similarity(source_text_norm, text)
 
             # Always append current turn to history after evaluating this turn.
             self._append_turn(text)
@@ -448,6 +612,10 @@ class WormSignatureDetector:
         direct_semantic_conf = direct_semantic.get("score", 0.0)
         reconstructed_semantic_conf = reconstructed_semantic.get("score", 0.0)
         semantic_confidence = max(direct_semantic_conf, reconstructed_semantic_conf)
+        source_semantic_conf = source_semantic.get("score", 0.0)
+        source_worm_like = bool(source_matches) or source_semantic_conf >= 0.55
+        replication_score = float(replication.get("combined", 0.0))
+        replication_confidence = 0.0
 
         if len(reconstructed_matches) > len(direct_matches):
             matched.append("cross_turn_reconstruction")
@@ -458,25 +626,47 @@ class WormSignatureDetector:
             else:
                 matched.append("semantic_propagation_intent")
 
+        # Output-to-input feedback loop: model output mirrors prior worm-like input.
+        if source_text_norm:
+            if source_worm_like and replication_score >= 0.62:
+                matched.append("input_output_replication")
+                replication_confidence = replication_score
+            elif replication_score >= 0.90 and (semantic_confidence >= 0.55 or regex_confidence >= 0.6):
+                matched.append("input_output_high_similarity")
+                replication_confidence = replication_score * 0.9
+
         # Deduplicate while keeping deterministic insertion order.
         seen = set()
         matched = [m for m in matched if not (m in seen or seen.add(m))]
 
         is_worm = bool(matched)
-        confidence = min(1.0, max(regex_confidence, semantic_confidence)) if is_worm else 0.0
+        confidence = (
+            min(1.0, max(regex_confidence, semantic_confidence, replication_confidence))
+            if is_worm
+            else 0.0
+        )
 
         dominant_semantic = (
             reconstructed_semantic if reconstructed_semantic_conf >= direct_semantic_conf else direct_semantic
         )
+
+        if is_worm and confidence >= 0.85:
+            self.observe_attack(text)
 
         return {
             "is_worm": is_worm,
             "confidence": round(confidence, 4),
             "matched_patterns": matched,
             "semantic_score": round(semantic_confidence, 4),
+            "replication_score": round(replication_score, 4),
             "semantic_details": {
                 "worm_similarity": dominant_semantic.get("worm_similarity", 0.0),
                 "benign_similarity": dominant_semantic.get("benign_similarity", 0.0),
                 "concept_score": dominant_semantic.get("concept_score", 0.0),
+            },
+            "replication_details": {
+                "bleu": replication.get("bleu", 0.0),
+                "rouge_l": replication.get("rouge_l", 0.0),
+                "combined": replication.get("combined", 0.0),
             },
         }

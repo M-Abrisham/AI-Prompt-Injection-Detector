@@ -34,7 +34,8 @@ class PropagationScanner:
 
     def __init__(self, threshold: float = 0.5) -> None:
         self.threshold = threshold
-        self._worm_detector = WormSignatureDetector()
+        # Enable optional runtime adaptation for signatures learned from attacks.
+        self._worm_detector = WormSignatureDetector(auto_adapt=True)
         self._lock = threading.Lock()
 
     # ---- public API -------------------------------------------------------
@@ -44,13 +45,16 @@ class PropagationScanner:
         """Return True if propagation scanning is enabled via env var."""
         return os.environ.get("NA0S_PROPAGATION_SCAN", "0") in ("1", "true", "yes")
 
-    def scan(self, output_text: str) -> dict:
+    def scan(self, output_text: str, source_input_text: str | None = None) -> dict:
         """Scan LLM output for injection payloads targeting downstream LLMs.
 
         Parameters
         ----------
         output_text : str
             The LLM-generated output to scan.
+        source_input_text : str or None
+            Optional original prompt that produced *output_text*. Used for
+            output-to-input replication feedback detection.
 
         Returns
         -------
@@ -66,16 +70,16 @@ class PropagationScanner:
             return self._empty_result()
 
         with self._lock:
-            return self._scan_impl(output_text)
+            return self._scan_impl(output_text, source_input_text=source_input_text)
 
     # ---- internals --------------------------------------------------------
 
-    def _scan_impl(self, output_text: str) -> dict:
+    def _scan_impl(self, output_text: str, source_input_text: str | None = None) -> dict:
         # 1. Run input classifier on the output
         scan_result = self._run_input_classifier(output_text)
 
         # 2. Run worm detector
-        worm_result = self._worm_detector.scan(output_text)
+        worm_result = self._worm_detector.scan(output_text, source_text=source_input_text)
 
         # 3. Combine results
         risk_score = scan_result.get("risk_score", 0.0)
@@ -128,6 +132,8 @@ class PropagationScanner:
                 "is_worm": False,
                 "confidence": 0.0,
                 "matched_patterns": [],
+                "semantic_score": 0.0,
+                "replication_score": 0.0,
                 "matched_components": [],
                 "advanced_signals": {},
             },
