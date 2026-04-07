@@ -133,8 +133,26 @@ class PropagationScanner:
                 "confidence": 0.0,
                 "matched_patterns": [],
                 "semantic_score": 0.0,
+                "semantic_details": {
+                    "worm_similarity": 0.0,
+                    "benign_similarity": 0.0,
+                    "concept_score": 0.0,
+                },
                 "replication_score": 0.0,
-                "matched_components": [],
-                "advanced_signals": {},
+                "replication_details": {
+                    "bleu": 0.0,
+                    "rouge_l": 0.0,
+                    "combined": 0.0,
+                },
+                "code_score": 0.0,
+                "code_details": {
+                    "decoded_payload_hit": False,
+                    "decoded_payloads": 0.0,
+                },
+                "embedding_score": 0.0,
+                "embedding_details": {
+                    "worm_similarity": 0.0,
+                    "benign_similarity": 0.0,
+                },
             },
         }
