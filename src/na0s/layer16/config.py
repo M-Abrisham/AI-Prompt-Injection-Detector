@@ -103,6 +103,15 @@ DRIFT_AVG_THRESHOLD = 0.5  # average cosine sim below this = gradual drift
 DRIFT_CONFIDENCE_MIN = 0.3
 
 # ---------------------------------------------------------------------------
+# Chain-of-Thought Compliance (D1.23)
+# ---------------------------------------------------------------------------
+
+ENABLE_COT_COMPLIANCE = True
+COT_COMPLIANCE_MIN_TURNS = 2
+COT_COMPLIANCE_CONFIDENCE_MIN = 0.3
+COT_COMPLIANCE_MULTI_SIGNAL_BOOST = 1.5
+
+# ---------------------------------------------------------------------------
 # User Risk Profiles (T3.1)
 # ---------------------------------------------------------------------------
 
@@ -171,3 +180,12 @@ ENABLE_CHANGE_POINT = True
 BOCPD_HAZARD_RATE = 0.02  # expect change every ~50 turns
 BOCPD_CHANGE_POINT_THRESHOLD = 0.5  # alert when P(cp) > 0.5
 BOCPD_MIN_TURNS = 3
+
+# ---------------------------------------------------------------------------
+# Scheming Behavior Detection (D1.22)
+# ---------------------------------------------------------------------------
+
+ENABLE_SCHEMING = True
+SCHEMING_MIN_TURNS = 3
+SCHEMING_CONFIDENCE_MIN = 0.25
+SCHEMING_MULTI_SIGNAL_BOOST = 1.5
