@@ -157,3 +157,51 @@ class TestBayesScanIntegration:
         det = WormSignatureDetector()
         result = det.scan("The weather is nice today.")
         assert result["bayes_score"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Behavioral tests: verify Bayes fusion quality, not plumbing
+# ---------------------------------------------------------------------------
+
+
+class TestBayesBehavioral:
+    """Tests that verify Bayes scoring produces meaningful results."""
+
+    def test_multi_signal_exceeds_strongest_single(self):
+        """Multiple strong signals must produce a higher posterior than any
+        single signal alone — this is the core value of Bayesian fusion."""
+        scorer = _BayesWormScorer(prior=0.01)
+        single_regex = scorer.score({"regex_confidence": 0.6})
+        single_semantic = scorer.score({"semantic_confidence": 0.5})
+        single_replication = scorer.score({"replication_confidence": 0.7})
+        multi = scorer.score({
+            "regex_confidence": 0.6,
+            "semantic_confidence": 0.5,
+            "replication_confidence": 0.7,
+        })
+        strongest_single = max(single_regex, single_semantic, single_replication)
+        assert multi > strongest_single, (
+            f"Multi-signal ({multi}) must exceed strongest single ({strongest_single})"
+        )
+
+    def test_lr_cap_bounds_posterior_spread(self):
+        """Tighter LR cap must produce lower posterior for extreme signals."""
+        tight_cap = _BayesWormScorer(prior=0.01, max_lr_cap=5.0)
+        wide_cap = _BayesWormScorer(prior=0.01, max_lr_cap=100.0)
+        extreme = {"regex_confidence": 1.0, "semantic_confidence": 1.0}
+        assert tight_cap.score(extreme) < wide_cap.score(extreme), (
+            "Tighter LR cap should produce lower posterior for extreme signals"
+        )
+
+    def test_weak_signal_negligible_vs_strong(self):
+        """A weak noisy signal should not substantially change a strong signal's posterior."""
+        scorer = _BayesWormScorer(prior=0.01)
+        strong_only = scorer.score({"regex_confidence": 0.8})
+        strong_plus_noise = scorer.score({
+            "regex_confidence": 0.8,
+            "auto_signature_score": 0.05,
+        })
+        delta = abs(strong_plus_noise - strong_only)
+        assert delta < 0.15, (
+            f"Noise signal shifted posterior by {delta} — should be < 0.15"
+        )
