@@ -11,6 +11,10 @@ import importlib
 import pytest
 
 from na0s.layer2 import obfuscation as obs_module
+from na0s.layer2._env_utils import (
+    safe_float_env as _env_float,
+    safe_int_env as _env_int,
+)
 from na0s.layer2.obfuscation import (
     PUNCTUATION_FLOOD_RATIO,
     CASING_TRANSITION_THRESHOLD,
@@ -25,8 +29,6 @@ from na0s.layer2.obfuscation import (
     MIN_KL_LETTERS,
     MIN_DECODED_STRIP_LENGTH,
     ZLIB_COMPRESSION_LEVEL,
-    _env_float,
-    _env_int,
     obfuscation_scan,
 )
 
