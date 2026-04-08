@@ -10,6 +10,8 @@ import urllib.parse
 import zlib
 from dataclasses import dataclass
 
+from ._env_utils import safe_float_env, safe_int_env
+
 
 @dataclass
 class DecodedView:
@@ -73,79 +75,58 @@ _CODE_FENCE_RE = re.compile(r"^```", re.MULTILINE)
 # ---------------------------------------------------------------------------
 # Each constant has a sensible default.  Operators can override via
 # environment variables prefixed with NA0S_ for deployment-time tuning
-# without code changes.
-
-
-def _env_float(name: str, default: float) -> float:
-    """Read a float from the environment, falling back to *default*.
-
-    Returns *default* when the variable is absent, empty, or cannot be
-    parsed as a float.
-    """
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except (ValueError, TypeError):
-        return default
-
-
-def _env_int(name: str, default: int) -> int:
-    """Read an int from the environment, falling back to *default*.
-
-    Returns *default* when the variable is absent, empty, or cannot be
-    parsed as an int.
-    """
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except (ValueError, TypeError):
-        return default
-
+# without code changes.  All helpers come from the shared ``_env_utils``
+# module, which rejects non-finite values (NaN, +/-inf) and enforces the
+# optional [lo, hi] ranges declared here.
 
 # Punctuation-flood: ratio of punctuation characters to total length.
 # Text above this ratio (and not structured data) triggers "punctuation_flood".
-PUNCTUATION_FLOOD_RATIO = _env_float("NA0S_PUNCTUATION_FLOOD_RATIO", 0.40)
+PUNCTUATION_FLOOD_RATIO = safe_float_env(
+    "NA0S_PUNCTUATION_FLOOD_RATIO", 0.40, lo=0.0, hi=1.0
+)
 
 # Weird-casing: minimum absolute number of case transitions required.
-CASING_TRANSITION_THRESHOLD = _env_int("NA0S_CASING_TRANSITION_THRESHOLD", 6)
+CASING_TRANSITION_THRESHOLD = safe_int_env(
+    "NA0S_CASING_TRANSITION_THRESHOLD", 6, lo=0
+)
 
 # Weird-casing: minimum ratio of transitions to alpha characters.
-CASING_TRANSITION_RATIO = _env_float("NA0S_CASING_TRANSITION_RATIO", 0.12)
+CASING_TRANSITION_RATIO = safe_float_env(
+    "NA0S_CASING_TRANSITION_RATIO", 0.12, lo=0.0, hi=1.0
+)
 
 # Default max_decodes parameter for obfuscation_scan (legacy compatibility).
 # Raised from 2 to 5 to support deeper recursive unwrapping.
-DEFAULT_MAX_DECODES = _env_int("NA0S_MAX_DECODES", 5)
+DEFAULT_MAX_DECODES = safe_int_env("NA0S_MAX_DECODES", 5, lo=0)
 
 # Minimum length for a standalone base64 candidate (before decode attempt).
-MIN_BASE64_LENGTH = _env_int("NA0S_MIN_BASE64_LENGTH", 16)
+MIN_BASE64_LENGTH = safe_int_env("NA0S_MIN_BASE64_LENGTH", 16, lo=0)
 
 # Minimum length for a standalone hex candidate (before decode attempt).
-MIN_HEX_LENGTH = _env_int("NA0S_MIN_HEX_LENGTH", 8)
+MIN_HEX_LENGTH = safe_int_env("NA0S_MIN_HEX_LENGTH", 8, lo=0)
 
 # Minimum printable characters required for an embedded decode to be accepted.
-MIN_PRINTABLE_CHARS = _env_int("NA0S_MIN_PRINTABLE_CHARS", 3)
+MIN_PRINTABLE_CHARS = safe_int_env("NA0S_MIN_PRINTABLE_CHARS", 3, lo=0)
 
 # Minimum ratio of printable characters in a decoded candidate.
-MIN_PRINTABLE_RATIO = _env_float("NA0S_MIN_PRINTABLE_RATIO", 0.7)
+MIN_PRINTABLE_RATIO = safe_float_env(
+    "NA0S_MIN_PRINTABLE_RATIO", 0.7, lo=0.0, hi=1.0
+)
 
 # Minimum alpha characters for ROT13 / reversed / leetspeak candidate checks.
-MIN_CANDIDATE_ALPHA = _env_int("NA0S_MIN_CANDIDATE_ALPHA", 10)
+MIN_CANDIDATE_ALPHA = safe_int_env("NA0S_MIN_CANDIDATE_ALPHA", 10, lo=0)
 
 # Minimum text length for composite entropy check to fire.
-MIN_ENTROPY_TEXT_LENGTH = _env_int("NA0S_MIN_ENTROPY_TEXT_LENGTH", 10)
+MIN_ENTROPY_TEXT_LENGTH = safe_int_env("NA0S_MIN_ENTROPY_TEXT_LENGTH", 10, lo=0)
 
 # Minimum letters required for meaningful KL-divergence computation.
-MIN_KL_LETTERS = _env_int("NA0S_MIN_KL_LETTERS", 5)
+MIN_KL_LETTERS = safe_int_env("NA0S_MIN_KL_LETTERS", 5, lo=0)
 
 # Minimum stripped length for a decoded view to be accepted during recursion.
-MIN_DECODED_STRIP_LENGTH = _env_int("NA0S_MIN_DECODED_STRIP_LENGTH", 2)
+MIN_DECODED_STRIP_LENGTH = safe_int_env("NA0S_MIN_DECODED_STRIP_LENGTH", 2, lo=0)
 
 # Zlib compression level used in compression-ratio analysis (0-9).
-ZLIB_COMPRESSION_LEVEL = _env_int("NA0S_ZLIB_COMPRESSION_LEVEL", 6)
+ZLIB_COMPRESSION_LEVEL = safe_int_env("NA0S_ZLIB_COMPRESSION_LEVEL", 6, lo=0, hi=9)
 
 
 # Calc String Randomness (High = Encrypted/gibberish)

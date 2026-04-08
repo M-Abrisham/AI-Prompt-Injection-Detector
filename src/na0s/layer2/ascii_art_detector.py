@@ -24,58 +24,23 @@ Public API:
 """
 
 import math
-import os
 import re
 from dataclasses import dataclass, field
 
-
-# ---------------------------------------------------------------------------
-# Safe env-override helpers (same pattern as whitespace_stego.py)
-# ---------------------------------------------------------------------------
-
-def _safe_float_env(name, default, lo=0.0, hi=1.0):
-    """Read a float from env, clamping to [lo, hi]. Falls back to *default*."""
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        val = float(raw)
-    except (ValueError, TypeError):
-        return default
-    if not math.isfinite(val):
-        return default
-    if val < lo or val > hi:
-        return default
-    return val
-
-
-def _safe_int_env(name, default, lo=0, hi=None):
-    """Read an int from env, clamping to [lo, hi]. Falls back to *default*."""
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        val = int(raw)
-    except (ValueError, TypeError):
-        return default
-    if val < lo:
-        return default
-    if hi is not None and val > hi:
-        return default
-    return val
+from ._env_utils import safe_float_env, safe_int_env
 
 
 # ---------------------------------------------------------------------------
 # Configurable thresholds (env-overridable)
 # ---------------------------------------------------------------------------
 
-MAX_INPUT_LENGTH = _safe_int_env("ASCII_ART_MAX_INPUT_LENGTH", 500_000, lo=1)
-DETECTION_THRESHOLD = _safe_float_env(
+MAX_INPUT_LENGTH = safe_int_env("ASCII_ART_MAX_INPUT_LENGTH", 500_000, lo=1)
+DETECTION_THRESHOLD = safe_float_env(
     "ASCII_ART_DETECTION_THRESHOLD", 0.30, lo=0.0, hi=1.0
 )
 
 # Minimum lines for a candidate art block.
-MIN_ART_BLOCK_LINES = _safe_int_env("ASCII_ART_MIN_BLOCK_LINES", 3, lo=2)
+MIN_ART_BLOCK_LINES = safe_int_env("ASCII_ART_MIN_BLOCK_LINES", 3, lo=2)
 
 # Signal weights -- must sum to 1.0.
 _W_ART_BLOCK = 0.35

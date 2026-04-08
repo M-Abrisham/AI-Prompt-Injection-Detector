@@ -18,57 +18,22 @@ Public API:
 """
 
 import math
-import os
 import re
 from dataclasses import dataclass, field
 
-
-# ---------------------------------------------------------------------------
-# Safe env-override helpers (same pattern as layer0/normalization.py)
-# ---------------------------------------------------------------------------
-
-def _safe_float_env(name, default, lo=0.0, hi=1.0):
-    """Read a float from env, clamping to [lo, hi]. Falls back to *default*."""
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        val = float(raw)
-    except (ValueError, TypeError):
-        return default
-    if not math.isfinite(val):
-        return default
-    if val < lo or val > hi:
-        return default
-    return val
-
-
-def _safe_int_env(name, default, lo=0, hi=None):
-    """Read an int from env, clamping to [lo, hi]. Falls back to *default*."""
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        val = int(raw)
-    except (ValueError, TypeError):
-        return default
-    if val < lo:
-        return default
-    if hi is not None and val > hi:
-        return default
-    return val
+from ._env_utils import safe_float_env, safe_int_env
 
 
 # ---------------------------------------------------------------------------
 # Configurable thresholds (env-overridable)
 # ---------------------------------------------------------------------------
 
-SNOW_MIN_LINES = _safe_int_env("WS_STEGO_SNOW_MIN_LINES", 2, lo=1)
-RATIO_THRESHOLD = _safe_float_env("WS_STEGO_RATIO_THRESHOLD", 0.30, lo=0.0, hi=1.0)
-ENTROPY_THRESHOLD = _safe_float_env("WS_STEGO_ENTROPY_THRESHOLD", 0.50, lo=0.0, hi=1.0)
-MIN_TRAILING_BYTES = _safe_int_env("WS_STEGO_MIN_TRAILING_BYTES", 8, lo=1)
-MAX_INPUT_LENGTH = _safe_int_env("WS_STEGO_MAX_INPUT_LENGTH", 1_000_000, lo=1)
-MIN_PRINTABLE_RATIO = _safe_float_env(
+SNOW_MIN_LINES = safe_int_env("WS_STEGO_SNOW_MIN_LINES", 2, lo=1)
+RATIO_THRESHOLD = safe_float_env("WS_STEGO_RATIO_THRESHOLD", 0.30, lo=0.0, hi=1.0)
+ENTROPY_THRESHOLD = safe_float_env("WS_STEGO_ENTROPY_THRESHOLD", 0.50, lo=0.0, hi=1.0)
+MIN_TRAILING_BYTES = safe_int_env("WS_STEGO_MIN_TRAILING_BYTES", 8, lo=1)
+MAX_INPUT_LENGTH = safe_int_env("WS_STEGO_MAX_INPUT_LENGTH", 1_000_000, lo=1)
+MIN_PRINTABLE_RATIO = safe_float_env(
     "WS_STEGO_MIN_PRINTABLE_RATIO", 0.60, lo=0.0, hi=1.0
 )
 
