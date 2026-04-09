@@ -477,7 +477,9 @@ def detect_whitespace_stego(text):
         pr = _printable_ratio(decoded)
         stats["decoded_printable_ratio"] = round(pr, 4)
 
-        if decoded and len(decoded) >= 1 and pr >= MIN_PRINTABLE_RATIO:
+        if (decoded
+                and len(decoded) >= _MIN_DECODED_LEN
+                and pr >= MIN_PRINTABLE_RATIO):
             return StegoResult(
                 detected=True,
                 confidence=_CONFIDENCE_BINARY,

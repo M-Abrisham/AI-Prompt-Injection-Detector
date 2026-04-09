@@ -1,4 +1,4 @@
-"""Layer 1 Morse code detection -- decode Morse-encoded text to reveal hidden attacks.
+"""Layer 2 Morse code detection -- decode Morse-encoded text to reveal hidden attacks.
 
 Detects International Morse Code (ITU-R M.1677) embedded in text, including
 Unicode dot/dash variants (middle dot, bullet, en dash, em dash, etc.).
