@@ -2,6 +2,7 @@ import base64
 import binascii
 import codecs
 import hashlib
+import logging
 import math
 import os
 import re
@@ -11,6 +12,8 @@ import zlib
 from dataclasses import dataclass
 
 from ._env_utils import safe_float_env, safe_int_env
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -679,15 +682,25 @@ def _is_rot13_candidate(text):
 # it contains attack keywords OR has a high ratio of real English words.
 # ---------------------------------------------------------------------------
 
-# Load English common words for dictionary validation
+# Load English words for dictionary validation.  Sourced from
+# dwyl/english-words (words_alpha.txt, ~370k entries, Unlicense / public
+# domain).  Used for Caesar / Pig Latin english_ratio gates and Pig Latin
+# consonant cluster disambiguation.
 _ENGLISH_WORDS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-    "data", "english_common_1000.txt",
+    "data", "english_words.txt",
 )
 
 
 def _load_english_words():
-    """Load English common words set for Caesar/PigLatin validation."""
+    """Load English common words set for Caesar/PigLatin validation.
+
+    On failure (file missing, unreadable, etc.) emits a single warning
+    and returns an empty frozenset.  An empty dictionary degrades the
+    Caesar / Pig Latin "english_ratio" detection path — only the
+    attack-keyword path will fire — so silent failure was hiding a
+    significant capability gap.
+    """
     words = set()
     try:
         with open(_ENGLISH_WORDS_PATH, "r") as fh:
@@ -695,8 +708,13 @@ def _load_english_words():
                 w = line.strip().lower()
                 if w and not w.startswith("#"):
                     words.add(w)
-    except OSError:
-        pass
+    except OSError as exc:
+        _logger.warning(
+            "Layer 2: failed to load English dictionary at %s (%s); "
+            "Caesar/Pig Latin validation will use attack-keyword path only",
+            _ENGLISH_WORDS_PATH,
+            exc,
+        )
     return frozenset(words)
 
 
@@ -896,8 +914,17 @@ def _decode_pig_latin_word(word: str) -> "tuple[str, bool]":
     if not body:
         return word, False
 
+    # Iterate longest-cluster-first.  Pig Latin's encoder moves the WHOLE
+    # consonant cluster (e.g. "show" -> "owsh" + "ay", cluster "sh"; "scratch"
+    # -> "atchscr" + "ay", cluster "scr"), so the longest cluster that yields a
+    # dictionary word is overwhelmingly the correct decoding.  With a short
+    # frequency-ranked dictionary the difference rarely matters, but with a
+    # comprehensive ~370k dictionary, greedy short-cluster matching produces
+    # obscure-but-real words ("hows" before "show", "het" before "the") and
+    # short-circuits before the correct longer cluster is tried.
+    max_len = min(4, len(body) - 1)
     fallback = None
-    for cluster_len in range(1, min(5, len(body))):
+    for cluster_len in range(max_len, 0, -1):
         consonants = body[-cluster_len:]
         rest = body[:-cluster_len]
         candidate = consonants + rest
@@ -905,7 +932,7 @@ def _decode_pig_latin_word(word: str) -> "tuple[str, bool]":
         if candidate in _ENGLISH_COMMON_WORDS:
             return candidate, True
 
-        if cluster_len == 1 and fallback is None:
+        if cluster_len == 1:
             fallback = candidate
 
     # Return length-1 attempt as fallback
@@ -1301,6 +1328,24 @@ def _scan_single_layer(text):
     content_type = _detect_content_type(text)
 
     has_attack_kw = bool(_ATTACK_KEYWORDS_RE.search(text))
+
+    # Branch map for the entropy gate below — four mutually exclusive paths,
+    # most-specific first.  Each branch picks ONE threshold; only the
+    # composite check (path 4) cares about non-entropy signals.
+    #
+    #   Path 1: text is *predominantly* inside a fence AND has no attack
+    #           keywords -> use _CODE_ENTROPY_THRESHOLD (5.5).  Fenced code
+    #           the user is sharing as data; only extreme entropy flags.
+    #   Path 2: text *contains* a fence but doesn't satisfy path 1 (mixed
+    #           prose + code, or fence + attack keywords) -> use
+    #           _CODE_FENCE_ENTROPY (5.0).  Catches base64 blobs slipped
+    #           into otherwise prose-y messages with backticks.
+    #   Path 3: detected content type is structured (code/yaml/json) but no
+    #           markdown fence -> use _CODE_ENTROPY_THRESHOLD (5.5) to
+    #           tolerate normal structured-data entropy (4.5-5.4).
+    #   Path 4: default plain text -> _composite_entropy_check() combines
+    #           entropy + KL-divergence + compression ratio for FP-resistant
+    #           voting (no single fixed threshold).
     if _is_inside_markdown_fence(text) and not has_attack_kw:
         # Text predominantly inside code fences WITHOUT attack keywords:
         # exempt from high_entropy.  Rationale: code in fences is DATA
