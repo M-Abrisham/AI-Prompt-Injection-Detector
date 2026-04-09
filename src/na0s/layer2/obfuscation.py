@@ -695,26 +695,44 @@ _ENGLISH_WORDS_PATH = os.path.join(
 def _load_english_words():
     """Load English common words set for Caesar/PigLatin validation.
 
-    On failure (file missing, unreadable, etc.) emits a single warning
-    and returns an empty frozenset.  An empty dictionary degrades the
-    Caesar / Pig Latin "english_ratio" detection path — only the
-    attack-keyword path will fire — so silent failure was hiding a
-    significant capability gap.
+    On failure (file missing, unreadable, decode error, etc.) emits a
+    single warning and returns an empty frozenset.  An empty dictionary
+    degrades the Caesar / Pig Latin "english_ratio" detection path —
+    only the attack-keyword path will fire — so silent failure was
+    hiding a significant capability gap.
+
+    The file is opened with explicit ``encoding="utf-8"`` so behavior is
+    identical on Mac, Linux, and Windows regardless of locale.  Without
+    this, Windows / non-UTF8 locales would silently load corrupted text
+    or raise UnicodeDecodeError at module import time.
     """
     words = set()
     try:
-        with open(_ENGLISH_WORDS_PATH, "r") as fh:
+        with open(_ENGLISH_WORDS_PATH, "r", encoding="utf-8") as fh:
             for line in fh:
                 w = line.strip().lower()
                 if w and not w.startswith("#"):
                     words.add(w)
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         _logger.warning(
             "Layer 2: failed to load English dictionary at %s (%s); "
             "Caesar/Pig Latin validation will use attack-keyword path only",
             _ENGLISH_WORDS_PATH,
             exc,
         )
+        return frozenset()
+
+    # Sanity check: file existed but produced an empty/tiny word set
+    # (header-only file, accidental truncation, etc.).  Surface this so
+    # the same silent-gap class of bug doesn't recur.
+    if len(words) < 1000:
+        _logger.warning(
+            "Layer 2: English dictionary at %s loaded only %d words; "
+            "Caesar/Pig Latin english_ratio gate will be unreliable",
+            _ENGLISH_WORDS_PATH,
+            len(words),
+        )
+
     return frozenset(words)
 
 
