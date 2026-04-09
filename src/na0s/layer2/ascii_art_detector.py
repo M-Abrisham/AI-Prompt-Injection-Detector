@@ -273,6 +273,15 @@ def _is_art_line(line):
 
     stripped = line.strip()
 
+    # Defensive guard: a single Unicode special character (e.g. a lone
+    # \u2500 box-drawing char) is not "art" — it's a horizontal rule, a
+    # bullet, or stray punctuation.  When _is_art_line() is called from
+    # _extract_art_blocks() the MIN_ART_BLOCK_LINES >= 3 requirement makes
+    # this irrelevant, but the helper is also reachable directly (e.g.
+    # tests, future callers), so reject single-character lines outright.
+    if len(stripped) < 2:
+        return False
+
     # Check for Unicode special characters first
     if _BRAILLE_RE.search(stripped):
         return True
