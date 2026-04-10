@@ -59,7 +59,7 @@ def _classify_license(license_id: str | None) -> str:
 def _load_cache() -> dict:
     """Load cached license info."""
     if os.path.isfile(CACHE_PATH):
-        with open(CACHE_PATH) as f:
+        with open(CACHE_PATH, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     return {}
 
@@ -67,7 +67,7 @@ def _load_cache() -> dict:
 def _save_cache(cache: dict):
     """Save license cache."""
     os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-    with open(CACHE_PATH, "w") as f:
+    with open(CACHE_PATH, "w", encoding="utf-8") as f:
         yaml.dump(cache, f, default_flow_style=False)
 
 
