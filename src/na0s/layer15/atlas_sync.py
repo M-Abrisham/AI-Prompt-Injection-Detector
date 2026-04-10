@@ -118,7 +118,7 @@ class AtlasSync(ThreatIntelSource):
             return self._mapping
 
         yaml = _get_yaml()
-        with open(self.mapping_file) as f:
+        with open(self.mapping_file, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
         # Expected format: {atlas_id: na0s_id} e.g. {"AML.T0043": "D1.5"}

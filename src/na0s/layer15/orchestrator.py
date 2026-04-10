@@ -132,7 +132,7 @@ class Orchestrator:
             "sources": [r.to_dict() for r in reports],
             "total_changes": sum(len(r.diff.items) for r in reports),
         }
-        with open(combined_path, "w") as f:
+        with open(combined_path, "w", encoding="utf-8") as f:
             json.dump(combined, f, indent=2)
         logger.info("Combined report saved to %s", combined_path)
 

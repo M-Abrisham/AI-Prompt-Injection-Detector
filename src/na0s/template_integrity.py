@@ -87,11 +87,11 @@ class PromptTemplateIntegrityChecker:
         directory = os.path.dirname(self._manifest_path)
         if directory:
             os.makedirs(directory, exist_ok=True)
-        with open(self._manifest_path, "w") as fh:
+        with open(self._manifest_path, "w", encoding="utf-8") as fh:
             json.dump(self._hashes, fh, indent=2)
 
     # ------------------------------------------------------------------
     def load_manifest(self) -> None:
         """Load the hash manifest from *manifest_path*."""
-        with open(self._manifest_path) as fh:
+        with open(self._manifest_path, encoding="utf-8") as fh:
             self._hashes = json.load(fh)

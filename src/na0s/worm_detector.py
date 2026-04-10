@@ -626,7 +626,7 @@ class _WormCorpusClassifier:
             )
             return
         try:
-            with open(hash_path, "r") as f:
+            with open(hash_path, "r", encoding="utf-8") as f:
                 expected_hash = f.read().strip().split()[0]
             actual_hash = self._hash_file(path)
             if actual_hash != expected_hash:
@@ -725,7 +725,7 @@ class _WormCorpusClassifier:
         os.makedirs(model_dir, exist_ok=True)
         joblib.dump(pipeline, self._model_path)
         file_hash = self._hash_file(self._model_path)
-        with open(self._model_path + ".sha256", "w") as f:
+        with open(self._model_path + ".sha256", "w", encoding="utf-8") as f:
             f.write(file_hash + "\n")
         logger.info("Worm corpus classifier saved to %s (sha256: %s)", self._model_path, file_hash[:16])
 
