@@ -228,9 +228,9 @@ class TaxonomyDiffEngine:
         md_path = output_dir / f"{base}.md"
         json_path = output_dir / f"{base}.json"
 
-        with open(md_path, "w") as f:
+        with open(md_path, "w", encoding="utf-8") as f:
             f.write(self.to_markdown(diff))
-        with open(json_path, "w") as f:
+        with open(json_path, "w", encoding="utf-8") as f:
             f.write(self.to_json(diff))
 
         logger.info("Reports saved: %s, %s", md_path, json_path)

@@ -310,7 +310,7 @@ class ThreatIntelSource(ABC):
             )
             return None
         try:
-            with open(snapshot_file) as f:
+            with open(snapshot_file, encoding="utf-8") as f:
                 data = json.load(f)
             return SourceSnapshot.from_dict(data)
         except (json.JSONDecodeError, SchemaValidationError) as exc:
@@ -329,7 +329,7 @@ class ThreatIntelSource(ABC):
         """
         snapshot_file = self.snapshots_dir / f"{self.name}_snapshot.json"
         tmp_file = snapshot_file.with_suffix(".tmp")
-        with open(tmp_file, "w") as f:
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(snapshot.to_dict(), f, indent=2)
         tmp_file.rename(snapshot_file)
         logger.info("Saved snapshot for %s (version=%s)", self.name, snapshot.version)

@@ -293,7 +293,7 @@ class FingerprintStore:
         ).fetchone()
         if row[0] > 0:
             return
-        with open(json_path, "r") as f:
+        with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         content = data.get("content_hashes", {})
         normalized = data.get("normalized_hashes", {})
