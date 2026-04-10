@@ -143,7 +143,7 @@ def _get_hf_token():
     token_path = os.path.expanduser("~/.cache/huggingface/token")
     if os.path.isfile(token_path):
         try:
-            with open(token_path, "r") as fh:
+            with open(token_path, "r", encoding="utf-8") as fh:
                 token = fh.read().strip()
             if token:
                 return token

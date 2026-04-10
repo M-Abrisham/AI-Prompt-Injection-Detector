@@ -43,13 +43,13 @@ LOCK_PATH = os.path.join(ROOT, "data", "datasets.lock")
 def _load_lock():
     if not os.path.exists(LOCK_PATH):
         return {}
-    with open(LOCK_PATH, "r") as f:
+    with open(LOCK_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def _save_lock(lock):
     os.makedirs(os.path.dirname(LOCK_PATH), exist_ok=True)
-    with open(LOCK_PATH, "w") as f:
+    with open(LOCK_PATH, "w", encoding="utf-8") as f:
         json.dump(lock, f, indent=2, sort_keys=True)
         f.write("\n")
 
