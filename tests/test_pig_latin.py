@@ -188,6 +188,97 @@ class TestPigLatinConsonantClusters:
 
 
 # ---------------------------------------------------------------------------
+# 3b. Longest-cluster tie-breaking
+# ---------------------------------------------------------------------------
+# Regression tests for the cluster-length iteration bug fix.  When the
+# comprehensive ~370k dwyl dictionary contains valid words at MULTIPLE
+# cluster lengths for the same Pig Latin input, the decoder must prefer
+# the LONGEST cluster (which corresponds to how the encoder originally
+# moved the entire leading consonant cluster).  Previously the loop ran
+# ascending (1..4) and short-circuited on the first dictionary hit,
+# returning obscure-but-real noise like "hows" for "owshay" instead of
+# the correct "show".
+
+@pytest.mark.skipif(
+    not _ENGLISH_COMMON_WORDS,
+    reason="_ENGLISH_COMMON_WORDS dictionary not loaded",
+)
+class TestPigLatinLongestClusterWins:
+    """When multiple cluster lengths produce real dictionary words,
+    the LONGEST cluster must win (matches the encoder's actual behavior)."""
+
+    def test_decode_prefers_longest_cluster_show(self):
+        """'owshay' -> 'show', NOT 'hows'.
+
+        body = 'owsh' (length 4).
+          cluster_len=1: 'h' + 'ows' = 'hows'   (real word, OLD bug returned this)
+          cluster_len=2: 'sh' + 'ow' = 'show'   (correct, longest cluster)
+        """
+        # Sanity: both candidates must actually be in the dict, otherwise
+        # this test is not exercising the tie-breaking path.
+        assert "hows" in _ENGLISH_COMMON_WORDS
+        assert "show" in _ENGLISH_COMMON_WORDS
+
+        decoded, was_decoded = _decode_pig_latin_word("owshay")
+        assert was_decoded is True
+        assert decoded == "show", (
+            f"Expected longest-cluster decoding 'show', got {decoded!r}. "
+            "OLD ascending-loop bug would have returned 'hows'."
+        )
+
+    def test_decode_prefers_longest_cluster_the(self):
+        """'ethay' -> 'the', NOT 'het'.
+
+        body = 'eth' (length 3).
+          cluster_len=1: 'h' + 'et' = 'het'   (real word, OLD bug returned this)
+          cluster_len=2: 'th' + 'e' = 'the'   (correct, longest cluster)
+        """
+        assert "het" in _ENGLISH_COMMON_WORDS
+        assert "the" in _ENGLISH_COMMON_WORDS
+
+        decoded, was_decoded = _decode_pig_latin_word("ethay")
+        assert was_decoded is True
+        assert decoded == "the", (
+            f"Expected longest-cluster decoding 'the', got {decoded!r}. "
+            "OLD ascending-loop bug would have returned 'het'."
+        )
+
+    def test_decode_prefers_longest_cluster_stop(self):
+        """'opstay' -> 'stop', NOT 'tops'.
+
+        body = 'opst' (length 4).
+          cluster_len=1: 't' + 'ops' = 'tops'   (real word, OLD bug returned this)
+          cluster_len=2: 'st' + 'op' = 'stop'   (correct, longest cluster)
+        """
+        assert "tops" in _ENGLISH_COMMON_WORDS
+        assert "stop" in _ENGLISH_COMMON_WORDS
+
+        decoded, was_decoded = _decode_pig_latin_word("opstay")
+        assert was_decoded is True
+        assert decoded == "stop", (
+            f"Expected longest-cluster decoding 'stop', got {decoded!r}. "
+            "OLD ascending-loop bug would have returned 'tops'."
+        )
+
+    def test_decode_prefers_longest_cluster_snow(self):
+        """'owsnay' -> 'snow', NOT 'nows'.
+
+        body = 'owsn' (length 4).
+          cluster_len=1: 'n' + 'ows' = 'nows'   (real word, OLD bug returned this)
+          cluster_len=2: 'sn' + 'ow' = 'snow'   (correct, longest cluster)
+        """
+        assert "nows" in _ENGLISH_COMMON_WORDS
+        assert "snow" in _ENGLISH_COMMON_WORDS
+
+        decoded, was_decoded = _decode_pig_latin_word("owsnay")
+        assert was_decoded is True
+        assert decoded == "snow", (
+            f"Expected longest-cluster decoding 'snow', got {decoded!r}. "
+            "OLD ascending-loop bug would have returned 'nows'."
+        )
+
+
+# ---------------------------------------------------------------------------
 # 4. Edge cases
 # ---------------------------------------------------------------------------
 
