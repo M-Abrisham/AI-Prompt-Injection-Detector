@@ -45,8 +45,12 @@ htmlcov/
 # Model backups (created by deploy_model.py)
 *.bak
 
-# DVC
-*.dvc
+# DVC — ignore the data cache, but keep the .dvc/ config directory
+# and pointer files (*.dvc) so the repo knows it's a DVC project.
+/.dvc/cache
+/.dvc/tmp
+!.dvc/
+!*.dvc
 
 # Claude Code config
 .claude/

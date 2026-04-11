@@ -81,7 +81,10 @@ class DualDirectionScanner:
         )
 
         # 2. Run propagation scanner (detects injection payloads in output)
-        propagation_result: dict = self.propagation_scanner.scan(output_text)
+        propagation_result: dict = self.propagation_scanner.scan(
+            output_text,
+            source_input_text=input_text,
+        )
 
         # 3. Cross-reference input and output
         cross_ref = self.cross_reference(

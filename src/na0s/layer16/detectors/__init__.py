@@ -6,6 +6,8 @@ from .escalation import EscalationDetector
 from .fabricated_history import FabricatedHistoryDetector
 from .payload_splitting import PayloadSplittingDetector
 from .stylometry import BehavioralStylometryDetector
+from .cot_compliance import CoTComplianceDetector
+from .scheming import SchemingDetector
 from .turn_analyzer import TurnAnalyzer
 
 try:
@@ -17,9 +19,11 @@ __all__ = [
     "MultiTurnDetector",
     "BehavioralStylometryDetector",
     "ContextPoisoningDetector",
+    "CoTComplianceDetector",
     "EmbeddingDriftDetector",
     "EscalationDetector",
     "FabricatedHistoryDetector",
     "PayloadSplittingDetector",
+    "SchemingDetector",
     "TurnAnalyzer",
 ]

@@ -20,7 +20,9 @@ Reference: ZEDD (arXiv 2601.12359), DeepContext (arXiv 2602.16935).
 
 from __future__ import annotations
 
+import hashlib
 import math
+import re
 import threading
 from typing import List, Optional
 
@@ -49,6 +51,41 @@ except ImportError:
 
 # Sentinel so tests can check / override
 _MODEL_NAME = "all-MiniLM-L6-v2"
+_FALLBACK_DIM = 128
+_FALLBACK_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _fallback_embedding(text: str, dim: int = _FALLBACK_DIM) -> list:
+    """Deterministic hashing-based embedding when sentence-transformers is absent."""
+    if dim <= 0:
+        dim = _FALLBACK_DIM
+    vec = [0.0] * dim
+    tokens = _FALLBACK_TOKEN_RE.findall((text or "").lower())
+    if not tokens:
+        return vec
+
+    # Include token unigrams and bigrams for stronger semantic continuity signal.
+    features = list(tokens)
+    features.extend(f"{a}_{b}" for a, b in zip(tokens, tokens[1:]))
+
+    for feat in features:
+        digest = hashlib.sha1(feat.encode("utf-8")).digest()
+        idx = int.from_bytes(digest[:2], "big") % dim
+        sign = -1.0 if (digest[2] & 1) else 1.0
+        vec[idx] += sign
+    return vec
+
+
+def _centroid(vectors: list) -> list:
+    if not vectors:
+        return []
+    width = len(vectors[0])
+    acc = [0.0] * width
+    for vec in vectors:
+        for i in range(width):
+            acc[i] += vec[i]
+    scale = float(len(vectors))
+    return [v / scale for v in acc]
 
 
 def _cosine_similarity(a: list, b: list) -> float:
@@ -113,24 +150,22 @@ class EmbeddingDriftDetector(MultiTurnDetector):
                     cls._model = SentenceTransformer(_MODEL_NAME)
 
     def _get_embeddings(self, texts: List[str]) -> Optional[list]:
-        """Batch-embed *texts*.  Returns list of vectors, or None if unavailable."""
-        if not _HAS_EMBEDDINGS:
-            return None
-        self._load_model()
-        if self._model is None:
-            return None
-        # SentenceTransformer.encode returns np.ndarray; convert rows to lists
-        # so downstream code stays numpy-free.
-        raw = self._model.encode(texts)
-        return [row.tolist() if hasattr(row, "tolist") else list(row) for row in raw]
+        """Batch-embed *texts* with sentence-transformers or deterministic fallback."""
+        if _HAS_EMBEDDINGS:
+            self._load_model()
+            if self._model is not None:
+                # SentenceTransformer.encode returns np.ndarray; convert rows to lists
+                # so downstream code stays numpy-free.
+                raw = self._model.encode(texts)
+                return [row.tolist() if hasattr(row, "tolist") else list(row) for row in raw]
+
+        # Graceful degradation path: low-cost hashing embeddings.
+        return [_fallback_embedding(t) for t in texts]
 
     # ----- Main detection logic -----------------------------------------------
 
     def analyze(self, state: ConversationState) -> List[Alert]:  # noqa: C901
         if not ENABLE_EMBEDDING_DRIFT:
-            return []
-
-        if not _HAS_EMBEDDINGS:
             return []
 
         if state is None or state.is_empty:
@@ -147,7 +182,7 @@ class EmbeddingDriftDetector(MultiTurnDetector):
             return []
 
         embeddings = self._get_embeddings(texts)
-        if embeddings is None:
+        if not embeddings:
             return []
 
         # Compute consecutive cosine similarities
@@ -222,5 +257,34 @@ class EmbeddingDriftDetector(MultiTurnDetector):
                     ],
                 )
             )
+
+        # --- Signal 3: Latest turn vs conversation baseline ------------------
+        if len(embeddings) >= 3:
+            prior_centroid = _centroid(embeddings[:-1])
+            latest_vs_prior = _cosine_similarity(prior_centroid, embeddings[-1])
+            baseline_threshold = max(0.0, DRIFT_AVG_THRESHOLD - 0.1)
+            if latest_vs_prior < baseline_threshold:
+                raw_conf = 1.0 - (latest_vs_prior / max(0.05, baseline_threshold))
+                confidence = max(DRIFT_CONFIDENCE_MIN, min(1.0, raw_conf))
+                confidence = round(confidence, 4)
+                offset = len(state.turns) - len(window_turns)
+                last_turn_idx = offset + len(window_turns) - 1
+                alerts.append(
+                    Alert(
+                        alert_type="embedding_drift",
+                        severity="high" if confidence >= 0.7 else "medium",
+                        confidence=confidence,
+                        description=(
+                            f"Latest turn diverges from prior context: cosine similarity "
+                            f"{latest_vs_prior:.3f} vs baseline centroid"
+                        ),
+                        turn_range=(last_turn_idx - 1, last_turn_idx),
+                        evidence=[
+                            f"latest_vs_prior={latest_vs_prior:.4f}",
+                            f"baseline_threshold={baseline_threshold}",
+                            "signal=baseline_shift",
+                        ],
+                    )
+                )
 
         return alerts

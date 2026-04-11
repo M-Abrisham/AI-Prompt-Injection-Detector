@@ -1,16 +1,17 @@
 """Context Poisoning detector (D1.20) — false premises in early turns.
 
-Context poisoning: early conversation turns plant false premises (authority
-claims, false prior agreements, permission expansion) that make later
-malicious requests seem legitimate.
+Context poisoning: early user turns plant false premises (authority claims,
+false prior agreements, permission expansion) that make later malicious
+requests seem legitimate.
 
-Three detection signals:
+Detection signals:
 1. Authority Claims — unverifiable authority/permission claims in early turns.
 2. Permission Seeking — progressive broadening questions (3+ consecutive).
-3. False Prior References — claims about agreements NOT in actual history.
+3. False Prior References — claims about agreements NOT in assistant history.
+4. Late Exploitation — exploit request after early poisoning setup.
 
 Combined confidence: weighted sum of active signals, boosted 1.5x when 2+
-signals fire.  Minimum 3 turns required.
+signals fire. Minimum 3 total turns required.
 """
 
 from __future__ import annotations
@@ -31,10 +32,13 @@ from .base_detector import MultiTurnDetector
 # Signal 1: Authority Claims
 # ---------------------------------------------------------------------------
 
+# Apostrophe variants commonly seen in user text and copy/paste payloads.
+_APOSTROPHE_CLASS = r"'\u2019\u02BC\uFF07"
+
 _AUTHORITY_PATTERNS = [
     re.compile(p, re.IGNORECASE)
     for p in [
-        r"\bi['\u2019]?m\s+(?:a\s+)?(?:security\s+researcher|admin(?:istrator)?|pentester|pen\s*tester|sysadmin|sys\s*admin|root\s+user|authorized\s+(?:user|person|agent))",
+        rf"\bi[{_APOSTROPHE_CLASS}]m\s+(?:a\s+)?(?:security\s+researcher|admin(?:istrator)?|pentester|pen\s*tester|sysadmin|sys\s*admin|root\s+user|authorized\s+(?:user|person|agent))",
         r"\bi\s+have\s+(?:authorization|permission|clearance|access)\s+to",
         r"\bmy\s+(?:admin|manager|supervisor|sysadmin|boss|team\s+lead)\s+(?:told|authorized|approved|said|asked|instructed)\s+me",
         r"\bi\s+(?:was|am)\s+(?:authorized|given\s+permission|granted\s+access|cleared)\s+(?:to|by|for)",
@@ -83,6 +87,25 @@ _FALSE_REF_PATTERNS = [
 
 _FALSE_REF_WEIGHT = 0.3
 
+# ---------------------------------------------------------------------------
+# Signal 4: Exploitation after early context planting
+# ---------------------------------------------------------------------------
+
+_EXPLOIT_PATTERNS = [
+    # Note: these patterns expect the verb immediately followed by the object
+    # (optionally "the "). Phrases like "show me the secret" will NOT match.
+    # Expand carefully if you need broader coverage.
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"\b(?:ignore|bypass|override)\s+(?:all\s+)?(?:safety|rules|guardrails|filters|restrictions|policies)",
+        r"\b(?:show|reveal|leak|print|dump)\s+(?:the\s+)?(?:system\s+prompt|hidden\s+instructions?|secret|api\s+key|credentials?)",
+        r"\b(?:provide|write|generate|build)\s+(?:an?\s+)?(?:exploit|payload|keylogger|malware|backdoor|shellcode)",
+        r"\b(?:unrestricted|full)\s+(?:access|privileges?)",
+    ]
+]
+
+_EXPLOIT_WEIGHT = 0.25
+
 
 def _has_pattern_match(text: str, patterns: List[re.Pattern]) -> bool:
     """Return True if any pattern matches the text."""
@@ -92,29 +115,63 @@ def _has_pattern_match(text: str, patterns: List[re.Pattern]) -> bool:
     return False
 
 
-def _count_authority_turns(turns_texts: List[str]) -> int:
-    """Count turns that contain authority claim patterns."""
-    return sum(1 for t in turns_texts if _has_pattern_match(t, _AUTHORITY_PATTERNS))
-
-
-def _count_permission_consecutive(turns_texts: List[str]) -> int:
-    """Return length of longest consecutive run of permission-seeking turns."""
-    best = 0
-    current = 0
-    for t in turns_texts:
-        if _has_pattern_match(t, _PERMISSION_PATTERNS):
-            current += 1
-            best = max(best, current)
-        else:
-            current = 0
-    return best
-
-
 # Pre-compiled agreement pattern (moved from inside function to module level)
 _AGREEMENT_PAT = re.compile(
-    r"\b(?:agree|yes|ok(?:ay)?|sure|will\s+do|confirmed|approved|granted|certainly|of\s+course)",
+    r"\b( ?:agree(?:d|s)?|yes|ok(?:ay)?|sure|will\s+do|confirm(?:ed|s)?|approve(?:d|s)?|grant(?:ed|s)?|certainly|of\s+course)\b",
     re.IGNORECASE,
 )
+_NEGATED_AGREEMENT_PAT = re.compile(
+    r"\b(?:not|never|can'?t|cannot|won'?t|refuse|unable)\s+"
+    r"(?:agree(?:d|s)?|yes|ok(?:ay)?|sure|confirm(?:ed|s)?|approve(?:d|s)?|grant(?:ed|s)?|certainly|of\s+course"
+    r"|help|do\s+that|assist|provide|comply|support|proceed)\b",
+    re.IGNORECASE,
+)
+_REFUSAL_PAT = re.compile(
+    r"\b(?:cannot|can'?t|unable|won'?t|refuse|decline"
+    r"|not\s+able|not\s+allowed|not\s+permitted"
+    r"|not\s+sure\s+i\s+can\s+help|sorry\s+but)\b",
+    re.IGNORECASE,
+)
+_AGREEMENT_MAX_LOOKBACK_TURNS = 8
+
+
+def _normalize_role(role: object) -> str:
+    if role is None:
+        return "user"
+    if isinstance(role, str):
+        normalized = role.strip().lower()
+    else:
+        normalized = str(role).strip().lower()
+    if not normalized or normalized == "none":
+        return "user"
+    if normalized in {"user", "human"}:
+        return "user"
+    if normalized in {"assistant", "ai", "model"}:
+        return "assistant"
+    return "user"
+
+
+def _turn_text(turn) -> str:
+    text = getattr(turn, "text", None)
+    if not text:
+        return ""
+    if isinstance(text, str):
+        return text
+    return str(text)
+
+
+def _turn_role(turn) -> str:
+    return _normalize_role(getattr(turn, "role", "user"))
+
+
+def _is_assistant_agreement(text: str) -> bool:
+    if not _AGREEMENT_PAT.search(text):
+        return False
+    if _NEGATED_AGREEMENT_PAT.search(text):
+        return False
+    if _REFUSAL_PAT.search(text):
+        return False
+    return True
 
 
 def _has_false_reference(text: str, has_prior_agreement: bool, has_prior_turns: bool) -> bool:
@@ -134,21 +191,63 @@ def _has_false_reference(text: str, has_prior_agreement: bool, has_prior_turns: 
     return not has_prior_agreement
 
 
-def _count_false_references(state: ConversationState) -> int:
-    """Count turns that contain false prior references.
-
-    Uses incremental tracking of prior agreement to avoid O(n^2) rescanning.
-    """
-    count = 0
-    has_prior_agreement = False
+def _false_reference_turn_indices(state: ConversationState) -> List[int]:
+    """Return global turn indices where false prior references are detected."""
+    indices: List[int] = []
+    last_assistant_agreement_idx = None
+    has_prior_assistant_turn = False
     for i, turn in enumerate(state.turns):
-        has_prior_turns = i > 0
-        if _has_false_reference(turn.text, has_prior_agreement, has_prior_turns):
-            count += 1
-        # Update agreement tracker: check if this turn contains agreement language
-        if not has_prior_agreement and _AGREEMENT_PAT.search(turn.text):
-            has_prior_agreement = True
-    return count
+        role = _turn_role(turn)
+        text = _turn_text(turn)
+
+        if role == "assistant":
+            has_prior_assistant_turn = True
+            if _is_assistant_agreement(text):
+                last_assistant_agreement_idx = i
+            continue
+
+        # False-reference checks target attacker/user turns only.
+        if role != "user":
+            continue
+
+        has_recent_assistant_agreement = (
+            last_assistant_agreement_idx is not None
+            and (i - last_assistant_agreement_idx) <= _AGREEMENT_MAX_LOOKBACK_TURNS
+        )
+        if _has_false_reference(
+            text,
+            has_prior_agreement=has_recent_assistant_agreement,
+            has_prior_turns=has_prior_assistant_turn,
+        ):
+            indices.append(i)
+    return indices
+
+
+def _find_matching_turn_indices(turns_texts: List[str], patterns: List[re.Pattern]) -> List[int]:
+    """Return turn indices that match any of the provided patterns."""
+    indices: List[int] = []
+    for i, text in enumerate(turns_texts):
+        if _has_pattern_match(text, patterns):
+            indices.append(i)
+    return indices
+
+
+def _max_consecutive_positions(indices: List[int]) -> int:
+    """Return longest run where indices increase by exactly one.
+
+    A single isolated match returns 1; callers must apply their own threshold.
+    """
+    if not indices:
+        return 0
+    best = 1
+    current = 1
+    for prev, curr in zip(indices, indices[1:]):
+        if curr == prev + 1:
+            current += 1
+            best = max(best, current)
+        else:
+            current = 1
+    return best
 
 
 class ContextPoisoningDetector(MultiTurnDetector):
@@ -164,7 +263,8 @@ class ContextPoisoningDetector(MultiTurnDetector):
         return ["D1.20"]
 
     def reset(self) -> None:
-        pass  # stateless
+        # Intentionally empty: this detector has no per-session mutable state.
+        pass
 
     def analyze(self, state: ConversationState) -> List[Alert]:
         if not ENABLE_CONTEXT_POISONING:
@@ -175,43 +275,84 @@ class ContextPoisoningDetector(MultiTurnDetector):
         if len(state.turns) < POISONING_MIN_TURNS:
             return []
 
-        texts = [t.text for t in state.turns]
+        texts = [_turn_text(t) for t in state.turns]
+        user_turn_indices = [i for i, t in enumerate(state.turns) if _turn_role(t) == "user"]
+        if len(user_turn_indices) < POISONING_MIN_TURNS:
+            return []
+        user_texts = [texts[i] for i in user_turn_indices]
+
         signals: List[str] = []
         weighted_sum = 0.0
         evidence: List[str] = []
+        planting_turn_indices: set[int] = set()
+        suspicious_turn_indices: set[int] = set()
 
         # Signal 1: Authority claims
-        authority_count = _count_authority_turns(texts)
+        authority_user_rel_indices = _find_matching_turn_indices(user_texts, _AUTHORITY_PATTERNS)
+        authority_turn_indices = [user_turn_indices[i] for i in authority_user_rel_indices]
+        authority_count = len(authority_turn_indices)
         if authority_count > 0:
             signals.append("authority_claims")
             weighted_sum += _AUTHORITY_WEIGHT
-            evidence.append(f"authority_claims={authority_count}")
+            evidence.append(f"authority_claims={authority_count}; turns={authority_turn_indices}")
+            planting_turn_indices.update(authority_turn_indices)
+            suspicious_turn_indices.update(authority_turn_indices)
 
         # Signal 2: Permission seeking (consecutive broadening)
-        perm_consecutive = _count_permission_consecutive(texts)
+        permission_user_rel_indices = _find_matching_turn_indices(user_texts, _PERMISSION_PATTERNS)
+        perm_consecutive = _max_consecutive_positions(permission_user_rel_indices)
+        permission_turn_indices = [user_turn_indices[i] for i in permission_user_rel_indices]
         if perm_consecutive >= _PERMISSION_MIN_CONSECUTIVE:
             signals.append("permission_seeking")
             weighted_sum += _PERMISSION_WEIGHT
-            evidence.append(f"permission_consecutive={perm_consecutive}")
+            evidence.append(
+                f"permission_consecutive={perm_consecutive}; turns={permission_turn_indices}"
+            )
+            planting_turn_indices.update(permission_turn_indices)
+            suspicious_turn_indices.update(permission_turn_indices)
 
         # Signal 3: False prior references
-        false_ref_count = _count_false_references(state)
+        false_ref_turn_indices = _false_reference_turn_indices(state)
+        false_ref_count = len(false_ref_turn_indices)
         if false_ref_count > 0:
             signals.append("false_prior_references")
             weighted_sum += _FALSE_REF_WEIGHT
-            evidence.append(f"false_references={false_ref_count}")
+            evidence.append(f"false_references={false_ref_count}; turns={false_ref_turn_indices}")
+            planting_turn_indices.update(false_ref_turn_indices)
+            suspicious_turn_indices.update(false_ref_turn_indices)
+
+        # Signal 4: exploitation in later turns after early poisoning setup.
+        # This explicitly models "plant early, exploit later" trajectory.
+        if planting_turn_indices and len(user_turn_indices) >= POISONING_MIN_TURNS + 1:
+            exploit_user_rel_indices = _find_matching_turn_indices(user_texts, _EXPLOIT_PATTERNS)
+            exploit_turn_indices = [user_turn_indices[i] for i in exploit_user_rel_indices]
+            if exploit_turn_indices:
+                first_plant = min(planting_turn_indices)
+                late_cutoff = max(2, len(texts) // 2)
+                valid_exploits = [i for i in exploit_turn_indices if i > first_plant and i >= late_cutoff]
+                if first_plant < late_cutoff and valid_exploits:
+                    signals.append("late_exploitation")
+                    weighted_sum += _EXPLOIT_WEIGHT
+                    evidence.append(
+                        f"late_exploitation_turns={valid_exploits[0]}..{valid_exploits[-1]}"
+                    )
+                    suspicious_turn_indices.update(valid_exploits)
 
         if not signals:
             return []
 
         # Multi-signal boost
-        confidence = weighted_sum
+        confidence_raw = weighted_sum
         if len(signals) >= 2:
-            confidence *= POISONING_MULTI_SIGNAL_BOOST
-        confidence = min(1.0, round(confidence, 4))
-
-        if confidence < POISONING_CONFIDENCE_MIN:
+            confidence_raw *= POISONING_MULTI_SIGNAL_BOOST
+        if confidence_raw < POISONING_CONFIDENCE_MIN:
             return []
+        confidence = round(min(1.0, confidence_raw), 4)
+
+        if suspicious_turn_indices:
+            turn_range = (min(suspicious_turn_indices), max(suspicious_turn_indices))
+        else:
+            turn_range = (0, len(texts) - 1)
 
         return [
             Alert(
@@ -222,7 +363,7 @@ class ContextPoisoningDetector(MultiTurnDetector):
                     f"Context poisoning detected: {', '.join(signals)} "
                     f"over {len(texts)} turns"
                 ),
-                turn_range=(0, len(texts) - 1),
+                turn_range=turn_range,
                 evidence=evidence,
             )
         ]

@@ -22,7 +22,12 @@ Usage::
             print(f"{alert.alert_type}: {alert.severity}")
 """
 
-from na0s.layer16.conversation_monitor import ConversationSecurityMonitor
+# Conversation monitor has optional/runtime-only dependencies in some builds.
+# Keep package imports resilient so tests can import models/config in isolation.
+try:  # pragma: no cover - exercised indirectly in integration tests
+    from na0s.layer16.conversation_monitor import ConversationSecurityMonitor
+except Exception:  # pragma: no cover
+    ConversationSecurityMonitor = None  # type: ignore[misc,assignment]
 from na0s.layer16.exceptions import (
     MaxSessionsReachedError,
     SessionExpiredError,
@@ -42,7 +47,6 @@ from na0s.layer16.sliding_window import SlidingWindow
 
 __all__ = [
     "Alert",
-    "ConversationSecurityMonitor",
     "ConversationState",
     "ConversationTurn",
     "MaxSessionsReachedError",
@@ -55,3 +59,6 @@ __all__ = [
     "ThreatLevel",
     "UserRiskProfile",
 ]
+
+if ConversationSecurityMonitor is not None:
+    __all__.insert(1, "ConversationSecurityMonitor")

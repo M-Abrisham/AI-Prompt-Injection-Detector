@@ -680,3 +680,16 @@ sources:
     gated: true
     enabled: false
     output: "hf_lima.csv"
+
+  # ── Morris II / ComPromptMized — worm detection dataset ─────────
+  # Ingested via: python -m scripts.ingest_morris2
+  # Training via: python -m scripts.train_worm_classifier
+
+  morris2_compromptmized:
+    type: github_csv
+    url: "https://raw.githubusercontent.com/StavC/Here-Comes-the-AI-Worm/master/Datasets/Jailbreaks.csv"
+    text_column: "JailBreak"
+    label: 1
+    license: "MIT"
+    category: "worm_payload"
+    output: "morris2_jailbreaks.csv"
