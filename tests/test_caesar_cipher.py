@@ -9,10 +9,12 @@ Covers:
   - Integration with obfuscation_scan()
 """
 
+import logging
 import time
 
 import pytest
 
+from na0s.layer2 import obfuscation
 from na0s.layer2.obfuscation import (
     _caesar_brute_force,
     _caesar_shift,
@@ -367,3 +369,92 @@ class TestCaesarIntegration:
         caesar_views = [dv for dv in result["decoded_chain"]
                         if "caesar_shift" in dv.encoding_type]
         assert len(caesar_views) > 0
+
+
+# ---------------------------------------------------------------------------
+# 9. _load_english_words() failure-mode coverage
+# ---------------------------------------------------------------------------
+
+_OBFUSCATION_LOGGER = "na0s.layer2.obfuscation"
+
+
+def _obfuscation_warnings(caplog):
+    """Return WARNING records emitted by the obfuscation logger."""
+    return [
+        r for r in caplog.records
+        if r.name == _OBFUSCATION_LOGGER and r.levelname == "WARNING"
+    ]
+
+
+class TestLoadEnglishWordsFailureModes:
+    """Cover the three failure modes hardened in _load_english_words().
+
+    Each test calls the real implementation directly with a monkeypatched
+    _ENGLISH_WORDS_PATH; the negative control uses the real dictionary.
+    """
+
+    def test_load_english_words_missing_file(self, monkeypatch, tmp_path, caplog):
+        missing = tmp_path / "definitely_does_not_exist.txt"
+        monkeypatch.setattr(obfuscation, "_ENGLISH_WORDS_PATH", str(missing))
+
+        with caplog.at_level(logging.WARNING, logger=_OBFUSCATION_LOGGER):
+            result = obfuscation._load_english_words()
+
+        assert isinstance(result, frozenset)
+        assert len(result) == 0
+        warnings = _obfuscation_warnings(caplog)
+        assert any("failed to load" in r.getMessage() for r in warnings), (
+            "expected a 'failed to load' warning, got: "
+            + repr([r.getMessage() for r in warnings])
+        )
+
+    def test_load_english_words_invalid_utf8(self, monkeypatch, tmp_path, caplog):
+        bad = tmp_path / "bad_utf8.txt"
+        # 0xE9 is a Latin-1 'é' but is an invalid UTF-8 start byte when not
+        # followed by a valid continuation; three in a row guarantees a
+        # UnicodeDecodeError under encoding="utf-8".
+        bad.write_bytes(b"hello\nworld\n\xe9\xe9\xe9\n")
+        monkeypatch.setattr(obfuscation, "_ENGLISH_WORDS_PATH", str(bad))
+
+        with caplog.at_level(logging.WARNING, logger=_OBFUSCATION_LOGGER):
+            result = obfuscation._load_english_words()
+
+        assert isinstance(result, frozenset)
+        assert len(result) == 0
+        warnings = _obfuscation_warnings(caplog)
+        assert any("failed to load" in r.getMessage() for r in warnings), (
+            "expected a 'failed to load' warning for invalid UTF-8, got: "
+            + repr([r.getMessage() for r in warnings])
+        )
+
+    def test_load_english_words_tiny_dictionary(self, monkeypatch, tmp_path, caplog):
+        tiny = tmp_path / "tiny.txt"
+        tiny.write_text("hello\nworld\nfoo\n", encoding="utf-8")
+        monkeypatch.setattr(obfuscation, "_ENGLISH_WORDS_PATH", str(tiny))
+
+        with caplog.at_level(logging.WARNING, logger=_OBFUSCATION_LOGGER):
+            result = obfuscation._load_english_words()
+
+        assert isinstance(result, frozenset)
+        assert result == frozenset({"hello", "world", "foo"})
+        warnings = _obfuscation_warnings(caplog)
+        assert any("loaded only" in r.getMessage() for r in warnings), (
+            "expected a 'loaded only' warning for tiny dict, got: "
+            + repr([r.getMessage() for r in warnings])
+        )
+
+    def test_load_english_words_valid_dictionary_no_warning(self, caplog):
+        # Negative control: real dictionary path, no monkeypatch.
+        with caplog.at_level(logging.WARNING, logger=_OBFUSCATION_LOGGER):
+            result = obfuscation._load_english_words()
+
+        assert isinstance(result, frozenset)
+        assert len(result) > 1000, (
+            "real english_words.txt should load >1000 entries, got "
+            + str(len(result))
+        )
+        warnings = _obfuscation_warnings(caplog)
+        assert warnings == [], (
+            "expected no warnings on healthy dictionary load, got: "
+            + repr([r.getMessage() for r in warnings])
+        )

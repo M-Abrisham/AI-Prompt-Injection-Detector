@@ -88,7 +88,7 @@ def get_decision_threshold():
     json_path = os.path.normpath(_THRESHOLD_JSON_PATH)
     if os.path.isfile(json_path):
         try:
-            with open(json_path, "r") as fh:
+            with open(json_path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
             _cached_threshold = float(data["recall95_threshold"])
             _logger.info(

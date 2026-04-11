@@ -46,7 +46,7 @@ def load_probe_results(path=None):
     path = path or _RESULTS_PATH
     if not os.path.isfile(path):
         return None
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     return data.get("probe_results", [])
 

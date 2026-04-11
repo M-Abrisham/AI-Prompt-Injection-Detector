@@ -234,7 +234,7 @@ def _load_known_hashes(path):
     """Load set of known text hashes from file."""
     if not os.path.isfile(path):
         return set()
-    with open(path, "r") as fh:
+    with open(path, "r", encoding="utf-8") as fh:
         return {
             line.strip()
             for line in fh
@@ -245,7 +245,7 @@ def _load_known_hashes(path):
 def _save_known_hashes(hashes, path):
     """Save set of text hashes to file."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         fh.write("# Known text hashes for deduplication\n")
         for h in sorted(hashes):
             fh.write(h + "\n")

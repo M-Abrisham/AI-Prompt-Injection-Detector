@@ -1,4 +1,4 @@
-"""Layer 1 numeric ASCII decoding -- detect binary/octal/decimal encoded text.
+"""Layer 2 numeric ASCII decoding -- detect binary/octal/decimal encoded text.
 
 Detects three numeric encoding schemes used to obfuscate prompt injection payloads:
 

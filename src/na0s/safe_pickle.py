@@ -224,14 +224,14 @@ def _resolve_expected_hash(path):
     # Prefer HMAC sidecar over SHA-256 sidecar
     hmac_file = _hmac_path(path)
     if os.path.exists(hmac_file):
-        with open(hmac_file, "r") as f:
+        with open(hmac_file, "r", encoding="utf-8") as f:
             raw = f.read().strip()
         return _parse_sidecar(raw), "sidecar_hmac"
 
 
     hash_file = _hash_path(path)
     if os.path.exists(hash_file):
-        with open(hash_file, "r") as f:
+        with open(hash_file, "r", encoding="utf-8") as f:
             raw = f.read().strip()
         return _parse_sidecar(raw), "sidecar_sha256"
 

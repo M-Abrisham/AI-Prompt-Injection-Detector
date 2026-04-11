@@ -225,7 +225,14 @@ class TestCalculateBoostEdgeCases(unittest.TestCase):
     """Edge cases: capping, boundaries, type handling."""
 
     def test_many_rules_many_flags_capped_at_max(self):
-        """Many rules + many flags -> capped at MAX_BOOST (0.3)."""
+        """Many rules + many flags -> bounded by MAX_BOOST with honest reasons.
+
+        New contract (post-explainability fix): boost_score is bounded by
+        MAX_BOOST AND the weights embedded in boost_reasons must sum to
+        exactly boost_score.  The old contract let reasons exceed the cap,
+        which broke audit-log attribution.
+        """
+        import re
         hits = [
             RuleHit(name="override", severity="critical"),
             RuleHit(name="roleplay", severity="high"),
@@ -235,8 +242,12 @@ class TestCalculateBoostEdgeCases(unittest.TestCase):
         ]
         flags = ["base64", "hex", "rot13", "leetspeak"]
         score, reasons = calculate_boost(hits, flags)
-        self.assertEqual(score, MAX_BOOST)
+        self.assertLessEqual(score, MAX_BOOST)
         self.assertGreater(len(reasons), 0)
+        # Explainability invariant: reasons sum to score
+        weights = [float(m.group(1)) for m in re.finditer(r'\+(\d\.\d\d)\)', " ".join(reasons))]
+        self.assertAlmostEqual(sum(weights), score, places=4,
+                               msg="reasons weights must sum to boost_score")
 
     def test_boost_at_score_boundary(self):
         """Verify boost value can push a near-miss composite over threshold.
@@ -397,6 +408,186 @@ class TestCalculateBoostIntegration(unittest.TestCase):
         # Should find both override+base64 (0.12) and roleplay+base64 (0.12) -> capped
         self.assertGreater(score, 0.12)
         self.assertLessEqual(score, MAX_BOOST)
+
+
+class TestExplainabilityInvariant(unittest.TestCase):
+    """Reasons weights must sum to boost_score (contract guarantee).
+
+    Regression tests for the "explainability leak" bug where the old code
+    capped boost_score but not boost_reasons, so parse(reasons) != score.
+    """
+
+    @staticmethod
+    def _sum_reason_weights(reasons):
+        import re
+        weights = [float(m.group(1)) for m in re.finditer(r'\+(\d\.\d\d)\)', " ".join(reasons))]
+        return sum(weights)
+
+    def test_reasons_sum_equals_score_under_cap(self):
+        """Uncapped: reasons weights sum exactly to score."""
+        hits = [RuleHit(name="roleplay", severity="high")]
+        flags = ["base64"]
+        score, reasons = calculate_boost(hits, flags)
+        self.assertAlmostEqual(self._sum_reason_weights(reasons), score, places=4)
+
+    def test_reasons_sum_equals_score_at_cap(self):
+        """At saturation: reasons are truncated so sum still equals score."""
+        hits = [
+            RuleHit(name="roleplay"),
+            RuleHit(name="override"),
+            RuleHit(name="system_prompt"),
+            RuleHit(name="decode_and_execute"),
+        ]
+        flags = ["base64", "hex", "rot13", "leetspeak"]
+        score, reasons = calculate_boost(hits, flags)
+        self.assertLessEqual(score, MAX_BOOST)
+        self.assertGreater(len(reasons), 0)
+        self.assertAlmostEqual(self._sum_reason_weights(reasons), score, places=4)
+
+    def test_reasons_empty_when_score_zero(self):
+        """Score=0 implies reasons=[]; no orphaned reason strings."""
+        score, reasons = calculate_boost([], [])
+        self.assertEqual(score, 0.0)
+        self.assertEqual(reasons, [])
+
+
+class TestMultiEncodingGuard(unittest.TestCase):
+    """The multi-encoding guard must count encoding flags, not raw list length."""
+
+    def test_two_non_encoding_flags_do_not_trigger_multi_encoding(self):
+        """['high_entropy','punctuation_flood'] has len 2 but zero encodings."""
+        score, reasons = calculate_boost([], ["high_entropy", "punctuation_flood"])
+        self.assertEqual(score, 0.0)
+        self.assertEqual(reasons, [])
+
+    def test_one_encoding_plus_one_non_encoding(self):
+        """['base64','high_entropy'] still has only 1 encoding flag."""
+        score, reasons = calculate_boost([], ["base64", "high_entropy"])
+        self.assertEqual(score, 0.0)
+
+    def test_three_encoding_flags_all_counted(self):
+        """Three encoding flags produce C(3,2)=3 pair boosts."""
+        score, reasons = calculate_boost([], ["base64", "hex", "rot13"])
+        self.assertAlmostEqual(score, 0.30, places=4)
+        self.assertEqual(len(reasons), 3)
+
+
+class TestUnknownTypeDropLogging(unittest.TestCase):
+    """Unknown types in rule_hits must be logged at DEBUG, not silently dropped."""
+
+    def test_dict_entry_logged(self):
+        """A dict in rule_hits should be dropped AND logged."""
+        import logging as _logging
+        with self.assertLogs("na0s.signal_boost", level="DEBUG") as cm:
+            calculate_boost(
+                [RuleHit(name="override"), {"not_a_rule": True}],
+                ["base64"],
+            )
+        dropped_logs = [r for r in cm.records if "dropped" in r.getMessage()]
+        self.assertEqual(len(dropped_logs), 1)
+        self.assertIn("1", dropped_logs[0].getMessage())
+
+    def test_none_entry_logged(self):
+        """None in rule_hits should be dropped AND logged."""
+        with self.assertLogs("na0s.signal_boost", level="DEBUG") as cm:
+            calculate_boost(
+                ["override", None],
+                ["base64"],
+            )
+        dropped_logs = [r for r in cm.records if "dropped" in r.getMessage()]
+        self.assertEqual(len(dropped_logs), 1)
+
+    def test_mixed_unknown_types_all_counted(self):
+        """Multiple unknown types are counted, valid entries still score."""
+        score, reasons = calculate_boost(
+            ["override", None, 42, {"x": 1}, "roleplay"],
+            ["base64"],
+        )
+        # Both override+base64 and roleplay+base64 fire (0.12 each) = 0.24
+        self.assertAlmostEqual(score, 0.24, places=4)
+        self.assertEqual(len(reasons), 2)
+
+
+class TestNoneSymmetry(unittest.TestCase):
+    """None inputs are normalized to []; no asymmetric behavior."""
+
+    def test_none_rule_hits_with_multi_encoding(self):
+        """(None, [b64, hex]) should equal ([], [b64, hex]) after normalization."""
+        a = calculate_boost(None, ["base64", "hex"])
+        b = calculate_boost([], ["base64", "hex"])
+        self.assertEqual(a, b)
+        self.assertAlmostEqual(a[0], 0.10, places=4)
+
+    def test_empty_and_none_flags_equivalent(self):
+        """([override], None) == ([override], [])."""
+        hits = [RuleHit(name="override")]
+        self.assertEqual(calculate_boost(hits, None), calculate_boost(hits, []))
+
+
+class TestSignalCombosFrozen(unittest.TestCase):
+    """SIGNAL_COMBOS must be read-only (MappingProxyType)."""
+
+    def test_mutation_raises_type_error(self):
+        """Assigning to SIGNAL_COMBOS should raise TypeError."""
+        with self.assertRaises(TypeError):
+            SIGNAL_COMBOS[frozenset({"x", "y"})] = 0.99  # type: ignore
+
+    def test_deletion_raises_type_error(self):
+        """Deleting from SIGNAL_COMBOS should raise TypeError."""
+        key = next(iter(SIGNAL_COMBOS))
+        with self.assertRaises(TypeError):
+            del SIGNAL_COMBOS[key]  # type: ignore
+
+
+class TestLoadTimeInvariants(unittest.TestCase):
+    """Load-time assertions that prevent structural regressions."""
+
+    def test_categories_are_pairwise_disjoint(self):
+        """No rule name may belong to more than one category."""
+        cats = {
+            "persona": _PERSONA_HIJACK_RULES,
+            "override": _OVERRIDE_AUTHORITY_RULES,
+            "system": _SYSTEM_EXTRACTION_RULES,
+        }
+        from itertools import combinations
+        for (na, a), (nb, b) in combinations(cats.items(), 2):
+            with self.subTest(pair=(na, nb)):
+                self.assertEqual(a & b, frozenset(),
+                                 "categories {0} x {1} overlap".format(na, nb))
+
+    def test_no_rule_name_collides_with_flag(self):
+        """Rule names must not match any encoding/obfuscation flag name."""
+        all_rules = (
+            _PERSONA_HIJACK_RULES
+            | _OVERRIDE_AUTHORITY_RULES
+            | _SYSTEM_EXTRACTION_RULES
+        )
+        self.assertEqual(all_rules & _ENCODING_FLAGS, frozenset())
+
+
+class TestRuleCoverage(unittest.TestCase):
+    """Visibility into the 'silent opt-out' gap for new rules."""
+
+    def test_get_uncovered_rules_is_list_of_strings(self):
+        """get_uncovered_rules() returns a (possibly empty) sorted list of strings."""
+        from na0s.signal_boost import get_uncovered_rules
+        result = get_uncovered_rules()
+        self.assertIsInstance(result, list)
+        self.assertEqual(result, sorted(result))
+        for name in result:
+            self.assertIsInstance(name, str)
+
+    def test_uncovered_rule_contributes_zero(self):
+        """A rule not in any category contributes zero even with encoding flag."""
+        # Pick an uncovered rule (these exist per get_uncovered_rules())
+        from na0s.signal_boost import get_uncovered_rules
+        uncovered = get_uncovered_rules()
+        if not uncovered:  # pragma: no cover - if coverage ever hits 100%
+            self.skipTest("no uncovered rules to test")
+        score, reasons = calculate_boost([uncovered[0]], ["base64"])
+        # Multi-encoding pass should not fire either since only 1 flag
+        self.assertEqual(score, 0.0)
+        self.assertEqual(reasons, [])
 
 
 if __name__ == "__main__":

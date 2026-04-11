@@ -149,7 +149,7 @@ def deploy(source_dir=None, dest_dir=None, init_path=None):
 
     # 2. Update KNOWN_HASHES in __init__.py
     try:
-        with open(init_path, "r") as f:
+        with open(init_path, "r", encoding="utf-8") as f:
             content = f.read()
     except OSError as exc:
         print(f"ERROR: could not read {init_path}: {exc}")
@@ -175,7 +175,7 @@ def deploy(source_dir=None, dest_dir=None, init_path=None):
         print("  KNOWN_HASHES unchanged (hashes match)")
     else:
         try:
-            with open(init_path, "w") as f:
+            with open(init_path, "w", encoding="utf-8") as f:
                 f.write(updated)
         except OSError as exc:
             print(f"ERROR: could not write {init_path}: {exc}")

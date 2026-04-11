@@ -2,6 +2,7 @@ import base64
 import binascii
 import codecs
 import hashlib
+import logging
 import math
 import os
 import re
@@ -9,6 +10,10 @@ import unicodedata
 import urllib.parse
 import zlib
 from dataclasses import dataclass
+
+from ._env_utils import safe_float_env, safe_int_env
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -73,79 +78,58 @@ _CODE_FENCE_RE = re.compile(r"^```", re.MULTILINE)
 # ---------------------------------------------------------------------------
 # Each constant has a sensible default.  Operators can override via
 # environment variables prefixed with NA0S_ for deployment-time tuning
-# without code changes.
-
-
-def _env_float(name: str, default: float) -> float:
-    """Read a float from the environment, falling back to *default*.
-
-    Returns *default* when the variable is absent, empty, or cannot be
-    parsed as a float.
-    """
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except (ValueError, TypeError):
-        return default
-
-
-def _env_int(name: str, default: int) -> int:
-    """Read an int from the environment, falling back to *default*.
-
-    Returns *default* when the variable is absent, empty, or cannot be
-    parsed as an int.
-    """
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except (ValueError, TypeError):
-        return default
-
+# without code changes.  All helpers come from the shared ``_env_utils``
+# module, which rejects non-finite values (NaN, +/-inf) and enforces the
+# optional [lo, hi] ranges declared here.
 
 # Punctuation-flood: ratio of punctuation characters to total length.
 # Text above this ratio (and not structured data) triggers "punctuation_flood".
-PUNCTUATION_FLOOD_RATIO = _env_float("NA0S_PUNCTUATION_FLOOD_RATIO", 0.40)
+PUNCTUATION_FLOOD_RATIO = safe_float_env(
+    "NA0S_PUNCTUATION_FLOOD_RATIO", 0.40, lo=0.0, hi=1.0
+)
 
 # Weird-casing: minimum absolute number of case transitions required.
-CASING_TRANSITION_THRESHOLD = _env_int("NA0S_CASING_TRANSITION_THRESHOLD", 6)
+CASING_TRANSITION_THRESHOLD = safe_int_env(
+    "NA0S_CASING_TRANSITION_THRESHOLD", 6, lo=0
+)
 
 # Weird-casing: minimum ratio of transitions to alpha characters.
-CASING_TRANSITION_RATIO = _env_float("NA0S_CASING_TRANSITION_RATIO", 0.12)
+CASING_TRANSITION_RATIO = safe_float_env(
+    "NA0S_CASING_TRANSITION_RATIO", 0.12, lo=0.0, hi=1.0
+)
 
 # Default max_decodes parameter for obfuscation_scan (legacy compatibility).
 # Raised from 2 to 5 to support deeper recursive unwrapping.
-DEFAULT_MAX_DECODES = _env_int("NA0S_MAX_DECODES", 5)
+DEFAULT_MAX_DECODES = safe_int_env("NA0S_MAX_DECODES", 5, lo=0)
 
 # Minimum length for a standalone base64 candidate (before decode attempt).
-MIN_BASE64_LENGTH = _env_int("NA0S_MIN_BASE64_LENGTH", 16)
+MIN_BASE64_LENGTH = safe_int_env("NA0S_MIN_BASE64_LENGTH", 16, lo=0)
 
 # Minimum length for a standalone hex candidate (before decode attempt).
-MIN_HEX_LENGTH = _env_int("NA0S_MIN_HEX_LENGTH", 8)
+MIN_HEX_LENGTH = safe_int_env("NA0S_MIN_HEX_LENGTH", 8, lo=0)
 
 # Minimum printable characters required for an embedded decode to be accepted.
-MIN_PRINTABLE_CHARS = _env_int("NA0S_MIN_PRINTABLE_CHARS", 3)
+MIN_PRINTABLE_CHARS = safe_int_env("NA0S_MIN_PRINTABLE_CHARS", 3, lo=0)
 
 # Minimum ratio of printable characters in a decoded candidate.
-MIN_PRINTABLE_RATIO = _env_float("NA0S_MIN_PRINTABLE_RATIO", 0.7)
+MIN_PRINTABLE_RATIO = safe_float_env(
+    "NA0S_MIN_PRINTABLE_RATIO", 0.7, lo=0.0, hi=1.0
+)
 
 # Minimum alpha characters for ROT13 / reversed / leetspeak candidate checks.
-MIN_CANDIDATE_ALPHA = _env_int("NA0S_MIN_CANDIDATE_ALPHA", 10)
+MIN_CANDIDATE_ALPHA = safe_int_env("NA0S_MIN_CANDIDATE_ALPHA", 10, lo=0)
 
 # Minimum text length for composite entropy check to fire.
-MIN_ENTROPY_TEXT_LENGTH = _env_int("NA0S_MIN_ENTROPY_TEXT_LENGTH", 10)
+MIN_ENTROPY_TEXT_LENGTH = safe_int_env("NA0S_MIN_ENTROPY_TEXT_LENGTH", 10, lo=0)
 
 # Minimum letters required for meaningful KL-divergence computation.
-MIN_KL_LETTERS = _env_int("NA0S_MIN_KL_LETTERS", 5)
+MIN_KL_LETTERS = safe_int_env("NA0S_MIN_KL_LETTERS", 5, lo=0)
 
 # Minimum stripped length for a decoded view to be accepted during recursion.
-MIN_DECODED_STRIP_LENGTH = _env_int("NA0S_MIN_DECODED_STRIP_LENGTH", 2)
+MIN_DECODED_STRIP_LENGTH = safe_int_env("NA0S_MIN_DECODED_STRIP_LENGTH", 2, lo=0)
 
 # Zlib compression level used in compression-ratio analysis (0-9).
-ZLIB_COMPRESSION_LEVEL = _env_int("NA0S_ZLIB_COMPRESSION_LEVEL", 6)
+ZLIB_COMPRESSION_LEVEL = safe_int_env("NA0S_ZLIB_COMPRESSION_LEVEL", 6, lo=0, hi=9)
 
 
 # Calc String Randomness (High = Encrypted/gibberish)
@@ -698,24 +682,57 @@ def _is_rot13_candidate(text):
 # it contains attack keywords OR has a high ratio of real English words.
 # ---------------------------------------------------------------------------
 
-# Load English common words for dictionary validation
+# Load English words for dictionary validation.  Sourced from
+# dwyl/english-words (words_alpha.txt, ~370k entries, Unlicense / public
+# domain).  Used for Caesar / Pig Latin english_ratio gates and Pig Latin
+# consonant cluster disambiguation.
 _ENGLISH_WORDS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-    "data", "english_common_1000.txt",
+    "data", "english_words.txt",
 )
 
 
 def _load_english_words():
-    """Load English common words set for Caesar/PigLatin validation."""
+    """Load English common words set for Caesar/PigLatin validation.
+
+    On failure (file missing, unreadable, decode error, etc.) emits a
+    single warning and returns an empty frozenset.  An empty dictionary
+    degrades the Caesar / Pig Latin "english_ratio" detection path —
+    only the attack-keyword path will fire — so silent failure was
+    hiding a significant capability gap.
+
+    The file is opened with explicit ``encoding="utf-8"`` so behavior is
+    identical on Mac, Linux, and Windows regardless of locale.  Without
+    this, Windows / non-UTF8 locales would silently load corrupted text
+    or raise UnicodeDecodeError at module import time.
+    """
     words = set()
     try:
-        with open(_ENGLISH_WORDS_PATH, "r") as fh:
+        with open(_ENGLISH_WORDS_PATH, "r", encoding="utf-8") as fh:
             for line in fh:
                 w = line.strip().lower()
                 if w and not w.startswith("#"):
                     words.add(w)
-    except OSError:
-        pass
+    except (OSError, UnicodeDecodeError) as exc:
+        _logger.warning(
+            "Layer 2: failed to load English dictionary at %s (%s); "
+            "Caesar/Pig Latin validation will use attack-keyword path only",
+            _ENGLISH_WORDS_PATH,
+            exc,
+        )
+        return frozenset()
+
+    # Sanity check: file existed but produced an empty/tiny word set
+    # (header-only file, accidental truncation, etc.).  Surface this so
+    # the same silent-gap class of bug doesn't recur.
+    if len(words) < 1000:
+        _logger.warning(
+            "Layer 2: English dictionary at %s loaded only %d words; "
+            "Caesar/Pig Latin english_ratio gate will be unreliable",
+            _ENGLISH_WORDS_PATH,
+            len(words),
+        )
+
     return frozenset(words)
 
 
@@ -915,8 +932,17 @@ def _decode_pig_latin_word(word: str) -> "tuple[str, bool]":
     if not body:
         return word, False
 
+    # Iterate longest-cluster-first.  Pig Latin's encoder moves the WHOLE
+    # consonant cluster (e.g. "show" -> "owsh" + "ay", cluster "sh"; "scratch"
+    # -> "atchscr" + "ay", cluster "scr"), so the longest cluster that yields a
+    # dictionary word is overwhelmingly the correct decoding.  With a short
+    # frequency-ranked dictionary the difference rarely matters, but with a
+    # comprehensive ~370k dictionary, greedy short-cluster matching produces
+    # obscure-but-real words ("hows" before "show", "het" before "the") and
+    # short-circuits before the correct longer cluster is tried.
+    max_len = min(4, len(body) - 1)
     fallback = None
-    for cluster_len in range(1, min(5, len(body))):
+    for cluster_len in range(max_len, 0, -1):
         consonants = body[-cluster_len:]
         rest = body[:-cluster_len]
         candidate = consonants + rest
@@ -924,7 +950,7 @@ def _decode_pig_latin_word(word: str) -> "tuple[str, bool]":
         if candidate in _ENGLISH_COMMON_WORDS:
             return candidate, True
 
-        if cluster_len == 1 and fallback is None:
+        if cluster_len == 1:
             fallback = candidate
 
     # Return length-1 attempt as fallback
@@ -1320,6 +1346,24 @@ def _scan_single_layer(text):
     content_type = _detect_content_type(text)
 
     has_attack_kw = bool(_ATTACK_KEYWORDS_RE.search(text))
+
+    # Branch map for the entropy gate below — four mutually exclusive paths,
+    # most-specific first.  Each branch picks ONE threshold; only the
+    # composite check (path 4) cares about non-entropy signals.
+    #
+    #   Path 1: text is *predominantly* inside a fence AND has no attack
+    #           keywords -> use _CODE_ENTROPY_THRESHOLD (5.5).  Fenced code
+    #           the user is sharing as data; only extreme entropy flags.
+    #   Path 2: text *contains* a fence but doesn't satisfy path 1 (mixed
+    #           prose + code, or fence + attack keywords) -> use
+    #           _CODE_FENCE_ENTROPY (5.0).  Catches base64 blobs slipped
+    #           into otherwise prose-y messages with backticks.
+    #   Path 3: detected content type is structured (code/yaml/json) but no
+    #           markdown fence -> use _CODE_ENTROPY_THRESHOLD (5.5) to
+    #           tolerate normal structured-data entropy (4.5-5.4).
+    #   Path 4: default plain text -> _composite_entropy_check() combines
+    #           entropy + KL-divergence + compression ratio for FP-resistant
+    #           voting (no single fixed threshold).
     if _is_inside_markdown_fence(text) and not has_attack_kw:
         # Text predominantly inside code fences WITHOUT attack keywords:
         # exempt from high_entropy.  Rationale: code in fences is DATA

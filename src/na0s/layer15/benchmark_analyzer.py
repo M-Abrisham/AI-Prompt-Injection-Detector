@@ -123,7 +123,7 @@ class BenchmarkAnalyzer:
         """
         import yaml  # optional dep (threatintel)
 
-        with open(self.taxonomy_path) as f:
+        with open(self.taxonomy_path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         return data.get("categories", {})
 
@@ -145,7 +145,7 @@ class BenchmarkAnalyzer:
         benchmark_names = {"jailbreakbench", "harmbench"}
         for path in sorted(self.snapshots_dir.glob("*_snapshot.json")):
             try:
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
                 snap = SourceSnapshot.from_dict(data)
                 # Filter: only include snapshots with benchmark techniques
