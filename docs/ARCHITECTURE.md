@@ -258,6 +258,39 @@ Plants honeytokens in system prompts to detect extraction:
 - **L11 Supply Chain**: SHA-256 sidecar integrity for all pickle model files
 - **L12 Probe Framework**: 19-category adversarial testing with 8 mutation buffs (Base64, ROT13, Leet, Fullwidth, ZeroWidth, Homoglyph, Reverse, CaseAlternating)
 - **L13 Dataset Pipeline**: Download, merge, generate, mine hard negatives, optimize thresholds
-- **L14 CI/CD**: Python 3.9-3.12 matrix, flake8 linting, 821+ tests, coverage reporting
+- **L14 CI/CD**: Python 3.9-3.12 matrix, flake8 linting, 8,500+ tests, coverage reporting
 
 </details>
+
+---
+
+## Project Structure
+
+```
+src/na0s/
+├── predict.py, cascade.py, config.py  — core detection pipeline
+├── signal_boost.py, rules.py          — scoring and rule engine
+│
+├── canary/          — canary token injection detection (7 modules)
+├── detectors/       — specialized injection detectors (10 modules)
+├── fusion/          — ensemble fusion and routing (5 modules)
+├── integrity/       — supply chain and model security (13 modules)
+├── judge/           — LLM judge classification (6 modules)
+├── ml/              — ML classifiers and embeddings (13 modules)
+├── rag/             — RAG pipeline security (7 modules)
+├── worm/            — worm signature detection (2 modules)
+├── parsers/office/  — office document deep extraction (7 formats)
+│
+├── layer0/          — input sanitization, encoding, OCR
+├── layer1/          — rules engine, pattern matching
+├── layer2/          — obfuscation decoding
+├── layer15/         — threat intelligence sync
+└── layer16/         — conversation-level monitoring
+
+tests/
+├── canary/, judge/, integrity/, ml/    — mirror source packages
+├── rag/, detectors/, worm/, fusion/
+├── parsers/office/                     — 66 tests with real binary fixtures
+├── test_layer16/                       — 39 conversation monitoring tests
+└── test_*.py                           — core pipeline tests
+```
