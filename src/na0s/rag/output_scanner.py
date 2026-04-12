@@ -200,6 +200,36 @@ _EXFILTRATION_URL_PATTERNS: List[re.Pattern] = [
     ),
 ]
 
+# ---------------------------------------------------------------------------
+# Egress patterns -- raw IP URLs, email exfil, data-in-URL, DNS exfil
+# ---------------------------------------------------------------------------
+
+_EGRESS_PATTERNS: Dict[str, re.Pattern] = {
+    # Raw IP address URLs (http(s)://N.N.N.N) -- suspicious in LLM output
+    "egress_raw_ip": re.compile(
+        r"https?://(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}"
+        r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)(?:[:/\?\#\[]|\b)",
+    ),
+    # Email exfiltration -- mailto: links or instructions to send/email data
+    "egress_email": re.compile(
+        r"(?:mailto:\S+@\S+|"
+        r"(?:send|email|forward|transmit)\s+(?:the\s+)?(?:data|results|output|contents|information|credentials|keys?|secrets?|tokens?)\s+to\s+\S+@\S+)",
+        re.IGNORECASE,
+    ),
+    # Data-in-URL: base64-padded values or long hex in query params.
+    # The pattern anchors on a URL with query string, then looks for
+    # base64-padded values (8+ chars ending in = or ==) or long hex blocks.
+    "egress_data_in_url": re.compile(
+        r"https?://[^\s\"')\]]+\?[^\s\"')\]]*(?:^|&|=)"
+        r"[A-Za-z0-9+/]{8,}(?:={1,2})"
+        r"|https?://[^\s\"')\]]+\?[^\s\"')\]]*[=&][0-9a-fA-F]{16,}",
+    ),
+    # DNS exfiltration: base64-encoded subdomain labels (long labels typical of exfil)
+    "egress_dns_exfil": re.compile(
+        r"\b[A-Za-z0-9+/]{12,}(?:={0,2})\.(?:[a-zA-Z0-9\-]+\.)+[a-zA-Z]{2,}\b",
+    ),
+}
+
 
 # Base64 block detection (standalone, not importing obfuscation.py)
 _BASE64_BLOCK = re.compile(
@@ -335,6 +365,11 @@ class OutputScanner:
         exf_score, exf_flags = self._check_exfiltration_urls(output_text)
         raw_score += exf_score * weight
         flags.extend(exf_flags)
+
+        # 9. Egress pattern detection (raw IP URLs, email exfil, data-in-URL, DNS exfil)
+        egr_score, egr_flags = self._check_egress_patterns(output_text)
+        raw_score += egr_score * weight
+        flags.extend(egr_flags)
 
         # BUG-L9-2 fix: comprehensive redaction pass.
         if role_flags:
@@ -705,6 +740,26 @@ class OutputScanner:
             if match:
                 flags.append(f"Data exfiltration URL: '{match.group()[:60]}'")
                 score = max(score, 0.7)
+
+        return (score, flags)
+
+    def _check_egress_patterns(self, text: str) -> tuple:
+        """Detect egress patterns: raw IP URLs, email exfil, data-in-URL, DNS exfil."""
+        flags: List[str] = []
+        score = 0.0
+
+        _SEVERITY: Dict[str, float] = {
+            "egress_raw_ip": 0.5,
+            "egress_email": 0.6,
+            "egress_data_in_url": 0.6,
+            "egress_dns_exfil": 0.5,
+        }
+
+        for label, pat in _EGRESS_PATTERNS.items():
+            match = pat.search(text)
+            if match:
+                flags.append(f"Egress pattern ({label}): '{match.group()[:60]}'")
+                score = max(score, _SEVERITY.get(label, 0.5))
 
         return (score, flags)
 

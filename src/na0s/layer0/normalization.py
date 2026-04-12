@@ -1,3 +1,4 @@
+import logging
 import math
 import os
 import re
@@ -42,6 +43,111 @@ _EXCESSIVE_TABS_RE = re.compile(r"\t{3,}")
 # token for reconstruction.  We use re.split with a capturing group so that
 # delimiters (whitespace runs) are preserved for lossless reassembly.
 _TOKEN_SPLIT_RE = re.compile(r"(\s+)")
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Character-level reassembly (anti-evasion for spaced/dotted chars)
+# ---------------------------------------------------------------------------
+# Matches a dot-separated token where every segment is a single alpha char
+# and there are at least 3 segments: e.g. "i.g.n.o.r.e"
+_DOT_CHAR_SPLIT_RE = re.compile(
+    r"\b([A-Za-z](?:\.[A-Za-z]){2,})\b"
+)
+
+# Known abbreviations that should NOT be reassembled (lowercase, with dots)
+_ABBREVIATION_ALLOWLIST = frozenset({
+    "u.s.a.", "u.s.", "a.m.", "p.m.", "e.g.", "i.e.", "a.d.", "b.c.",
+    "d.c.", "u.k.", "e.u.", "ph.d.", "m.d.", "b.a.", "m.a.", "b.s.",
+    "m.s.", "j.d.", "r.n.", "d.d.s.", "o.k.", "a.k.a.", "e.t.a.",
+    "r.s.v.p.", "a.s.a.p.", "d.i.y.", "f.y.i.", "t.b.d.", "n.a.",
+    "c.e.o.", "c.f.o.", "c.t.o.", "v.p.", "l.l.c.", "inc.",
+})
+
+
+def _reassemble_char_splits(text):
+    """Reassemble words that have been split into individual characters.
+
+    Handles two evasion patterns:
+      1. Space-separated single chars: ``i g n o r e`` -> ``ignore``
+      2. Dot-separated single chars: ``i.g.n.o.r.e`` -> ``ignore``
+
+    For space-separated chars, double-space boundaries (``"e  a"``) are
+    treated as word separators so that ``"i g n o r e  a l l"`` becomes
+    ``"ignore all"`` rather than ``"ignoreall"``.  When no double-space
+    boundaries exist, consecutive single-char runs are joined as one word.
+
+    Only reassembles runs of 3+ consecutive single alpha characters to
+    avoid false positives on legitimate text like "I am" or "a b".
+
+    Known abbreviations (U.S.A., e.g., etc.) are preserved.
+
+    Returns ``(text, reassembled)`` where *reassembled* is True if any
+    reassembly occurred.
+    """
+    reassembled = False
+
+    # --- Pass 1: Space-separated single alpha chars ---
+    # Process each line independently to avoid cross-line reassembly.
+    # Within a line, split on double-space boundaries first (word
+    # separators), then reassemble single-char runs within each segment.
+    out_lines = []
+    for line in text.split("\n"):
+        # Split on runs of 2+ spaces (preserving them as word boundaries)
+        segments = re.split(r"( {2,})", line)
+        rebuilt_segments = []
+        for seg in segments:
+            # If this segment is a multi-space delimiter, keep as-is
+            if seg and not seg.strip():
+                rebuilt_segments.append(seg)
+                continue
+            # Process tokens within this segment
+            tokens = seg.split(" ")
+            out_tokens = []
+            i = 0
+            while i < len(tokens):
+                if len(tokens[i]) == 1 and tokens[i].isalpha():
+                    run_start = i
+                    while (i < len(tokens)
+                           and len(tokens[i]) == 1
+                           and tokens[i].isalpha()):
+                        i += 1
+                    run_len = i - run_start
+                    if run_len >= 3:
+                        word = "".join(tokens[run_start:i])
+                        out_tokens.append(word)
+                        reassembled = True
+                    else:
+                        out_tokens.extend(tokens[run_start:i])
+                else:
+                    out_tokens.append(tokens[i])
+                    i += 1
+            rebuilt_segments.append(" ".join(out_tokens))
+        out_lines.append("".join(rebuilt_segments))
+    text = "\n".join(out_lines)
+
+    # --- Pass 2: Dot-separated single alpha chars ---
+    def _dot_replace(m):
+        nonlocal reassembled
+        matched = m.group(1)
+        # Check if it's a known abbreviation (with or without trailing dot)
+        lower_with_dot = matched.lower() + "."
+        lower_no_dot = matched.lower()
+        if (lower_with_dot in _ABBREVIATION_ALLOWLIST
+                or lower_no_dot in _ABBREVIATION_ALLOWLIST):
+            return matched
+        # Reassemble: remove dots
+        word = matched.replace(".", "")
+        reassembled = True
+        return word
+
+    text = _DOT_CHAR_SPLIT_RE.sub(_dot_replace, text)
+
+    if reassembled:
+        logger.debug("char-level reassembly applied")
+
+    return text, reassembled
+
 
 # ---------------------------------------------------------------------------
 # Configurable thresholds (named constants, env-overridable)
@@ -856,6 +962,15 @@ def normalize_text(text, _idempotency_pass=False):
     if count > 0:
         flags.append("unicode_whitespace_normalized")
         text = cleaned
+
+    # Step 3.5: Character-level reassembly (anti-evasion)
+    # Detect and reassemble words split into individual characters via
+    # spaces ("i g n o r e") or dots ("i.g.n.o.r.e").  Must run BEFORE
+    # multi-space collapse so that double-space word boundaries are
+    # preserved for accurate reassembly.
+    text, char_reassembled = _reassemble_char_splits(text)
+    if char_reassembled:
+        flags.append("char_level_reassembly")
 
     # Collapse multiple spaces into one, strip leading/trailing
     text = _MULTI_SPACE_RE.sub(" ", text).strip()

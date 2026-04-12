@@ -868,7 +868,6 @@ class TestD7_5_TokenSmuggling(unittest.TestCase):
             # the input was adversarial enough to cause processing issues.
             pass
 
-    @unittest.expectedFailure
     def test_word_splitting_with_spaces(self):
         """Known gap: word splitting using inserted spaces.
 
@@ -890,7 +889,6 @@ class TestD7_5_TokenSmuggling(unittest.TestCase):
             "risk={}, flags={}".format(r.risk_score, r.anomaly_flags),
         )
 
-    @unittest.expectedFailure
     def test_word_splitting_with_dots(self):
         """Known gap: word splitting with dots between characters.
 
