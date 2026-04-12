@@ -266,7 +266,7 @@ Layer 1 is a regex-based signature engine that detects known attack patterns. Ha
 **Status**: Fully implemented `layer2/` package (2026-02-26). Detects 12+ encoding/obfuscation types. All 7 modules complete with full test coverage. **Gap Closure Sprint (2026-02-28)**: content-type aware entropy thresholds (code/yaml/json get 5.5 vs 4.5), code fence exemption from high_entropy (with attack-keyword safety check), encoding chain depth/diversity scoring via `_analyze_encoding_chain()` (boost 0.0-0.20).
 
 ### Updated Description
-Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-classification. Now organized as a proper package at `src/na0s/layer2/`. Handles Base64, hex, URL-encoding, ROT13, leetspeak, reversed text, Morse code, binary/octal/decimal ASCII, whitespace steganography, ASCII art detection (5-signal weighted voting, ArtPrompt defense), and syllable-splitting de-hyphenation (25 Unicode dash chars, 83 suspicious words, 63 compound whitelist), with entropy analysis (2-of-3 composite voting), punctuation flood detection, and casing transition analysis. Each decoded view is re-classified through both ML and L1 rules. Recursive Matryoshka unwrapping with encoding chain provenance tracking. **Remaining gaps**: Caesar cipher (non-13 shifts), pig-latin, combined signal boosting.
+Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-classification. Now organized as a proper package at `src/na0s/layer2/`. Handles Base64, hex, URL-encoding, ROT13, leetspeak, reversed text, Morse code, binary/octal/decimal ASCII, whitespace steganography, ASCII art detection (5-signal weighted voting, ArtPrompt defense), and syllable-splitting de-hyphenation (25 Unicode dash chars, 83 suspicious words, 63 compound whitelist), with entropy analysis (2-of-3 composite voting), punctuation flood detection, and casing transition analysis. Each decoded view is re-classified through both ML and L1 rules. Recursive Matryoshka unwrapping with encoding chain provenance tracking. **Remaining gaps**: ~~Caesar cipher (non-13 shifts)~~ DONE, ~~pig-latin~~ DONE, ~~combined signal boosting~~ DONE. Caesar brute-force (shifts 1-25) and Pig Latin detection added with 370k-word dictionary validation. Signal boost refactored with explainability invariant, frozen SIGNAL_COMBOS, load-time assertions.
 
 ### TODO List
 
@@ -334,9 +334,9 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 #### REMAINING
 - [x] ~~**ascii_art_detector.py full implementation**~~ — DONE (2026-02-26). 5-signal weighted voting, Unicode detection, 115 tests.
 - [x] ~~**syllable_splitting.py full implementation**~~ — DONE (2026-02-26). 25 Unicode dashes, 83 suspicious words, 63 compound whitelist, 144 tests.
-- [x] ~~**FIX: Combined signal boosting missing**~~ — DONE (2026-02-28). Multi-vector co-occurrence boost in `signal_boost.py`, wired into cascade.py + predict.py. 45 tests. Security audit: 6/7 PASS, CPU exhaustion fixed with 10KB cap.
-- [x] ~~**Caesar cipher (non-13 shifts)**~~ — DONE (2026-02-28). Brute-force shifts 1-25 (skip 13), 1150-word English dictionary + attack keyword validation, 10KB input cap. 38 tests.
-- [x] ~~**Pig-latin detection**~~ — DONE (2026-02-28). Consonant-cluster decoding, 50+ English "-ay" word exclusion set, 10KB input cap. 36 tests.
+- [x] ~~**FIX: Combined signal boosting missing**~~ — DONE (2026-02-28). Multi-vector co-occurrence boost in `signal_boost.py`, wired into cascade.py + predict.py. 45 tests. Security audit: 6/7 PASS, CPU exhaustion fixed with 10KB cap. **Refactored (2026-04-11)**: explainability invariant (reasons weights sum to capped score), frozen SIGNAL_COMBOS via MappingProxyType, load-time disjointness + collision assertions, encoding-count guard fix, unknown-type drop logging, `get_uncovered_rules()` helper. 62 tests (17 new). PR #16.
+- [x] ~~**Caesar cipher (non-13 shifts)**~~ — DONE (2026-02-28). Brute-force shifts 1-25 (skip 13), 1150-word English dictionary + attack keyword validation, 10KB input cap. 38 tests. **Updated (2026-04-08)**: integrated 370k-word dwyl dictionary, explicit UTF-8 encoding, UnicodeDecodeError handling.
+- [x] ~~**Pig-latin detection**~~ — DONE (2026-02-28). Consonant-cluster decoding, 50+ English "-ay" word exclusion set, 10KB input cap. 36 tests. **Updated (2026-04-08)**: fixed decoder to prefer longest-cluster match (was greedy short-cluster returning "hows" before "show" with large dictionary). 4 new tie-breaking regression tests.
 - [x] ~~**Cross-track integration tests**~~ — DONE (2026-02-28). 27 tests verifying signal boost + Caesar + Pig Latin work together. 4 formerly-xfail D4 tests now pass.
 
 ---
@@ -1466,7 +1466,7 @@ Layer 17 scans structured document formats (PDF, DOCX/XLSX/PPTX, CSV, source cod
 - (nothing — layer is new)
 
 #### NEW (All items are new)
-- [ ] **Add DOCX/XLSX scanning** — Parse ZIP+XML to extract metadata, comments, track changes, hidden sheets; scan all fields for injection patterns. Source: IM0003 Coverage Gap #15. **Priority**: P1. **Effort**: Medium.
+- [x] **Add DOCX/XLSX/PPTX/ODF/OLE scanning** — Deep extraction of hidden injection surfaces from office documents. 5 format-specific extractors (DOCX 19 surfaces, XLSX 12, PPTX 13, ODF 17, OLE 3 tiers), magic-byte router, zip-bomb safety, 66 tests against real injected binary fixtures. `src/na0s/parsers/office/` (3,622 lines). ✅ DONE (2026-04-11) — PR #18.
 - [ ] **Add CSV injection detection** — Formula injection (`=CMD()`, `=SYSTEM()`), comment injection, delimiter confusion. Source: IM0003 Coverage Gap #16. **Priority**: P1. **Effort**: Easy.
 - [ ] **Add code comment scanning** — Extract comments/docstrings from Python, JS, HTML, YAML; scan for injection payloads (INSEC attack vector, arXiv:2408.02509). Source: IM0003 Coverage Gap #17. **Priority**: P1. **Effort**: Medium.
 - [ ] **Integrate OCR** for image text extraction — pytesseract; detect tiny/invisible text (font height < 5px). Source: IM0003 Coverage Gap #25. **Priority**: P2.
@@ -1477,7 +1477,7 @@ Layer 17 scans structured document formats (PDF, DOCX/XLSX/PPTX, CSV, source cod
 - [ ] **Add QR/barcode decoding** — pyzbar integration. Source: IM0003 Coverage Gap #31. **Priority**: P3.
 **P1 — High impact, moderate effort:**
 - [ ] **PDFScanner** — Extract ALL text layers (visible + invisible/white-on-white) using `pdfminer.six` or `PyMuPDF`. Parse metadata fields and annotations. Check for text-color matches with background. Run extracted text through injection detector. **Effort**: Medium.
-- [ ] **OOXMLScanner** — Unzip OOXML archives (.docx, .xlsx, .pptx), parse all XML parts (not just main document). Check for hidden text (white font, font-size:1, hidden XML attributes). Extract comments, tracked changes, footnotes, headers/footers. Scan all extracted text. **Effort**: Medium.
+- [x] **OOXMLScanner** — Implemented as `parsers/office/` with DOCX, XLSX, PPTX, ODF extractors. Extracts comments, tracked changes, hidden sheets/slides, speaker notes, metadata, custom properties, field codes, alt text, VBA macros — 61+ extraction surfaces total. ✅ DONE (2026-04-11) — PR #18.
 - [ ] **CSVScanner** — Check for formula-prefix characters (`=`, `+`, `-`, `@`, `\t`, `\r`) in cells. Scan cell contents for injection patterns. Flag cells with excessive length or unusual encoding. Strip/escape formula prefixes before LLM ingestion. **Effort**: Easy.
 - [ ] **CodeCommentScanner** — Extract comments from source files (Python `#`, JS `//`, `/* */`, HTML `<!-- -->`). Scan comments for instruction-like language patterns. Addresses CVE-2025-53773. **Effort**: Easy-Medium.
 
@@ -2057,7 +2057,7 @@ Attacks split words into single characters: `"i g n o r e"` or `"i.g.n.o.r.e"`. 
 Current decoders run independently. Attacks chain encodings (rot13 then leet, leet then pig_latin). Need cross-decoder chained decode.
 
 - [ ] **Cross-decoder chained decode loop** — After flat `_detect_and_decode()`, run second pass: for each decoded result, try other decoders. Max depth 2, budget 50 attempts, 200ms timeout. Use `_composite_entropy_check()` as "looks like English" gate. **Files**: `obfuscation.py`. **Tests**: `test_obfuscation_chaining.py`. **Effort**: 2d.
-- [ ] **English plausibility scorer** — Extract KL-divergence logic into `_is_plausible_english()`. Add 5000-word dictionary check (frozenset, no deps). Either KL < 0.8 OR dict hit rate > 0.4. **Effort**: 1d.
+- [x] **English plausibility scorer** — Integrated 370k-word dwyl dictionary (`data/english_words.txt`, Unlicense). Fixed `_load_english_words()` with explicit UTF-8 encoding + UnicodeDecodeError handling + <1000-word sanity warning. Fixed Pig Latin decoder to prefer longest-cluster match (was greedy short-cluster). 8 new tests. ✅ DONE (2026-04-08) — Commits fc73de5, 66a0011, 5e323de.
 - [ ] **Performance budget + timeout** — `NA0S_CHAIN_DECODE_TIMEOUT_MS` (200ms), `NA0S_MAX_CHAIN_DECODES` (50). Perf regression test: <500ms on 500-char input. **Effort**: 0.5d.
 - [ ] **Promote xfail tests** — Remove `@expectedFailure` from `test_d4_rot13_plus_leet` and `test_d4_leet_plus_pig_latin`. Add base64(rot13), url(leet), rot13(pig_latin) tests. **Effort**: 0.5d.
 
