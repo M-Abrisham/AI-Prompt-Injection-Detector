@@ -99,6 +99,7 @@ class SessionCanaryManager:
             if now > entry["expires_at"]:
                 continue  # skip expired
             canary: CanaryToken = entry["canary"]
+            # Substring search — timing-safe comparison not applicable (see manager._is_present)
             if canary.token in output_text:
                 canary.record_trigger()
                 results.append({

@@ -214,8 +214,15 @@ class CanaryManager:
         return bool(re.search(pattern, text))
 
     def _is_present(self, canary: CanaryToken, text: str) -> bool:
-        """Return True if *canary* is present in *text* in any form."""
-        # 1. Exact match
+        """Return True if *canary* is present in *text* in any form.
+
+        Note: these checks use ``in`` (substring search) rather than
+        ``hmac.compare_digest`` because we are scanning untrusted LLM
+        output for any occurrence of the token.  Timing-safe comparison
+        only applies to fixed-length equality checks, not substring
+        search, so ``in`` is the correct primitive here.
+        """
+        # 1. Exact match (substring — see docstring)
         if canary.token in text:
             return True
 
