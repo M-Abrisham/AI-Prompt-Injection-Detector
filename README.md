@@ -8,7 +8,7 @@
 
 
 <p>
-  <strong>17-Layer Defense | 104 Attack Techniques | 1.9M Samples</strong>
+  <strong>21-Layer Defense | 117+ Attack Techniques | 8,500+ Tests</strong>
 </p>
 
 </div>
@@ -23,9 +23,9 @@ Na0S is under active development and **cannot guarantee 100% protection** agains
 
 ## Overview
 
-Na0s is a **defense-in-depth prompt injection detector** — 17 independent layers working in parallel, a **[threat taxonomy](docs/TAXONOMY.md) of 19 attack categories and 104 techniques** (the most comprehensive open-source classification available), and an ML ensemble trained on 1.9M+ samples from 24 public datasets.
+Na0S is a **defensive security library** that companies embed in their AI applications to detect and block prompt injection attacks. One `scan()` call runs 21 independent detection layers in parallel — pattern matching, ML classifiers, obfuscation decoders, semantic analysis, and output scanning — returning a verdict before malicious input reaches the LLM.
 
-**Prompt injection** is the [#1 security risk for LLM apps](https://genai.owasp.org/) (OWASP LLM Top 10, 2025).
+**Prompt injection** is the [#1 security risk for LLM apps](https://genai.owasp.org/) (OWASP LLM Top 10, 2025). Na0S covers **29 attack categories and 276+ techniques** via the most comprehensive open-source [threat taxonomy](docs/TAXONOMY.md) available.
 
 [Architecture](docs/ARCHITECTURE.md) · [Taxonomy](docs/TAXONOMY.md) · [Training & Stats](docs/TRAINING.md) · [Standards](docs/STANDARDS.md)
 
@@ -53,35 +53,9 @@ Na0s is a **defense-in-depth prompt injection detector** — 17 independent laye
 
 ---
 
-## <img src="https://img.shields.io/badge/-DETECTION-2A9D8F?style=for-the-badge&labelColor=1D3557" alt="" /> Detection in Action
-
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/scanner-animation.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="assets/scanner-animation.svg" />
-    <img alt="Scanner Animation" src="assets/scanner-animation.svg" width="800" />
-  </picture>
-</div>
-
-<br/>
-
-**Defense-in-depth prompt injection detector for LLM applications.**<br/>
-<sub>One <code>scan()</code> call. 15 layers. 103+ attack techniques. Fully offline. &lt;10ms.</sub>
-
-<br/>
-
-<a href="#quick-start">Quick Start</a> &middot;
-<a href="#how-it-works">How It Works</a> &middot;
-<a href="docs/ARCHITECTURE.md">Architecture</a>
-
-</div>
-
-<summary>Disclaimer</summary>
----
-
 ## How It Works
 
-Na0S uses an 11-layer cascade pipeline (L0--L10) where layers L0--L4 always execute and layers L5--L10 gracefully degrade if optional dependencies are missing.
+Na0S uses a 21-layer cascade pipeline where core layers (L0-L4) always execute and advanced layers (L5-L16) gracefully degrade if optional dependencies are missing.
 
 ```
 Input -> L0 Sanitize -> L1 Rules -> L2 Obfuscation -> L3 Structural -> L4 ML (TF-IDF)
@@ -284,25 +258,28 @@ python scripts/evaluate_probes.py --buffs --output report.json
 ## Project Structure
 
 ```
-src/na0s/              # Core detection library
-  __init__.py          # Public API: scan(), scan_output(), CascadeClassifier
-  cascade.py           # L6 CascadeClassifier (whitelist + weighted voting)
-  predict.py           # L4 ML prediction pipeline (TF-IDF + LogisticRegression)
-  rules.py             # L1 pattern rules
-  layer0/              # L0 input sanitization
-  layer2.py            # L2 obfuscation detection
-  embedding_classifier.py  # L5 sentence-transformer classifier
-  llm_judge.py         # L7 LLM judge
-  positive_validation.py   # L8 false-positive reduction
-  output_scanner.py    # L9 output scanning
-  canary.py            # L10 canary tokens
-  cli.py               # CLI entry point (na0s scan ...)
-scripts/
-  taxonomy/            # Probe framework (28 probes)
-  evaluate_probes.py   # Probe evaluation runner
-data/
-  taxonomy.yaml        # Attack taxonomy (29 categories, 276 techniques)
-tests/                 # 6,600+ tests
+src/na0s/
+├── predict.py, cascade.py     # Core detection pipeline
+├── signal_boost.py, rules.py  # Scoring and rule engine
+│
+├── canary/          # Canary token detection (7 modules)
+├── detectors/       # Specialized injection detectors (10 modules)
+├── fusion/          # Ensemble fusion and routing (5 modules)
+├── integrity/       # Supply chain and model security (13 modules)
+├── judge/           # LLM judge classification (6 modules)
+├── ml/              # ML classifiers and embeddings (13 modules)
+├── rag/             # RAG pipeline security (7 modules)
+├── worm/            # Worm signature detection (2 modules)
+├── parsers/office/  # Office document deep extraction (7 formats)
+│
+├── layer0/          # Input sanitization, encoding, OCR
+├── layer1/          # Rules engine, pattern matching
+├── layer2/          # Obfuscation decoding
+├── layer15/         # Threat intelligence sync
+└── layer16/         # Conversation-level monitoring
+
+tests/               # 8,500+ tests organized by package
+data/taxonomy.yaml   # 29 attack categories, 276+ techniques
 ```
 
 ---
