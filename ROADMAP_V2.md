@@ -8,7 +8,7 @@ Input -> L0 (Sanitize) -> L1 (Rules) -> L2 (Obfuscation) -> L3 (Structural)
       -> [LLM Output] -> L9 (Output Scan) -> L10 (Canary) -> Verdict
 
 L11 Supply Chain | L12 Probes | L13 Dataset | L14 CI/CD | L15 Threat Intel
-L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxonomy Automation
+L16 Multi-Turn | L17 Doc Scanning (35%) | L18 RAG Security | L19 Agent/MCP | L20 Taxonomy Automation
 ```
 
 | Track | Scope | New Files | Rules | Tests |
@@ -44,12 +44,13 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 | **L14**| `████████████████████` | **21/21**  | COMPLETE |
 | **L15**| `████████████████████` | **18/18**  | COMPLETE |
 | **L16**| `████████████████████` | **17/17**  | COMPLETE |
-| **L17**| `░░░░░░░░░░░░░░░░░░░░` | **0/20**   | NOT STARTED |
+| **L17**| `███████░░░░░░░░░░░░░` | **7/20**   | 35% |
 | **L18**| `░░░░░░░░░░░░░░░░░░░░` | **0/18**   | NOT STARTED |
 | **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
 | **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
 | **Hardening** | `██████████████░░░░░░` | **10/14** | 71% |
-|        |                        | **601/768** | **78%** |
+| **Infra** | `████████████████████` | **—** | Repo reorg (13 phases), CI, Dependabot, CodeQL, SECURITY.md |
+|        |                        | **608/768** | **79%** |
 
 ---
 
@@ -1451,11 +1452,11 @@ SafetyPrompts.com monitor ─┘                        ├─ Dedup check again
 
 ---
 
-## Layer 17: Document Format Scanning (NEW) — Tasks: 0/20 (0%)
+## Layer 17: Document Format Scanning (NEW) — Tasks: 7/20 (35%)
 
-**Files**: None (new layer)
-**Tests**: None
-**Status**: **NOT implemented** — documents parsed only as plain text
+**Files**: `src/na0s/parsers/office/` (8 modules, 3,622 lines), `tests/parsers/office/` (5 test files, 66 tests), `tests/fixtures/office/` (16 binary fixtures + 4 builders), `docs/research/` (5 hiding-spots inventories, 3,122 lines)
+**Tests**: 66 passing (DOCX 12, XLSX 14, PPTX 12, ODF 12, router 16)
+**Status**: **Partially implemented** — office document deep extraction complete (DOCX/XLSX/PPTX/ODF/OLE); pipeline integration and remaining format scanners pending
 
 ### Updated Description
 Layer 17 scans structured document formats (PDF, DOCX/XLSX/PPTX, CSV, source code) for hidden prompt injections before they reach the LLM. Attackers embed invisible instructions in PDF hidden text layers, OOXML XML parts, CSV formula cells, and source code comments. This layer extracts all text (visible and hidden) from documents and runs it through the existing detection pipeline (L0→L1→L2→L4). Research shows PDF invisible text exploits (Snyk 2025), OOXML steganography (IEEE 2025), CSV formula injection in LLM context, and code comment injection (CVE-2025-53773, CVSS 9.6 against GitHub Copilot).
@@ -1463,38 +1464,42 @@ Layer 17 scans structured document formats (PDF, DOCX/XLSX/PPTX, CSV, source cod
 ### TODO List
 
 #### DONE
-- (nothing — layer is new)
+- [x] **Add DOCX/XLSX/PPTX/ODF/OLE scanning** — Full office parser suite with deep extraction of hidden injection surfaces. DOCX (19 surfaces: comments, tracked changes, hidden text, field codes, custom XML, smart tags), XLSX (12 surfaces: hidden/veryHidden sheets, comments, defined names, formulas, data validation), PPTX (13 surfaces: speaker notes, hidden slides, alt text, modern comments, tags), ODF (17 surfaces: annotations, hidden text/paragraphs/sections/sheets/slides, scripts), OLE legacy (3 tiers: metadata, VBA macros, raw string extraction). Magic-byte format detection, zip-bomb safety, malformed-XML safety. 66 tests against real injected binary fixtures. `src/na0s/parsers/office/` (3,622 lines). ✅ DONE (2026-04-11) — PR #18.
+- [x] **OOXMLScanner** — Implemented as `parsers/office/` with DOCX, XLSX, PPTX extractors. Extracts comments, tracked changes, hidden sheets/slides, speaker notes, metadata, custom properties, field codes, alt text, VBA macros — 61+ extraction surfaces total. ✅ DONE (2026-04-11) — PR #18.
+- [x] **Add image metadata extraction** — EXIF/IPTC/XMP via Pillow; scan for injection payloads. ✅ DONE (2026-02-18) — 88 tests in test_exif_xmp_extraction.py.
+- [x] **5 hiding-spots research inventories** — 3,122 lines of analysis covering DOCX, XLSX, PPTX, ODF, OLE hiding locations with XML paths, tags, citations, and priority tiers. `docs/research/hiding_spots_*.md`. ✅ DONE (2026-04-11).
+- [x] **Test fixture builder infrastructure** — 4 builder scripts generating 16 real injected binary test fixtures (DOCX 4, XLSX 4, PPTX 4, ODF 4). `tests/fixtures/office/_builders/`. ✅ DONE (2026-04-11).
+- [x] **Router with magic-byte format detection** — `parsers/office/router.py` dispatches to correct extractor based on magic bytes (PK→OOXML/ODF, OLE magic→legacy). Rejects Apple .pages with explicit error. ✅ DONE (2026-04-11).
+- [x] **End-to-end router tests** — 16 tests verifying format detection + extraction for all formats + error cases. `tests/parsers/office/test_router.py`. ✅ DONE (2026-04-11).
 
-#### NEW (All items are new)
-- [ ] **Add DOCX/XLSX scanning** — Parse ZIP+XML to extract metadata, comments, track changes, hidden sheets; scan all fields for injection patterns. Source: IM0003 Coverage Gap #15. **Priority**: P1. **Effort**: Medium.
+#### REMAINING — Pipeline Integration (P0)
+- [ ] **Wire `router.extract()` into `predict.scan()`** — Feed each ExtractedArtifact's `.text` through `scan()`, tag results with `.location` so users know WHERE in the document the injection was found. Create `scan_document(data: bytes) -> list[ScanResult]` public API. **Files**: `src/na0s/parsers/office/integration.py`, `src/na0s/__init__.py`. **Effort**: 3-4 hrs. **Priority**: P0.
+- [ ] **Hardening pass** — Zip-bomb edge cases (nested ZIPs, ratio bombs), encrypted document detection + clear errors, malformed XML edge cases (billion laughs, entity expansion), Unicode edge cases in XML content. **Effort**: 2-3 hrs. **Priority**: P1.
+
+#### REMAINING — Additional Format Scanners (P1-P3)
 - [ ] **Add CSV injection detection** — Formula injection (`=CMD()`, `=SYSTEM()`), comment injection, delimiter confusion. Source: IM0003 Coverage Gap #16. **Priority**: P1. **Effort**: Easy.
 - [ ] **Add code comment scanning** — Extract comments/docstrings from Python, JS, HTML, YAML; scan for injection payloads (INSEC attack vector, arXiv:2408.02509). Source: IM0003 Coverage Gap #17. **Priority**: P1. **Effort**: Medium.
-- [ ] **Integrate OCR** for image text extraction — pytesseract; detect tiny/invisible text (font height < 5px). Source: IM0003 Coverage Gap #25. **Priority**: P2.
-- [ ] **Add image metadata extraction** — EXIF/IPTC/XMP via Pillow; scan for injection payloads. Source: IM0003 Coverage Gap #26. **Priority**: P2.
+- [ ] **PDFScanner (deep/hidden layers)** — Extract ALL text layers (visible + invisible/white-on-white) using `pdfminer.six` or `PyMuPDF`. Parse metadata fields and annotations. Check for text-color matches with background. Basic PDF extraction exists in `layer0/doc_extractor.py` but does not detect hidden text. **Effort**: Medium.
+- [ ] **CSVScanner** — Check for formula-prefix characters (`=`, `+`, `-`, `@`, `\t`, `\r`) in cells. Scan cell contents for injection patterns. **Effort**: Easy.
+- [ ] **CodeCommentScanner** — Extract comments from source files (Python `#`, JS `//`, `/* */`, HTML `<!-- -->`). Scan comments for instruction-like language patterns. Addresses CVE-2025-53773. **Effort**: Easy-Medium.
+- [ ] **Integrate OCR** for image text extraction — pytesseract; detect tiny/invisible text (font height < 5px). Source: IM0003 Coverage Gap #25. **Priority**: P2. Note: `layer0/ocr_extractor.py` already exists.
 - [ ] **Integrate Whisper** for audio transcription analysis — adversarial prefix detection, special token exploitation. Source: IM0003 Coverage Gap #27. **Priority**: P3.
 - [ ] **Add adversarial image perturbation detection** — Bagdasaryan et al., arXiv:2307.10490. Source: Coverage Gap #28. **Priority**: P3.
 - [ ] **Add typographic attack detection** — OCR + layout analysis (19+ papers, ECCV 2024). Source: Coverage Gap #29. **Priority**: P3.
 - [ ] **Add QR/barcode decoding** — pyzbar integration. Source: IM0003 Coverage Gap #31. **Priority**: P3.
-**P1 — High impact, moderate effort:**
-- [ ] **PDFScanner** — Extract ALL text layers (visible + invisible/white-on-white) using `pdfminer.six` or `PyMuPDF`. Parse metadata fields and annotations. Check for text-color matches with background. Run extracted text through injection detector. **Effort**: Medium.
-- [ ] **OOXMLScanner** — Unzip OOXML archives (.docx, .xlsx, .pptx), parse all XML parts (not just main document). Check for hidden text (white font, font-size:1, hidden XML attributes). Extract comments, tracked changes, footnotes, headers/footers. Scan all extracted text. **Effort**: Medium.
-- [ ] **CSVScanner** — Check for formula-prefix characters (`=`, `+`, `-`, `@`, `\t`, `\r`) in cells. Scan cell contents for injection patterns. Flag cells with excessive length or unusual encoding. Strip/escape formula prefixes before LLM ingestion. **Effort**: Easy.
-- [ ] **CodeCommentScanner** — Extract comments from source files (Python `#`, JS `//`, `/* */`, HTML `<!-- -->`). Scan comments for instruction-like language patterns. Addresses CVE-2025-53773. **Effort**: Easy-Medium.
-
-**P2 — Heavier dependencies:**
-- [ ] **RTF/legacy format scanner** — Parse RTF control words for hidden text. **Effort**: Medium.
-- [ ] **Email (.eml/.msg) scanner** — Parse MIME parts, extract text from HTML and attachments. **Effort**: Medium.
-- [ ] **SVG scanner** — Parse SVG XML for embedded text, scripts, and foreignObject content. **Effort**: Easy.
+- [ ] **RTF/legacy format scanner** — Parse RTF control words for hidden text. **Effort**: Medium. **Priority**: P2.
+- [ ] **Email (.eml/.msg) scanner** — Parse MIME parts, extract text from HTML and attachments. **Effort**: Medium. **Priority**: P2.
+- [ ] **SVG scanner** — Parse SVG XML for embedded text, scripts, and foreignObject content. **Effort**: Easy. **Priority**: P2.
 - [ ] **LSB steganography detection (M1.2)** — Check least-significant bits in images for hidden data. **Priority**: P2.
-- [ ] **Microsoft MarkItDown** — Unified parser for PDF/DOCX/PPTX/XLSX as alternative to individual scanners. **Priority**: P2.
-
-**P3 — Research-dependent:**
 - [ ] **Font-based attacks** — Detect invisible/near-invisible text via font manipulation (white-on-white, font-size:1px, zero-width fonts). **Priority**: P3.
 - [ ] **Visual prompt injection detection (CLIP)** — Use CLIP or similar vision-language model to detect text-in-image injection. **Priority**: P3.
 
 ### Implementation Plan
-**Phase 1 (P1)**: PDFScanner + OOXMLScanner + CSVScanner + CodeCommentScanner
-**Phase 2 (P2)**: RTF, email, SVG scanners, LSB stego, MarkItDown, adversarial document generation for testing
+**Phase 1 (DONE)**: Office document parser — DOCX/XLSX/PPTX/ODF/OLE extractors ✅
+**Phase 2 (NEXT)**: Pipeline integration — wire extractors into scan(), hardening pass
+**Phase 3 (P1)**: CSV + code comment scanners, PDF deep hidden-text detection
+**Phase 4 (P2)**: RTF, email, SVG scanners, LSB stego
+**Phase 5 (P3)**: Whisper, CLIP, adversarial image, QR/barcode
 **Phase 3 (P3)**: Font-based attacks, visual prompt injection (CLIP), adversarial OCR robustness
 
 ---
