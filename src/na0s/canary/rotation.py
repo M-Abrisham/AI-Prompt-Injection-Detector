@@ -94,6 +94,7 @@ class RotatingCanaryManager:
             all_canaries.append(self._active)
 
         for canary in all_canaries:
+            # Substring search — timing-safe comparison not applicable (see manager._is_present)
             if canary.token in output_text:
                 canary.record_trigger()
                 triggered.append(canary)
