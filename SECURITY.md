@@ -33,15 +33,7 @@ If you believe you have found a security vulnerability in Na0S, please report it
 
 Send your report to: **security@na0s.dev**
 
-For sensitive reports, encrypt your message using our PGP key:
-
-```
------BEGIN PGP PUBLIC KEY BLOCK-----
-[PGP key will be published at https://na0s.dev/.well-known/pgp-key.asc]
------END PGP PUBLIC KEY BLOCK-----
-```
-
-> **Note:** The PGP key and secure email channel are being provisioned. Until the key is published, please use GitHub Private Vulnerability Reporting as your primary channel.
+If your report contains highly sensitive material, please use GitHub Private Vulnerability Reporting (preferred) which provides end-to-end encrypted communication with the maintainer.
 
 ---
 
