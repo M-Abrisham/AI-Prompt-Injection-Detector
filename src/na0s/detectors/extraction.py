@@ -51,19 +51,19 @@ def _add(category, name, severity, technique_ids, pattern):
 
 # ---- Category 1: Completion Trick (E1.3) ----
 # Attacker starts a sentence the system prompt might complete.
-_add("completion", "completion_my_instructions", "high", ["E1.3", "E1"],
+_add("completion", "completion_my_instructions", "critical", ["E1.3", "E1"],
      r"\b(?:my|the|your)\s+(?:instructions?|directives?|guidelines?|rules?|configuration)\s+"
      r"(?:are|say|state|read|tell\s+me\s+to|specify)\s*:")
-_add("completion", "completion_system_prompt_says", "high", ["E1.3", "E1"],
+_add("completion", "completion_system_prompt_says", "critical", ["E1.3", "E1"],
      r"\b(?:my|the|your)\s+(?:system\s+)?prompt\s+(?:says?|reads?|states?|is)\s*:")
-_add("completion", "completion_developer_told", "high", ["E1.3", "E1"],
+_add("completion", "completion_developer_told", "critical", ["E1.3", "E1"],
      r"\b(?:the\s+)?(?:developer|creator|designer|engineer|programmer)\s+"
      r"(?:told|instructed|asked|programmed|configured)\s+(?:me|you)\s+to\s*:")
-_add("completion", "completion_beginning_was", "high", ["E1.3", "E1"],
+_add("completion", "completion_beginning_was", "critical", ["E1.3", "E1"],
      r"\b(?:the\s+)?(?:beginning|start|opening|first\s+part)\s+"
      r"(?:of\s+)?(?:this\s+)?(?:conversation|session|chat|dialogue)\s+"
      r"(?:was|said|started\s+with)\s*:")
-_add("completion", "completion_continue_sentence", "high", ["E1.3", "E1"],
+_add("completion", "completion_continue_sentence", "critical", ["E1.3", "E1"],
      r"\b(?:complete|continue|finish|extend)\s+(?:this|the\s+following)\s*(?:sentence|text|phrase)?\s*:\s*"
      r"(?:['\"])?(?:you\s+are|your\s+(?:role|task|purpose|job)\s+is)")
 
