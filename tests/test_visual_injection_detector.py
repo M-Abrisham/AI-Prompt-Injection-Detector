@@ -265,7 +265,7 @@ class TestDetectTinyFont:
         score, indicators, tids = _detect_tiny_font_text("", b"")
         assert score == 0.0
 
-    @mock.patch("na0s.visual_injection_detector._HAS_PIL", True)
+    @mock.patch("na0s.detectors.visual_injection._HAS_PIL", True)
     def test_high_density_text(self):
         """Very dense text relative to image size should trigger."""
         # Create a mock 10x10 image (100 pixels = 0.0001 MP)
@@ -273,7 +273,7 @@ class TestDetectTinyFont:
         mock_img = mock.MagicMock()
         mock_img.size = (10, 10)
 
-        with mock.patch("na0s.visual_injection_detector.Image") as mock_pil:
+        with mock.patch("na0s.detectors.visual_injection.Image") as mock_pil:
             mock_pil.open.return_value = mock_img
             text = "A" * 300
             score, indicators, tids = _detect_tiny_font_text(text, _TINY_PNG)
@@ -281,20 +281,20 @@ class TestDetectTinyFont:
             assert any(i.indicator_type == "tiny_font_heuristic" for i in indicators)
             assert "M1.3" in tids
 
-    @mock.patch("na0s.visual_injection_detector._HAS_PIL", True)
+    @mock.patch("na0s.detectors.visual_injection._HAS_PIL", True)
     def test_normal_density_text(self):
         """Normal text density should not trigger."""
         mock_img = mock.MagicMock()
         mock_img.size = (1920, 1080)  # 2 MP
 
-        with mock.patch("na0s.visual_injection_detector.Image") as mock_pil:
+        with mock.patch("na0s.detectors.visual_injection.Image") as mock_pil:
             mock_pil.open.return_value = mock_img
             text = "Hello world"
             score, indicators, tids = _detect_tiny_font_text(text, _TINY_PNG)
             assert score == 0.0
             assert indicators == []
 
-    @mock.patch("na0s.visual_injection_detector._HAS_PIL", False)
+    @mock.patch("na0s.detectors.visual_injection._HAS_PIL", False)
     def test_no_pil(self):
         score, indicators, tids = _detect_tiny_font_text("text", b"data")
         assert score == 0.0
@@ -306,12 +306,12 @@ class TestDetectTinyFont:
 
 
 class TestDetectLowContrast:
-    @mock.patch("na0s.visual_injection_detector._HAS_PIL", False)
+    @mock.patch("na0s.detectors.visual_injection._HAS_PIL", False)
     def test_no_pil(self):
         score, indicators, tids = _detect_low_contrast_text(b"data")
         assert score == 0.0
 
-    @mock.patch("na0s.visual_injection_detector._HAS_PIL", True)
+    @mock.patch("na0s.detectors.visual_injection._HAS_PIL", True)
     def test_uniform_image(self):
         """Image with nearly uniform pixel values should trigger."""
         mock_img = mock.MagicMock()
@@ -319,14 +319,14 @@ class TestDetectLowContrast:
         # All pixels same value -> std_dev = 0
         mock_img.getdata.return_value = [200] * 100
 
-        with mock.patch("na0s.visual_injection_detector.Image") as mock_pil:
+        with mock.patch("na0s.detectors.visual_injection.Image") as mock_pil:
             mock_pil.open.return_value = mock_img
             score, indicators, tids = _detect_low_contrast_text(_TINY_PNG)
             assert score >= 0.5
             assert any(i.indicator_type == "low_contrast_text" for i in indicators)
             assert "M1.3" in tids
 
-    @mock.patch("na0s.visual_injection_detector._HAS_PIL", True)
+    @mock.patch("na0s.detectors.visual_injection._HAS_PIL", True)
     def test_high_contrast_image(self):
         """Image with high variance should not trigger."""
         mock_img = mock.MagicMock()
@@ -334,7 +334,7 @@ class TestDetectLowContrast:
         # Alternating black and white pixels -> high std_dev
         mock_img.getdata.return_value = [0, 255] * 50
 
-        with mock.patch("na0s.visual_injection_detector.Image") as mock_pil:
+        with mock.patch("na0s.detectors.visual_injection.Image") as mock_pil:
             mock_pil.open.return_value = mock_img
             score, indicators, tids = _detect_low_contrast_text(_TINY_PNG)
             assert score == 0.0
@@ -371,7 +371,7 @@ class TestScanImage:
             # Should not raise, should have warnings
             assert isinstance(result, VisualInjectionResult)
 
-    @mock.patch("na0s.visual_injection_detector._HAS_PIL", True)
+    @mock.patch("na0s.detectors.visual_injection._HAS_PIL", True)
     @mock.patch("na0s.layer0.ocr_extractor.extract_image_metadata")
     @mock.patch("na0s.layer0.ocr_extractor.extract_text_from_image")
     def test_clean_image(self, mock_ocr, mock_meta):
@@ -386,7 +386,7 @@ class TestScanImage:
         mock_img.convert.return_value = mock_img
         mock_img.getdata.return_value = [0, 255] * 50  # high contrast
 
-        with mock.patch("na0s.visual_injection_detector.Image") as mock_pil:
+        with mock.patch("na0s.detectors.visual_injection.Image") as mock_pil:
             mock_pil.open.return_value = mock_img
             result = scan_image(_TINY_PNG)
             assert result.is_suspicious is False
@@ -477,7 +477,7 @@ class TestScanImageFile:
         img_path.write_bytes(_TINY_PNG)
 
         with mock.patch(
-            "na0s.visual_injection_detector.scan_image"
+            "na0s.detectors.visual_injection.scan_image"
         ) as mock_scan:
             mock_scan.return_value = VisualInjectionResult()
             scan_image_file(str(img_path))
@@ -498,12 +498,12 @@ class TestScanDocumentVisualPDF:
         result = scan_document_visual(b"data", "xlsx")
         assert any("Unsupported" in w for w in result.warnings)
 
-    @mock.patch("na0s.visual_injection_detector._HAS_PYMUPDF", False)
+    @mock.patch("na0s.detectors.visual_injection._HAS_PYMUPDF", False)
     def test_no_pymupdf(self):
         result = scan_document_visual(b"%PDF-fake", "pdf")
         assert result.is_suspicious is False
 
-    @mock.patch("na0s.visual_injection_detector._HAS_PYMUPDF", True)
+    @mock.patch("na0s.detectors.visual_injection._HAS_PYMUPDF", True)
     def test_pdf_tiny_font(self):
         """PDF with tiny font text should trigger indicator."""
         mock_page = mock.MagicMock()
@@ -525,7 +525,7 @@ class TestScanDocumentVisualPDF:
         mock_doc.__len__ = mock.MagicMock(return_value=1)
         mock_doc.__getitem__ = mock.MagicMock(return_value=mock_page)
 
-        with mock.patch("na0s.visual_injection_detector.fitz", create=True) as mock_fitz:
+        with mock.patch("na0s.detectors.visual_injection.fitz", create=True) as mock_fitz:
             mock_fitz.TEXT_PRESERVE_WHITESPACE = 1
             mock_fitz.open.return_value = mock_doc
             result = scan_document_visual(b"%PDF-data", "pdf")
@@ -536,7 +536,7 @@ class TestScanDocumentVisualPDF:
             )
             assert "M1.4" in result.technique_ids
 
-    @mock.patch("na0s.visual_injection_detector._HAS_PYMUPDF", True)
+    @mock.patch("na0s.detectors.visual_injection._HAS_PYMUPDF", True)
     def test_pdf_white_text(self):
         """PDF with white text should trigger indicator."""
         mock_page = mock.MagicMock()
@@ -558,7 +558,7 @@ class TestScanDocumentVisualPDF:
         mock_doc.__len__ = mock.MagicMock(return_value=1)
         mock_doc.__getitem__ = mock.MagicMock(return_value=mock_page)
 
-        with mock.patch("na0s.visual_injection_detector.fitz", create=True) as mock_fitz:
+        with mock.patch("na0s.detectors.visual_injection.fitz", create=True) as mock_fitz:
             mock_fitz.TEXT_PRESERVE_WHITESPACE = 1
             mock_fitz.open.return_value = mock_doc
             result = scan_document_visual(b"%PDF-data", "pdf")
@@ -568,7 +568,7 @@ class TestScanDocumentVisualPDF:
                 for i in result.injection_indicators
             )
 
-    @mock.patch("na0s.visual_injection_detector._HAS_PYMUPDF", True)
+    @mock.patch("na0s.detectors.visual_injection._HAS_PYMUPDF", True)
     def test_pdf_annotation_text(self):
         """PDF with annotation text should trigger indicator."""
         mock_annot = mock.MagicMock()
@@ -582,7 +582,7 @@ class TestScanDocumentVisualPDF:
         mock_doc.__len__ = mock.MagicMock(return_value=1)
         mock_doc.__getitem__ = mock.MagicMock(return_value=mock_page)
 
-        with mock.patch("na0s.visual_injection_detector.fitz", create=True) as mock_fitz:
+        with mock.patch("na0s.detectors.visual_injection.fitz", create=True) as mock_fitz:
             mock_fitz.TEXT_PRESERVE_WHITESPACE = 1
             mock_fitz.open.return_value = mock_doc
             result = scan_document_visual(b"%PDF-data", "pdf")
@@ -592,7 +592,7 @@ class TestScanDocumentVisualPDF:
                 for i in result.injection_indicators
             )
 
-    @mock.patch("na0s.visual_injection_detector._HAS_PYMUPDF", True)
+    @mock.patch("na0s.detectors.visual_injection._HAS_PYMUPDF", True)
     def test_pdf_normal_text(self):
         """PDF with normal visible text should not trigger."""
         mock_page = mock.MagicMock()
@@ -614,7 +614,7 @@ class TestScanDocumentVisualPDF:
         mock_doc.__len__ = mock.MagicMock(return_value=1)
         mock_doc.__getitem__ = mock.MagicMock(return_value=mock_page)
 
-        with mock.patch("na0s.visual_injection_detector.fitz", create=True) as mock_fitz:
+        with mock.patch("na0s.detectors.visual_injection.fitz", create=True) as mock_fitz:
             mock_fitz.TEXT_PRESERVE_WHITESPACE = 1
             mock_fitz.open.return_value = mock_doc
             result = scan_document_visual(b"%PDF-data", "pdf")
@@ -631,12 +631,12 @@ class TestScanDocumentVisualPDF:
 
 
 class TestScanDocumentVisualDOCX:
-    @mock.patch("na0s.visual_injection_detector._HAS_DOCX", False)
+    @mock.patch("na0s.detectors.visual_injection._HAS_DOCX", False)
     def test_no_docx_lib(self):
         result = scan_document_visual(b"PK\x03\x04data", "docx")
         assert result.is_suspicious is False
 
-    @mock.patch("na0s.visual_injection_detector._HAS_DOCX", True)
+    @mock.patch("na0s.detectors.visual_injection._HAS_DOCX", True)
     def test_docx_tiny_font(self):
         """DOCX with tiny font text should trigger."""
         mock_run = mock.MagicMock()
@@ -650,7 +650,7 @@ class TestScanDocumentVisualDOCX:
         mock_document = mock.MagicMock()
         mock_document.paragraphs = [mock_para]
 
-        with mock.patch("na0s.visual_injection_detector.docx", create=True) as mock_docx_mod:
+        with mock.patch("na0s.detectors.visual_injection.docx", create=True) as mock_docx_mod:
             mock_docx_mod.Document.return_value = mock_document
             result = scan_document_visual(b"PK\x03\x04data", "docx")
             assert result.is_suspicious is True
@@ -660,7 +660,7 @@ class TestScanDocumentVisualDOCX:
             )
             assert "M1.4" in result.technique_ids
 
-    @mock.patch("na0s.visual_injection_detector._HAS_DOCX", True)
+    @mock.patch("na0s.detectors.visual_injection._HAS_DOCX", True)
     def test_docx_white_text(self):
         """DOCX with white text should trigger."""
         mock_run = mock.MagicMock()
@@ -675,7 +675,7 @@ class TestScanDocumentVisualDOCX:
         mock_document = mock.MagicMock()
         mock_document.paragraphs = [mock_para]
 
-        with mock.patch("na0s.visual_injection_detector.docx", create=True) as mock_docx_mod:
+        with mock.patch("na0s.detectors.visual_injection.docx", create=True) as mock_docx_mod:
             mock_docx_mod.Document.return_value = mock_document
             result = scan_document_visual(b"PK\x03\x04data", "docx")
             assert result.is_suspicious is True
@@ -684,7 +684,7 @@ class TestScanDocumentVisualDOCX:
                 for i in result.injection_indicators
             )
 
-    @mock.patch("na0s.visual_injection_detector._HAS_DOCX", True)
+    @mock.patch("na0s.detectors.visual_injection._HAS_DOCX", True)
     def test_docx_normal_text(self):
         """DOCX with normal text should not trigger visual indicators."""
         mock_run = mock.MagicMock()
@@ -699,7 +699,7 @@ class TestScanDocumentVisualDOCX:
         mock_document = mock.MagicMock()
         mock_document.paragraphs = [mock_para]
 
-        with mock.patch("na0s.visual_injection_detector.docx", create=True) as mock_docx_mod:
+        with mock.patch("na0s.detectors.visual_injection.docx", create=True) as mock_docx_mod:
             mock_docx_mod.Document.return_value = mock_document
             result = scan_document_visual(b"PK\x03\x04data", "docx")
             assert not any(
@@ -729,14 +729,14 @@ class TestGracefulDegradation:
 
     def test_scan_document_pdf_no_lib(self):
         with mock.patch(
-            "na0s.visual_injection_detector._HAS_PYMUPDF", False
+            "na0s.detectors.visual_injection._HAS_PYMUPDF", False
         ):
             result = scan_document_visual(b"%PDF", "pdf")
             assert isinstance(result, VisualInjectionResult)
 
     def test_scan_document_docx_no_lib(self):
         with mock.patch(
-            "na0s.visual_injection_detector._HAS_DOCX", False
+            "na0s.detectors.visual_injection._HAS_DOCX", False
         ):
             result = scan_document_visual(b"PK\x03\x04", "docx")
             assert isinstance(result, VisualInjectionResult)
