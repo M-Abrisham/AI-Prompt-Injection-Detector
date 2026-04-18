@@ -56,356 +56,254 @@ L16 Multi-Turn | L17 Doc Scanning (35%) | L18 RAG Security | L19 Agent/MCP | L20
 
 ## Layer 0: Input Sanitization & Gating — Tasks: 58/58 (COMPLETE)
 
-**Files**: `src/layer0/` (14 files: `__init__.py`, `result.py`, `sanitizer.py`, `validation.py`, `normalization.py`, `encoding.py`, `html_extractor.py`, `tokenization.py`, `input_loader.py`, `mime_parser.py`, `safe_regex.py`, `content_type.py`, `ocr_extractor.py`, `doc_extractor.py`)
-**Tests**: `tests/test_layer0_size_gate.py` (23 tests), `tests/test_unicode_bypass.py` (45 tests), `tests/test_layer0_hypothesis.py` (40 property-based tests), `tests/test_input_loader.py` (48 tests), `tests/test_open_redirect.py` (9 tests), `tests/test_mime_parser.py` (24 tests), `tests/test_safe_regex.py` (33 tests), `tests/test_content_type.py` (107 tests), `tests/test_ocr_extractor.py` (27 tests), `tests/test_doc_extractor.py` (32 tests), `tests/test_pdf_javascript.py` (24 tests)
-
 ### Description
-Layer 0 is the mandatory first gate for all input. It validates type/size, normalizes Unicode (NFKC), strips invisible characters, canonicalizes whitespace, extracts safe text from HTML, detects tokenization anomalies via tiktoken, extracts text from images via OCR (EasyOCR/Tesseract), and parses documents (PDF/DOCX/RTF/XLSX/PPTX) with graceful fallback when optional dependencies are missing. Every downstream layer receives sanitized input. Integrated into `predict.py`, `cascade.py`, and `predict_embedding.py` as of 2026-02-14.
+Layer 0 is the first processing gate for all input. Every downstream layer receives sanitized text — no raw input reaches the ML classifiers or rules engine. Integrated into `predict.py`, `cascade.py`, and `ml/predict_embedding.py`.
 
-### TODO List
+The 19-step sanitization pipeline covers: input validation (type/size limits), encoding detection (chardet + BOM), ftfy mojibake repair, NFKC Unicode normalization, Cyrillic/Greek homoglyph confusable mapping, Unicode Tag Character and Variation Selector steganography extraction, character-level reassembly (space/dot-separated evasion), carriage return normalization, invisible character stripping (Cf/Cs/Cc/Cn), whitespace canonicalization, HTML hidden-content detection, 35+ magic-byte content-type detection with polyglot and mismatch checks, tiktoken tokenization anomaly detection, EXIF/XMP metadata extraction, OCR text extraction (EasyOCR/Tesseract), document parsing (PDF/DOCX/RTF/XLSX/PPTX), language detection, and PII pre-screening. All optional dependencies guarded with `try/except ImportError`.
 
-- [x] `Layer0Result` dataclass with sanitized_text, anomaly_flags, rejected, rejection_reason — `result.py`
-- [x] `layer0_sanitize()` entry point orchestrating all steps — `sanitizer.py`
-- [x] Fail-fast validation: type guard, empty guard, size limits (char + byte, env-configurable) — `validation.py`
-- [x] NFKC Unicode normalization (fullwidth, ligatures, superscripts, compatibility forms) — `normalization.py`
-- [x] Invisible character stripping (Cf, Cc, Cn categories) — `normalization.py`
-- [x] Whitespace canonicalization (Unicode variants → ASCII space, collapse runs) — `normalization.py`
-- [x] Encoding detection via chardet with BOM priority — `encoding.py`
-- [x] HTML tag stripping and hidden-content detection (display:none, opacity:0, font-size:0) — `html_extractor.py`
-- [x] Tokenization anomaly detection with tiktoken (global + sliding window) — `tokenization.py`
-- [x] FingerprintStore (SQLite, WAL mode, TTL pruning, LRU eviction) — `tokenization.py`
-- [x] Integration with `predict.py:scan()` — L0 runs before ML/rules
+**Target directory structure** (v1.0.0 refactor — `layer0/` → `input/`):
+```
+src/na0s/input/                                 tests/input/
+│                                               │
+├── __init__.py       ← public API + docstring  ├── __init__.py
+├── result.py         ← Layer0Result dataclass  │
+├── sanitizer.py      ← entry: 19-step pipeline ├── test_layer0_size_gate.py
+│                                               ├── test_layer0_hypothesis.py  ← 40 property-based tests
+│                                               │
+├── validation.py     ← step 1: type/size       ├── test_unicode_bypass.py     ← 68 tests
+├── encoding.py       ← step 2: chardet + BOM   ├── test_encoding.py
+├── normalization.py  ← steps 3-11: Unicode,    ├── test_ftfy_integration.py
+│                       stego, reassembly,       ├── test_homoglyph_detection.py
+│                       whitespace               ├── test_tag_stego.py
+│                                               ├── test_variation_selector_stego.py
+│                                               │
+├── html_extractor.py ← step 12: HTML           ├── test_html_extractor.py
+├── content_type.py   ← step 13: magic bytes,   ├── test_content_type.py       ← 128 tests
+│                       polyglot, mismatch       ├── test_content_type_mismatch.py
+│                                               │
+├── tokenization.py   ← step 14: tiktoken       ├── test_tokenization.py
+│                                               ├── test_tiktoken_guard.py
+│                                               │
+├── ocr_extractor.py  ← steps 15-16: EXIF + OCR ├── test_ocr_extractor.py
+│                                               ├── test_exif_metadata.py
+│                                               ├── test_exif_xmp_extraction.py
+│                                               │
+├── doc_extractor.py  ← step 17: PDF/DOCX/      ├── test_doc_extractor.py
+│                       RTF/XLSX/PPTX            ├── test_pdf_javascript.py
+│                                               │
+├── image_threat.py   ← adversarial image detect ├── test_layer0_image_threat.py
+├── language_detector.py ← step 18: langdetect   ├── test_language_detector.py
+├── pii_detector.py   ← step 19: PII screening  ├── test_pii_detector.py
+│                                               │
+├── input_loader.py   ← file/URL/bytes intake   ├── test_input_loader.py
+│                                               ├── test_open_redirect.py
+│                                               │
+├── mime_parser.py    ← MIME multipart parsing   ├── test_mime_parser.py
+├── safe_regex.py     ← ReDoS-safe regex engine  ├── test_safe_regex.py
+├── resource_guard.py ← size/depth/memory limits ├── test_resource_guard.py
+│                                               ├── test_resource_exhaustion.py
+├── timeout.py        ← per-step timeouts        ├── test_timeout.py
+│                                               │
+│                                               ├── test_l0_config.py          ← env var overrides
+│                                               ├── test_l0_flag_mapping.py    ← predict.py flag wiring
+│                                               │
+└── parsers/office/   ← deep doc extraction     └── parsers/office/            ← already organized
+    ├── base.py         (61+ hidden surfaces)       ├── test_docx.py           ← 12 tests
+    ├── router.py                                   ├── test_xlsx.py           ← 14 tests
+    ├── docx_extractor.py                           ├── test_pptx.py           ← 12 tests
+    ├── xlsx_extractor.py                           ├── test_odf.py            ← 12 tests
+    ├── pptx_extractor.py                           └── test_router.py         ← 16 tests
+    ├── odf_extractor.py
+    └── ole_extractor.py
 
-#### Bugs ---> Fixes
-- [x] **BUG-1 (HIGH)**: All-invisible input produces empty sanitized_text without rejection. `validate_input()` runs BEFORE normalization, so `"\u200b\u200b\u200b"` passes empty check then becomes `""` after stripping. **Fix**: Add post-normalization empty check in `sanitizer.py`. ✅ DONE (2026-02-14)
-- [x] **BUG-2 (MEDIUM)**: `_get_default_store()` singleton init is not thread-safe. Race condition on concurrent first access. **Fix**: Add `threading.Lock()`. ✅ DONE (2026-02-14)
-- [x] **BUG-3 (LOW)**: `FingerprintStore.check()` uses `.format(col)` for SQL column names. Not exploitable today (hardcoded cols) but fragile. **Fix**: Add column name whitelist assertion. ✅ DONE (2026-02-14)
-- [x] **BUG-4 (HIGH)**: `predict.py:_L0_FLAG_MAP` references `"zero_width_stripped"` — Layer 0 never emits this flag. Actual flag is `"invisible_chars_found"`. D5.2 technique is never tagged. ✅ DONE (2026-02-14)
-- [x] **BUG-5 (HIGH)**: `_L0_FLAG_MAP` also references `"high_compression_ratio"` — Layer 0 never emits this. Dead mapping. ✅ DONE (2026-02-14)
-- [x] **BUG-6 (MEDIUM)**: 13+ Layer 0 flags are missing from `_L0_FLAG_MAP` in predict.py, so technique tags are not emitted for: `unicode_whitespace_normalized`, `bom_detected_*`, `tokenization_spike`, `tokenization_spike_local`, `suspicious_html_comment`, `embedded_pdf`, etc. ✅ DONE (2026-02-14) — 11 missing mappings added
-- [x] **BUG-7 (MEDIUM)**: `register_malicious()` in predict.py is called with raw text, not sanitized text. Fingerprint lookups happen on post-normalization text. Mismatch means obfuscated variants don't get fingerprint matches. ✅ DONE (2026-02-14)
-- [x] **BUG-8 (LOW)**: `cascade.py` does NOT call `layer0_sanitize()` — returns `l0_stub`. All cascade input is unsanitized. ✅ DONE (2026-02-14)
-- [x] **BUG-9 (LOW)**: `predict_embedding.py` does NOT call `layer0_sanitize()` — embedding model receives raw input. ✅ DONE (2026-02-14)
-- [x] **ftfy integration** for mojibake repair (fixes broken Unicode from encoding mismatches). Pure Python, complements NFKC. **Effort**: Easy. `pip install ftfy`, call `ftfy.fix_text()` before NFKC. ✅ DONE (2026-02-17) — Added as Step 0 in normalization.py (before NFKC), graceful fallback if not installed, `fix_character_width=False` to avoid NFKC overlap, `mojibake_repaired` anomaly flag, 22 tests in test_ftfy_integration.py. Also includes workarounds for ftfy upstream bugs: #222 (string-start boundary fix), #149 (post-ftfy integrity validation against wrong corrections), version pinned to `>=6.2,<7` (6.2 fixes critical #202 Cyrillic bug).
-- [x] **Cyrillic homoglyph confusable mapping (D5.3)** using Unicode TR39 `confusables.txt` data. ✅ DONE (2026-02-18) — Zero-dependency implementation: 75-entry curated mapping (Cyrillic→Latin, Greek→Latin, Armenian→Latin) in normalization.py. Per-word mixed-script detection preserves legitimate multilingual text (pure Cyrillic/Greek untouched). Added as Step 1.5 in normalize_text() (after NFKC, before invisible strip). `mixed_script_homoglyphs` anomaly flag. 107 tests in test_homoglyph_detection.py. 12 `@expectedFailure` tests promoted to passing across C1, D4, D7, D8, E2, P1 categories.
-- [x] **Unicode Tag Characters stego (U+E0001-U+E007F)** — invisible chars that map 1:1 to ASCII. `_extract_tag_stego()` added to normalization.py Step 1.9 (before invisible strip). Decoded payload appended to sanitized text for downstream scanning. Anomaly flag `unicode_tag_stego` + `source_metadata["tag_stego_decoded"]`. 31 tests. Na0S is the ONLY open-source tool that extracts+scans hidden tag messages (all competitors only strip). ✅ DONE (2026-02-22)
-- [x] **Variation Selector stego detection** — `_extract_variation_selector_stego()` + `_strip_variation_selectors()` added to normalization.py Step 1.95. Detects full-byte mapping scheme (VS1-VS256 → bytes 0-255) used in npm `os-info-checker-es6` supply chain attack. Context-aware: preserves legitimate emoji/CJK variation sequences. Anomaly flag `variation_selector_stego`. 38 tests. First open-source tool to detect VS steganography. ✅ DONE (2026-02-22)
-- [x] **Composite entropy check** — replaced hardcoded threshold with KL-required 2-of-3 voting in obfuscation.py `_composite_entropy_check()`. Thresholds: entropy≥4.5, KL-div≥0.8, compression≤1.05. Eliminates 40% FP rate on technical text (log entries, shell commands, git output). Novel approach — TruffleHog/detect-secrets abandoned entropy entirely due to FPs. 29 tests. ✅ DONE (2026-02-22)
-- [x] **Mixed-script detection** — detect Latin+Cyrillic or Latin+Greek within same word. ✅ DONE (2026-02-18) — Implemented as part of D5.3 homoglyph confusable mapping. `_has_mixed_scripts_for_homoglyphs()` detects per-word script mixing.
-- [x] **L0 flag mapping completeness** — 15 unmapped anomaly flags (`unicode_tag_stego`, `variation_selector_stego`, `mixed_script_homoglyphs`, `mojibake_repaired`, `ftfy_suspicious_correction`, `html_depth_exceeded`, 5x `bom_detected_*`, 4x `timeout_*`) were silently discarded by the scoring pipeline. All 15 now mapped in `_L0_FLAG_MAP` → D5.2/D5.3/D5/A1/D4/A1.1. 19 tests in `test_l0_flag_mapping.py`. ✅ DONE (2026-02-22)
-- [x] **tiktoken import guard** — bare `import tiktoken` crashed all of Layer 0 when tiktoken not installed. Wrapped in `try/except ImportError` with `_HAS_TIKTOKEN` sentinel, matching the pattern used by all other optional deps. Graceful degradation: tokenization checks return empty flags instead of crashing. 10 tests in `test_tiktoken_guard.py`. ✅ DONE (2026-02-22)
-- [x] **safe_regex.py dead code removal** — removed 38 lines of orphaned `ProcessPoolExecutor` infrastructure (`_regex_worker()`, `_PROCESS_POOL`, `_get_process_pool()`) that was never called after SIGALRM refactor. ✅ DONE (2026-02-22)
-- [x] **Silent exception logging** — added `logger.debug(..., exc_info=True)` to 3 silent `except Exception: pass` blocks in `ocr_extractor.py` (tesseract confidence), `content_type.py` (base64 decode), `resource_guard.py` (HTML depth). No behavior change, only observability. ✅ DONE (2026-02-22)
-##### content_type.py Bugs & Improvements
-- [x] **BUG-CT-1 (HIGH): Shebang false positive** — `b"#!"` signature is only 2 bytes; any text starting with `#!` gets rejected as executable. **Fix**: Change to `b"#!/"` (3 bytes). **Priority**: P1. **Effort**: Trivial. DONE (2026-02-15)
-- [x] **BUG-CT-2 (MEDIUM): Java class vs Mach-O Universal** — `\xca\xfe\xba\xbe` always classified as `java_class`, but also matches Mach-O fat binary. Both CRITICAL/reject, so no security gap — cosmetic. **Fix**: Check bytes 6-7 (Java major version 45-66) to disambiguate. **Priority**: P3. **Effort**: Easy. DONE (2026-02-15)
-- [x] **BUG-CT-3 (LOW): BM/ICO false positives** — `b"BM"` (2 bytes) and `b"\x00\x00\x01\x00"` (4 bytes, generic) can false-positive on text/null-padded data. **Fix**: Add secondary header validation for BMP (check reserved bytes 6-9 == 0) and ICO (verify image count 1-255). **Priority**: P3. **Effort**: Easy. DONE (2026-02-15)
-- [x] **Map remaining `embedded_*` flags in predict.py** — `_L0_FLAG_MAP` only maps 2 of 35+ content_type flags (`embedded_pdf`, `embedded_rtf`). All other flags silently discarded: `embedded_executable`, `embedded_ole2`, `embedded_docx`, `embedded_image`, `base64_blob_detected`, `data_uri_detected`, etc. ~80% of content_type.py output is wasted. **Priority**: P0. **Effort**: Easy. DONE (2026-02-15) -- Added 48 new flag mappings covering all content_type.py outputs: executables->M1.4, documents->M1.4, images->M1.1, archives->M1.4, audio->M1.3, video->M1.4, base64/data-URI->D4.1
-- [x] **Add false-positive tests for content_type.py** — No tests for text starting with `#!` (non-shebang), `BM` prefix, or null-padded data. **Priority**: P2. **Effort**: Easy. DONE (2026-02-15) — Added by BUG-CT-1/CT-3 agents: `test_shebang_without_slash_not_detected`, `TestBmpIcoFalsePositives` (10 tests covering BMP text prefix, ICO null-padded, short inputs).
-- [x] **Add XZ/LZMA archive signatures** — `b"\xfd7zXZ\x00"` for XZ, `b"\x5d\x00\x00"` for LZMA. Relevant given xz-utils supply chain attack. **Priority**: P3. **Effort**: Trivial. DONE (2026-02-15) — Added XZ and LZMA to _SIGNATURES (HIGH tier, embedded_archive), mapped embedded_xz/embedded_lzma to M1.4 in _L0_FLAG_MAP. Tests: test_xz_detected, test_lzma_detected.
-- [x] **Polyglot file detection** — After primary format detection at offset 0, scan for secondary magic bytes at common polyglot offsets (JPEG+ZIP, PDF+ZIP). Flag `polyglot_detected`. **Priority**: P2. **Effort**: Medium. DONE (2026-02-15) — Added _check_polyglot() function; refactored detect_content_type() to use result-variable pattern; checks for embedded PK/ZIP and %PDF signatures after primary match; upgrades tier to HIGH on polyglot. Mapped polyglot_detected to M1.4. Tests: test_polyglot_pdf_zip, test_polyglot_jpeg_zip, test_polyglot_png_zip, test_non_polyglot_pdf, test_non_polyglot_jpeg, test_polyglot_tier_upgrade.
+Totals: 19 source files + 7 parsers = 26 source │ 25 test files + 5 parser tests = 30 tests
+```
 
-##### Content-Type Security
-- [x] **Content-type mismatch detection** — Compare declared type (HTTP `Content-Type` header / file extension) vs detected type (magic bytes). Flag `content_type_mismatch` when they disagree (e.g., declared `text/plain` but contains PDF bytes). **Priority**: P1. **Effort**: Low. File: `sanitizer.py`. **DONE**: Implemented `_check_content_type_mismatch()` with MIME family mapping (text/document/image/audio/video/archive/executable). Generic types like `application/octet-stream` are excluded. Mapped to technique `M1.4` in predict.py. 41 tests in `test_content_type_mismatch.py`.
-- [x] **Base64 decode + re-scan pipeline** — When `base64_blob_detected` or `data_uri_detected`, decode the blob and run `detect_content_type()` on decoded bytes. Adds `base64_hidden_{type}` flags (executable/document/image/archive/audio/video). Safety limits: max 1.5 MB encoded / 1 MB decoded. CRITICAL-tier hidden content gets `base64_hidden_executable`. Mapped in predict.py `_L0_FLAG_MAP`. 12 new tests. Files: `content_type.py` (`_decode_and_rescan()`, `sniff_binary()`), `predict.py`. DONE (2026-02-16)
-- [x] **EXIF/XMP metadata extraction from images** — ✅ DONE (2026-02-18). Security audit found 4 bugs: BUG-1 (HIGH) wrong tag ID for XPSubject (40093=XPAuthor not XPSubject), BUG-2 (MEDIUM) JIS charset not handled, BUG-3 (MEDIUM) XMP CDATA silently dropped, BUG-4 (LOW) only first rdf:li language captured. All fixed. Added 6 new EXIF tags (Artist, Copyright, Software, DocumentName, XPKeywords, real XPSubject). Added CDATA+multi-language XMP support, JIS/Undefined charset handling, 64KB metadata size limit. 88 tests in test_exif_xmp_extraction.py + 27 in test_ocr_extractor.py.
-- [x] **PDF JavaScript detection** — Byte-level scan for `/JS`, `/JavaScript`, `/OpenAction`, `/AA`, `/Launch`, `/SubmitForm`, `/ImportData` in PDF streams with regex token-boundary validation to prevent false positives. Flags: `pdf_javascript`->M1.4, `pdf_auto_action`->M1.4, `pdf_external_action`->E1. Integrated into `extract_text_from_document()` and `_try_binary_extraction()`. 24 tests. File: `doc_extractor.py`. DONE (2026-02-15)
+### Completed (64 items)
 
-##### Linguistic & Multilingual
-- [x] **Language detection for multilingual routing** — Uses `langdetect` with deterministic seed + Unicode script heuristic fallback for short text. Flags `non_english_input` (D6) and `mixed_language_input` (D6.3). Graceful degradation when langdetect not installed. File: `language_detector.py`. DONE (2026-02-15)
-- [x] **PII/secrets pre-screening** — Pure-regex PII/secrets scanner with Luhn-validated credit cards (Visa/MC/Amex/Discover), SSN with invalid range exclusion, emails, US phones, AWS keys, GitHub tokens, generic hex/base64 with entropy filter, IPv4. All values redacted. File: `pii_detector.py`. DONE (2026-02-15)
-- [x] **Chunked ML analysis for long inputs** — HEAD+TAIL and CHUNKS strategies for inputs >512 words. `_chunk_text()` with overlap + `_head_tail_extract()`. Runs `rule_score` on each chunk, merges hits, boosts score for buried payloads. File: `predict.py`. DONE (2026-02-15)
-- [x] **D6 Multilingual injection handler** — Standalone regex-based detector for injection patterns in 20+ languages (FR/ES/DE/ZH/JA/AR/KO/HI/RU/PT/IT/TR/NL/PL/VI/TH/ID/SV/CS/HE + romanized transliterations). SOV word-order aware patterns for CJK/Korean/Turkish/Hindi. 6 pattern categories per language (instruction_override, reveal_prompt, roleplay_hijack, disable_protections, authority_claim, new_role). Integrated into predict.py with additive weights. 47 tests. File: `multilingual_handler.py`. ✅ DONE (2026-02-28)
-- [x] **C1 Fictional frame detector** — 3-layer analysis for compliance evasion: frame detection (fictional/hypothetical/academic/emotional/authority) → inner attack extraction (extraction/override/harmful/disable/generic_attack) → combined verdict with confidence scoring and C1.x technique ID mapping. Meta-educational language suppression prevents FPs on academic discussions. Integrated into predict.py. 34 tests. File: `fictional_frame_detector.py`. ✅ DONE (2026-02-28)
-- [x] **E1 Indirect extraction detector** — 6-category detector for indirect system prompt extraction: completion tricks (E1.3), translation tricks (E1.4), encoding tricks (E1.5), summarization tricks (E1.6), reference manipulation (E1.2), constraint probing. Targets "YOUR instructions/config/rules" to avoid FPs. Integrated into predict.py. 42 tests. File: `extraction_detector.py`. ✅ DONE (2026-02-28)
-- [x] **D7 Payload assembly detector** — Fragmented payload detection: token-split assembly (D7.1) with assembly keyword heuristic, code-block weaponization (D7.3) distinguishing educational vs weaponized code, comment/metadata payload hiding (D7.4) for HTML/JSON/YAML/XML/CSS/SQL, cross-encoding fragment assembly (D7.5), multi-turn stub (D7.2). Integrated into predict.py. 30 tests. File: `payload_assembly_detector.py`. ✅ DONE (2026-02-28)
-- [x] **O1 Harmful intent detector** — Injection+harmful combination detection: CSAM always-flag (O1.2), violence (O1.1), social engineering (O1.3), disinformation (O1.4), malware — only when combined with injection techniques (Na0S-scoped, not general content moderation). Tightened educational context suppression. Integrated into predict.py. 25 tests. File: `harmful_intent_detector.py`. ✅ DONE (2026-02-28)
-- [x] **D3.6 Semantic structural markers** — `semantic_system_marker` rule in rules_registry.py detecting natural-language fake system boundaries: authority+boundary framing, pseudo-official headers, supersession language. PL2, context-suppressible. D3.5 (zero-width chars) confirmed already handled by L0 Cf-category stripping. 18 tests. ✅ DONE (2026-02-28)
+All core functionality implemented: 19-step sanitization pipeline, 9 bug fixes (BUG-1 through BUG-9), content-type security (polyglot detection, MIME mismatch, base64 re-scan, PDF JavaScript detection), EXIF/XMP metadata extraction, linguistic features (20+ language handler, PII screening, language detection, fictional frame detector, extraction detector, payload assembly detector, harmful intent detector), security hardening (SSRF, TOCTOU CWE-367, open redirect protection, ReDoS-safe regex, resource exhaustion limits), 8 externalized config values with env var overrides, property-based Hypothesis fuzzing (40 tests), full test coverage for encoding/HTML/tokenization modules. See CHANGELOG v0.1.0 and v0.2.0 for details.
 
-##### Security Hardening (input_loader.py) 
-- [x] **SSRF protection** — DNS-resolve hostnames before connection, block private/loopback/link-local/reserved/metadata IPs via `_is_private_ip()` + `_validate_url_target()`. ✅ DONE (2026-02-15)
-- [x] **Open Redirect protection** — Custom `_SafeRedirectHandler` validates each redirect hop for scheme, HTTPS-only, private IP, max count. Replaced `urlopen` with `_build_safe_opener()`. ✅ DONE (2026-02-15)
-- [x] **TOCTOU race condition fix (CWE-367)** — Atomic `os.open(O_NOFOLLOW)` + fd-based `os.fstat()` validation. Single-fd flow: open→validate→size-check→read. Removed `os.path.exists()` pre-check. ✅ DONE (2026-02-15)
+#### Documentation TODO (identified 2026-04-12, verified by agent audit)
 
-#### REMAINING 
-- [x] **Expand magic byte detection** in `html_extractor.py` — Add DOCX/XLSX (PK header), PNG, JPEG, GIF, WAV, MP3, FLAC, OGG, WebM signatures. Source: IM0003 Coverage Gap #24. **Priority**: P2. **Effort**: Easy. — DONE (2026-02-14): Created content_type.py with 35+ signatures across 6 tiers
-- [x] **Timeout enforcement** — Cross-platform timeout via `concurrent.futures.ThreadPoolExecutor`. **Priority**: P0. — DONE (2026-02-15): timeout.py module with per-step timeouts (normalize, html, tokenize), pipeline-level timeout (30s) in sanitizer.py, scan-level timeout (60s) in predict.py; all configurable via env vars; 24 tests (unit + integration)
-- [x] **ReDoS protection** — Current regex patterns are safe but no systemic protection. Consider `google-re2` for linear-time guarantees as rules scale. **Priority**: P1. — DONE (2026-02-14): safe_regex.py with optional re2, SIGALRM timeout protection, pattern auditing; rules.py and cascade.py updated to use safe_regex; 33 tests
-- [x] **Input accepts files and URLs** — `layer0_sanitize` only handles str/bytes. **Priority**: P1. — DONE (2026-02-14): input_loader.py with file/URL/text/bytes support
-- [x] **File type detection by magic bytes** — `html_extractor.py` does basic sniffing but not comprehensive. Use `python-magic` for robust detection. **Priority**: P1. — DONE (2026-02-14): Manual detection in content_type.py, no python-magic dependency
-- [x] **MIME parsing** — Not implemented. Use stdlib `email.parser` for email-format inputs. **Priority**: P2. — DONE (2026-02-14): mime_parser.py using stdlib email.parser
-- [x] **OCR for image-based injection (M1.1)** — No image processing at all. Use Tesseract or EasyOCR. **Priority**: P2 (heavy dependency). — DONE (2026-02-14): `ocr_extractor.py` with optional EasyOCR/Tesseract, graceful fallback when deps missing, PIL image decoding, configurable max size, integrated into sanitizer.py
-- [x] **Doc parsing (PDF/DOCX)** — PDF/RTF detected by magic bytes but not parsed. Use `unstructured` or Microsoft MarkItDown. **Priority**: P2. — DONE (2026-02-14): `doc_extractor.py` with optional pymupdf/pdfplumber/PyPDF2 for PDF, python-docx for DOCX, striprtf for RTF, openpyxl for XLSX, python-pptx for PPTX, graceful fallback when deps missing, security limits (max pages, max text size), integrated into sanitizer.py
-- [x] **Property-based testing (Hypothesis)** — DONE (2026-02-14): `test_layer0_hypothesis.py` with 40 invariant tests across 12 test classes, full Unicode fuzzing (200 examples/test). Found and fixed surrogate crash bug in validation.py and normalization.py. **Priority**: P1.
-- [x] **CI/CD pipeline** — DONE (2026-02-14): GitHub Actions CI with Python 3.9-3.12 matrix, flake8 linting, coverage reporting, PR checks, smoke tests (13 tests). **Priority**: P0.
-- [x] **Resource exhaustion protection** — Integrated orphaned `resource_guard.py` into pipeline. Now enforced: input size (50K chars/200KB), HTML depth (100), expansion ratio (10x), memory budget (50MB), rate limiting (100 req/60s). Added HTML depth pre-check in `html_extractor.py`. Added `MAX_CHUNKS=20` in predict.py to cap ML inference passes. All limits env-configurable. 38 tests (26 resource + 12 chunks). ✅ DONE (2026-02-22)
-
-### ~~Hardcoded Values to Externalize~~ ✅ ALL DONE
-All 8 values externalized into named constants with `L0_*` env var overrides. Safe parsing with `math.isfinite()` NaN/Inf guard + range validation. 42 tests in `test_l0_config.py`.
-
-| Value | Env Var | Default | Status |
-|-------|---------|---------|--------|
-| ~~NFKC changed threshold~~ | `L0_NFKC_CHANGE_THRESHOLD` | 0.25 | ✅ DONE |
-| ~~Invisible chars threshold~~ | `L0_INVISIBLE_CHARS_THRESHOLD` | 2 | ✅ DONE |
-| ~~`GLOBAL_RATIO_THRESHOLD`~~ | `L0_GLOBAL_RATIO_THRESHOLD` | 0.75 | ✅ DONE |
-| ~~`WINDOW_RATIO_THRESHOLD`~~ | `L0_WINDOW_RATIO_THRESHOLD` | 0.85 | ✅ DONE |
-| ~~CJK fraction threshold~~ | `L0_CJK_FRACTION_THRESHOLD` | 0.3 | ✅ DONE |
-| ~~Short text skip~~ | `L0_MIN_TEXT_LENGTH_FOR_TOKENIZATION` | 10 | ✅ DONE |
-| ~~`_MIN_CONFIDENCE`~~ | `L0_MIN_ENCODING_CONFIDENCE` | 0.5 | ✅ DONE |
-| ~~Window size~~ | `L0_WINDOW_SIZE` | 50 | ✅ DONE |
-
-- ~~`encoding.py` — zero dedicated test coverage~~ ✅ DONE — 46 tests in `test_encoding.py` (BOM detection, chardet fallback, low confidence, decode chain, anomaly flags, edge cases)
-- ~~`html_extractor.py` — only 2 tests~~ ✅ DONE — 73 tests in `test_html_extractor.py` (tag stripping, hidden content, script/style, comments, BOM, malformed HTML, depth limit, void elements, anomaly flags)
-- ~~`tokenization.py` — zero dedicated test coverage~~ ✅ DONE — 60 tests in `test_tokenization.py` (fingerprint computation, anomaly detection, CJK exemption, FingerprintStore CRUD, LRU eviction, TTL, WAL mode, edge cases)
-- ~~Bytes-input pipeline path — untested~~ COVERED by `test_layer0_hypothesis.py` (TestBytesInputPath, TestNeverCrash)
-- ~~Concurrent FingerprintStore access — untested~~ ✅ DONE — 4 concurrent stress tests in `test_tokenization.py` (10+ threads, file-based WAL SQLite, mixed read/write, 100-operation stress test)
-
-### Implementation Plan
-**Phase 1 (P0 — Critical fixes)**: ~~Fix BUG-1 through BUG-9, wire L0 into cascade.py and predict_embedding.py, complete `_L0_FLAG_MAP`~~ ✅ DONE (2026-02-14)
-**Phase 2 (P1 — Core gaps)**: Add timeout enforcement, ~~ftfy~~✅, Cyrillic confusables, property-based tests, Hypothesis fuzzing
-**Phase 3 (P2 — Extensions)**: OCR, doc parsing, MIME, file/URL input
+**Missing module docstrings (7 files):**
+- [ ] `__init__.py` — NO docstring, no `__all__`, no public API listing. Should match Layer 1/2 format. Under-exports 10+ public symbols.
+- [ ] `result.py` — NO module docstring
+- [ ] `sanitizer.py` — NO module docstring (809 lines, main entry point)
+- [ ] `validation.py` — NO module docstring
+- [ ] `normalization.py` — NO module docstring (1,074 lines)
+- [ ] `encoding.py` — NO module docstring
+- [ ] `tokenization.py` — NO module docstring
 
 ---
 
-## Layer 1: IOC / Signature Rules Engine — Tasks: 51/53 (96%)
+## Layer 1: IOC / Signature Rules Engine — Tasks: 53/60 (88%)
 
-**Files**: `src/na0s/layer1/` (10 modules: `__init__.py`, `analyzer.py`, `rules_registry.py`, `context.py`, `paranoia.py`, `result.py`, `unicode_defense.py`, `ioc_extractor.py`, + backward-compat shims for `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py` that re-export from `layer2/`)
-**Tests**: `tests/test_rules.py` (269 tests), `tests/test_ioc_extractor.py` (73 tests), `tests/test_whitespace_stego.py` (43 tests), `tests/test_ascii_art_detector.py` (67 tests), `tests/test_syllable_splitting.py` (73 tests)
-**Status**: Active — **110 rules** covering 10+ technique categories with paranoia level system (PL1-PL4). **Canary eval: 100% TPR, 100% TNR, F1=1.000 on 200-sample holdout set (2026-03-04).** Gap Closure Sprint Wave 6-7 (2026-03-04): +5 new rules (D3.7 code_block_system_injection, C1.1 devils_advocate_harmful, D7.6 fictional_extraction, D7.7 sequential_task_extraction, D7.8 word_concatenation_game), D7.8 token concatenation game extractor (`_extract_concatenation_game()`), D5 literal Unicode escape sequence decoding (`_decode_literal_escapes()`), D8 tail scan for context dilution defense, `direct_prompt_request` adjective fix, `dismiss_prior_context` pattern widening, `context_dilution_override` "ignore everything above" variant, `entire_input_base64` obfuscation flag.
+### Description
+regex-based signature engine that detects known attack patterns. Runs 117 pre-compiled rules across 68 technique IDs with paranoia-level filtering on a PL1-PL4 scale (PL1-PL3 currently populated; env-configurable via `RULES_PARANOIA_LEVEL` at [paranoia.py:13](src/na0s/layer1/paranoia.py#L13); see [rules_registry.py](src/na0s/layer1/rules_registry.py) docstring for current distribution). Novel industry-first detectors: summarization extraction, authority escalation, constraint negation, meta-referential probing, gaslighting. Context-aware suppression (6 frames: educational, question, quoting, code, narrative, techdoc) prevents FPs on legitimate security discussions — critical-severity rules such as `data_exfiltration_pii` and `serialization_injection` are excluded from the `_CONTEXT_SUPPRESSIBLE` list and fire even inside framing. All patterns are ReDoS-safe: `Rule.__post_init__` invokes `safe_compile(..., check_safety=True)` automatically for every rule. Rules are integrated into both `predict.py` and `cascade.py` with dual-pass evaluation (raw + sanitized text, deduplicated via `hit_names_seen`). Unicode angle-bracket homoglyph folding (12 variants: 6 left + 6 right at [unicode_defense.py](src/na0s/layer1/unicode_defense.py)) protects XML/chat-template rules from bypass before rule evaluation. Historical bug fixes and sprint-by-sprint additions live in [CHANGELOG.md](CHANGELOG.md).
 
-### Updated Description
-Layer 1 is a regex-based signature engine that detects known attack patterns. Has 81 pre-compiled rules (5 original + 13 roadmap + 5 novel + 10 E1/P1 extraction + 7 O1/O2 content-safety + 1 worm + 1 destructive + 4 D1-subtle-overrides + 5 E2-reconnaissance + 6 P1-privacy + 4 RAG + 4 medium-priority + 16 earlier) with paranoia level filtering (PL1-PL4, env-configurable via RULES_PARANOIA_LEVEL). All 6 bugs fixed (technique mismap, duplicate eval, severity underrating, DRY violation, raw-text-only, pattern divergence). Novel industry-first detectors: summarization extraction, authority escalation, constraint negation, meta-referential probing, gaslighting. Context-aware suppression (educational/question/quoting/code/narrative frames) prevents FPs on legitimate security discussions — critical-severity rules (data_exfiltration_pii, serialization_injection, training_data_extraction) are never suppressed. All patterns are ReDoS-safe via `safe_compile()`. Rules are integrated into both `predict.py` and `cascade.py` with dual-pass (raw + sanitized text). Unicode angle bracket homoglyph folding (12 variants) protects all XML/chat-template rules from bypass.
+**Target directory structure** (v1.0.0 refactor — `layer1/` → `rules/`; 4 shim files deleted, dead-code duplicate of `whitespace_stego.py` already deleted 2026-04-16, extension modules consolidated):
+```
+src/na0s/rules/                                   tests/rules/
+│                                                 │
+├── __init__.py        ← public API + __all__     ├── __init__.py
+├── result.py          ← Rule, RuleHit dataclasses│
+├── analyzer.py        ← rule_score orchestrator  ├── test_analyzer.py
+│                                                 │
+├── paranoia.py        ← PL1-PL4 env-configurable ├── test_paranoia.py
+├── context.py         ← 6 suppression frames     ├── test_context.py
+├── unicode_defense.py ← 12-variant homoglyph fold├── test_unicode_defense.py
+├── ioc_extractor.py   ← defang + refang IOCs     ├── test_ioc_extractor.py    ← 73 tests
+│                                                 │
+└── registry/          ← 117 rules split by cat   └── registry/
+    ├── __init__.py    ← merges lists → RULES         ├── __init__.py
+    ├── core.py        ← base 98 (D3-8, E1, R1)       ├── test_rules_core.py   ← 269 tests
+    ├── subtle_override.py   ← D1 subtle (4 rules)    ├── test_subtle_override.py
+    ├── compliance_evasion.py ← C1 (4 rules)          ├── test_compliance_evasion.py
+    ├── recon.py       ← E2 reconnaissance (5 rules)  ├── test_recon.py
+    └── privacy_probe.py ← P1 privacy (6 rules)       └── test_privacy_probe.py
+
+v1.0.0 deletions (shims that re-export from layer2/ — obfuscation/ is the real home):
+  layer1/morse_code.py, layer1/numeric_decode.py,
+  layer1/ascii_art_detector.py, layer1/syllable_splitting.py
+
+Already deleted (2026-04-16):
+  layer1/whitespace_stego.py (544 LOC of dead code — a stale duplicate of
+  layer2/whitespace_stego.py; zero call sites referenced the layer1 path).
+  The layer2 version (508 LOC, newer) remains the canonical implementation
+  and will move to obfuscation/whitespace_stego.py as part of Layer 2's refactor.
+
+Top-level scattered extensions to consolidate into rules/registry/:
+  src/na0s/subtle_override_rules.py      → rules/registry/subtle_override.py
+  src/na0s/compliance_evasion_rules.py   → rules/registry/compliance_evasion.py
+  src/na0s/detectors/recon.py            → rules/registry/recon.py
+  src/na0s/detectors/privacy_probe.py    → rules/registry/privacy_probe.py
+  src/na0s/recon_detector.py             (shim — delete)
+  src/na0s/privacy_probe_detector.py     (shim — delete)
+
+Totals: 7 core modules + 6 registry modules = 13 source files │ tests organized under tests/rules/
+```
+
+
+### Completed (53 items)
+
+Core API and infrastructure: `Rule` and `RuleHit` dataclasses with `Rule.__post_init__` auto-invoking `safe_compile(check_safety=True)`, `rule_score()` and `rule_score_detailed()` APIs (single-pass dedupe), `SEVERITY_WEIGHTS` shared with `predict.py`/`cascade.py`, dual-pass evaluation over raw + sanitized text deduplicated via `hit_names_seen`. 4-level paranoia system (`RULES_PARANOIA_LEVEL` env var, PL1–PL4). 6 audit-bug fixes on 2026-02-18 (technique mismap, duplicate evaluation, severity underrating, DRY violation, raw-text-only evaluation, pattern divergence). Rule library grew to **117 rules across 68 technique IDs**: 6 P0 critical (fake_system_prompt, chat_template_injection, xml_role_tags, api_key_extraction, forget_override, developer_mode), 7 P1 high (new_instruction, delimiter_confusion, completion_trick, tool_enumeration, unauthorized_tool_call, recursive_output, persona_split), 5 novel industry-first (summarization_extraction, authority_escalation, constraint_negation, meta_referential, gaslighting), 5 P2 (hypothetical_bypass, multilingual_override_latin + _cjk covering 20 languages, multilingual_intent semantic detector, recursive_jailbreak), 2 P0-CRITICAL hardening (12-variant angle-bracket homoglyph bypass fix, T1.2 destructive_action), 4 RAG rules (policy_update, knowledge_base_instruction, context_separator, fake_retrieval_markers), 1 worm signature detector. Extension modules wired: `recon_detector.py` (5 E2 probes), `privacy_probe_detector.py` (6 P1 probes), `subtle_override_rules.py` (4 D1 overrides), `multilingual_intent.py` semantic detector. `ioc_extractor.py` with 15+ defanging patterns, 73 tests. Context-suppression reconciled (10 new rule names added; critical-severity rules like `data_exfiltration_pii` and `serialization_injection` kept exempt). Cleanup this session: `rules_registry.py` module docstring updated 110→117 with PL distribution + 68 technique IDs; roadmap `**Files**:` / `**Status**:` metadata corrected; 544-line dead-code duplicate `layer1/whitespace_stego.py` deleted 2026-04-16 (zero call sites; layer2 copy remains canonical). See [CHANGELOG.md](CHANGELOG.md) v0.1.0, v0.1.1, v0.2.0 for sprint-by-sprint history.
 
 ### TODO List
 
-#### DONE
-- [x] `Rule` dataclass with pre-compiled regex, technique_ids, severity — `rules.py`
-- [x] `RuleHit` dataclass for structured output
-- [x] `rule_score()` backward-compatible API
-- [x] `rule_score_detailed()` enriched API with severity + technique_ids
-- [x] All patterns pre-compiled at import time
-- [x] All 5 patterns verified ReDoS-safe (bounded quantifiers)
-- [x] Integration with predict.py weighted voting and cascade.py
-
-#### FIXES — ALL DONE (2026-02-18)
-- [x] **FIX-1: Technique ID mismap** — `secrecy` remapped from `E1.4` to `I1` (indirect injection). ✅ DONE
-- [x] **FIX-2: Duplicate rule evaluation** — `rule_score()` now delegates to `rule_score_detailed()` (single pass). predict.py refactored: classify_prompt() uses detailed hits, scan() reuses them. ✅ DONE
-- [x] **FIX-3: Severity underrating** — `roleplay` upgraded from `medium` to `high`. ✅ DONE
-- [x] **FIX-4: DRY violation** — `SEVERITY_WEIGHTS` canonical definition in rules.py, imported by predict.py and cascade.py. ✅ DONE
-- [x] **FIX-5: Rules run on raw text only** — predict.py and cascade.py now dual-pass: rules run on BOTH raw and sanitized text, deduplicating hits. ✅ DONE
-- [x] **FIX-6: Pattern divergence** — roleplay rule unified with cascade.py's `ROLE_ASSIGNMENT` (now uses compiled pattern from RULES list). ✅ DONE
-
-#### NEW (Rules to add — from research)
-- [x] **Create `WormSignatureDetector`** — Detect self-replicating prompt patterns: action + self-replication structural signatures, recursive instruction depth. Input-side detection complement to L9's output-side PropagationScanner. Source: IM0006 Coverage Gap #8. **Priority**: P0. **Effort**: Medium. DONE (2026-02-18) -- worm_signature rule added to rules.py (technique I1.5, severity critical, PL1, 4 sub-patterns: direct propagation, recursive instruction, forward/spread, template replication).
-**Critical Priority (P0):** DONE (2026-02-18)
-- [x] D3.1 Fake-system-prompt: `fake_system_prompt` rule, PL1 — detects [SYSTEM], [INST], <<SYS>>, <|im_start|>system
-- [x] D3.2 Chat-template-injection: `chat_template_injection` rule, PL1 — detects ChatML/Llama/Anthropic-style tokens
-- [x] D3.3 XML-role-tags: `xml_role_tags` rule, PL1 — detects <system>, <instructions>, <admin>, <developer>
-- [x] P1.5 API-key-extraction: `api_key_extraction` rule, PL1 — detects print/show/reveal API_KEY/OPENAI/SECRET/TOKEN/PASSWORD/CREDENTIAL
-- [x] D1.1 Expanded forget/override: `forget_override` rule, PL1 — detects memory wipe/reset/purge and stop-following patterns (complements existing `override` rule)
-- [x] D1.3 Developer-mode: `developer_mode` rule, PL1 — detects enable/activate developer/debug/god/admin/sudo/root/jailbreak mode
-
-**High Priority (P1):** DONE (2026-02-18)
-- [x] D1.2 New-instruction: `new_instruction` rule, PL2 — detects new/updated/revised instructions injection
-- [x] D1.9 Delimiter-confusion: `delimiter_confusion` rule, PL2 — detects ---/===/*** system/instructions patterns
-- [x] E1.3 Completion-trick: `completion_trick` rule, PL3 — detects complete/continue/finish sentence/response/output tricks
-- [x] E2.2 Tool-enumeration: `tool_enumeration` rule, PL2 — detects list/show/enumerate tools/functions/plugins
-- [x] T1.1 Unauthorized-tool-call: `unauthorized_tool_call` rule, PL3 — detects call/execute/run function/tool/command
-- [x] R1.2 Recursive-output: `recursive_output` rule, PL2 — detects repeat this forever/infinitely/N times
-- [x] D2.4 Persona-split: `persona_split` rule, PL2 — detects respond-as-both evil/unrestricted/shadow
-
-**Novel Industry-First Rules (from deep research):** DONE (2026-02-18)
-- [x] E1.6 Summarization-extraction: `summarization_extraction` rule, PL1 — detects summarize/paraphrase/rephrase + instructions/rules/system prompt
-- [x] D1.3 Authority-escalation: `authority_escalation` rule, PL1 — detects "I am the admin", "I have root access", "admin override"
-- [x] C1.1 Constraint-negation: `constraint_negation` rule, PL1 — detects "disable safety filters", "without restrictions", "unrestricted mode" (catches DAN, Skeleton Key)
-- [x] E2.3-5 Meta-referential: `meta_referential` rule, PL2 — detects "your hidden prompt", "what model are you", "your training data"
-- [x] D2.3 Gaslighting: `gaslighting` rule, PL2 — detects "you already told me", "stop pretending", "I know you can"
-
-**Gap Closure Sprint (2026-02-28) — Track A: E2 Reconnaissance:**
-- [x] `recon_detector.py` — 5 probe categories (E2.1-E2.5): capability_probing, recon_tool_enumeration, model_fingerprinting, boundary_testing, config_extraction. 30+ patterns via safe_compile. Stateless (single-turn) and stateful (multi-turn with conversation_history) modes. RECON_RULES (5 Rule objects) wired into rules_registry.py. Context-suppressible in educational framing. 50K input cap, conversation_history capped at 100 entries. 39 tests in test_recon_detector.py. ✅ DONE
-- [x] `privacy_probe_detector.py` — 6 probe categories (P1.1-P1.6): conversation_extraction, data_exfiltration, training_data_extraction, cross_session, serialization_injection, membership_inference. 27+ patterns. PRIVACY_RULES (6 Rule objects) wired into rules_registry.py. PII-aware severity escalation (LOW→MEDIUM→HIGH). Extraction patterns trigger HIGH severity. 50K input cap. 38 tests in test_privacy_probe.py. ✅ DONE
-- [x] `subtle_override_rules.py` — 4 rules: polite_override (D1.15, high, PL2), temporal_override (D1.17, high, PL2), clean_slate (D1.19, medium, PL2), subtle_authority (D1.18, medium, PL3). All context-suppressible. 40 tests in test_subtle_overrides.py. ✅ DONE
-- [x] Context suppression updates — 10 new rule names added to `_CONTEXT_SUPPRESSIBLE` in context.py. Critical-severity rules (data_exfiltration_pii, serialization_injection, training_data_extraction) excluded from suppression. ✅ DONE
-- [x] Duplicate rule name resolution — `tool_enumeration` renamed to `recon_tool_enumeration`, `training_data_extraction` renamed to `training_data_completion` to avoid collisions with existing rules at indices 14 and 31. 81 rules, 0 duplicates. ✅ DONE
-
-**Security Hardening (from OpenClaw research):** DONE (2026-02-19)
-- [x] **Angle bracket homoglyph bypass fix** — `_fold_angle_homoglyphs()` normalizes 12 Unicode look-alike characters (U+3008 〈, U+FF1C ＜, U+27E8 ⟨, U+FE64 ﹤, U+276C ❬, U+2039 ‹ + right variants) to ASCII `<>` before rule matching. Protects `xml_role_tags`, `fake_system_prompt`, `chat_template_injection` from bypass. 16 tests in `test_rules.py`. **Priority**: P0-CRITICAL. ✅ DONE (2026-02-19)
-- [x] **T1.2 Destructive action injection** — `destructive_action` rule, PL1, severity critical. Detects `rm -rf /`, `DROP TABLE`, `TRUNCATE TABLE`, `DELETE FROM`, `kill -9`, `shutdown now`, `git push --force`, `git reset --hard`, `format C:`. 18 tests. **Priority**: P0. ✅ DONE (2026-02-19)
-
-**Medium Priority (P2):** DONE (2026-02-23)
-- [x] D1.14 Hypothetical-response-priming — `hypothetical_bypass` rule, PL2, severity=high. Co-occurrence anchoring: hypothetical frame + safety-bypass language within 120 chars. Context-suppressible. 20 tests. ✅ DONE (2026-02-23)
-- [x] D6 Multilingual-ignore keywords in top 20 languages — `multilingual_override_latin` (10 Latin-script languages: FR/ES/PT/DE/IT/ID/TR/PL/NL/VI, PL2) + `multilingual_override_cjk` (9 non-Latin scripts: ZH/JA/KO/AR/RU/HI/HE/TH/FA, PL1). Both context-suppressible. Traditional Chinese + Hindi SOV support. 50 tests. ✅ DONE (2026-02-23)
-- [x] D6 Multilingual semantic intent detection + transliteration coverage — added `multilingual_intent.py` semantic detector for non-English/native-script and romanized attacks (override, extraction, roleplay, fake authority, new-instruction, exfiltration, transliterations such as Arabizi/Pinyin/Romaji/Hinglish/Korean/Russian). Integrated into `predict.py` weighted scoring via synthetic multilingual hits + D6 score floor when Layer 0 confirms multilingual input. Focused validation: `tests/test_scan_d6_multilingual.py` now 83 passed / 1 xfailed, D6 malicious holdout scan check 20/20 detected. ✅ DONE (2026-03-17)
-- [x] D1.11 Skeleton-key patterns — COVERED by `constraint_negation` + `authority_escalation` rules
-- [x] D1.19 Recursive-jailbreak — `recursive_jailbreak` rule, PL2, severity=high. 4 sub-patterns: direct generation, method design, list/enumerate, named jailbreak (DAN/STAN/AIM/DUDE/KEVIN). Context-suppressible. 23 tests. ✅ DONE (2026-02-23)
-
-#### REMAINING (From original roadmap)
-- [x] **Paranoia level system** — Added `paranoia_level` field to `Rule` dataclass. Filtering by `_PARANOIA_LEVEL` (env: `RULES_PARANOIA_LEVEL`, default=2). PL1=production, PL2=moderate, PL3=high, PL4=audit. `get_paranoia_level()` / `set_paranoia_level()` API. DONE (2026-02-18)
+**Feature work:**
 - [ ] **YARA rule engine** — Replace/supplement regex with `yara-python` for multi-pattern matching, combinatorial conditions, and hot-reloadable rule files. **Priority**: P1. **Effort**: Medium.
-- [ ] **Known injection phrase database** — Extract phrases from Garak probes, JailbreakBench, HackaPrompt, Tensor Trust datasets for rule generation. **Priority**: P1.
-- [x] **PII pre-screen** — Pure-regex in `pii_detector.py` with Luhn validation. DONE (2026-02-15)
-- [x] **IOC extraction** — Custom pure-stdlib `ioc_extractor.py` module (iocextract GPL-blocked). `refang()` for 15+ defanging patterns, `extract_iocs()` for URLs/IPs/emails/hashes. Integrated into analyzer.py as alt_view. 73 tests. ✅ DONE (2026-02-23)
-- [x] **Recursive unpacking (Matryoshka)** — Replaced flat `max_decodes=2` with recursive `_scan_single_layer()` + `obfuscation_scan()` (max_depth=4, cycle detection, expansion limit). ✅ DONE (2026-02-20)
-- [x] **RAG "policy update" injection rule** — `rag_policy_update` (R1.1), PL2, severity=high. Pattern: `(?:updated|new|revised)\s+(?:policy|guideline)s?\s+.{0,80}(?:supersede|override|replace)`. Context-suppressible. 67 tests. ✅ DONE (2026-02-20)
-- [x] **RAG "knowledge base instruction" rule** — `rag_knowledge_base_instruction` (R1.2), PL2, severity=high. Restructured regex: `always/never` require following malicious verb (ignore/disregard/forget/override/bypass/skip) to avoid FP on benign AI docs. Context-suppressible. ✅ DONE (2026-02-20)
-- [x] **RAG context separator manipulation rule** — `rag_context_separator` (R1.3), PL2, severity=critical. Pattern: `END OF (CONTEXT|DOCUMENT|RETRIEVED|SOURCE)...NEW INSTRUCTIONS|SYSTEM PROMPT|OVERRIDE`. NOT context-suppressible. ✅ DONE (2026-02-20)
-- [x] **RAG fake retrieval markers rule** — `rag_fake_retrieval_markers` (R1.4), PL3, severity=high. Pattern: `\[/?(?:RETRIEVED|SOURCE|CONTEXT|DOCUMENT|REFERENCE|KNOWLEDGE)\s*(?:TEXT|DATA|BASE|CHUNK)?\]`. Context-suppressible. ✅ DONE (2026-02-20)
+- [ ] **Rule generation from injection-phrase databases** — The HackaPrompt, Garak, JailbreakBench, and TensorTrust datasets are already harvested for Layer 4 ML training and Layer 15 threat intel. Build a phrase-extraction pipeline that mines them for novel attack strings and auto-drafts candidate L1 regex rules for human review. Input: harvested CSVs. Output: PR-ready `Rule(...)` entries for `rules_registry.py`. **Priority**: P1. **Effort**: Medium.
+
+**Documentation (identified 2026-04-16 by 4-agent audit):**
+- [ ] `context.py` — module docstring lists 5 suppression frames (educational/question/quoting/code/narrative) but code checks 6 (TECHDOC_FRAME is included in `_has_strong_contextual_framing()` lines 84–92). **Fix**: add TECHDOC_FRAME to frame list.
+- [ ] 3 shim files (`ascii_art_detector.py`, `morse_code.py`, `syllable_splitting.py`) — shim docstrings don't enumerate re-exported public names. Readers can't tell what's available without opening `layer2/`. **Fix**: list exports inline, e.g. `"""Backward-compatibility shim: re-exports detect_ascii_art, AsciiArtResult from layer2.ascii_art_detector."""`
+- [ ] `result.py` — `Rule` and `RuleHit` dataclasses have no class-level docstring; `Rule.__post_init__` has no docstring explaining the auto-compilation of `_compiled`. **Fix**: add one-line class docstrings + `__post_init__` docstring.
+- [ ] `context.py` — private helpers `_has_contextual_framing()` (line 124) and `_has_code_comment_injection()` (line 156) lack docstrings; `_has_strong_contextual_framing()` (line 165) docstring should mention TECHDOC_FRAME inclusion. **Fix**: add one-line docstrings.
+- [ ] `ioc_extractor.py:319` — inline comment says `# SHA-256 only for now` but code below handles SHA-1 (line 329) and MD5 (line 346). **Fix**: update comment to `# File hashes: SHA-256 (prioritized), SHA-1, MD5`.
 
 ### Implementation Plan
-**Phase 1**: ~~Add paranoia levels + 6 P0 rules → ~15%~~ ✅ DONE (2026-02-18)
-**Phase 2**: ~~Add 7 P1 rules + 5 novel rules + 6 bug fixes + single-pass refactor → ~22%~~ ✅ DONE (2026-02-18)
-**Phase 3**: ~~IOC extraction + multilingual rules + D1.14 + D1.19~~ ✅ DONE (2026-02-23) — 4 new rules, IOC module, 7 audit bug fixes, 146 new tests
+(2026-02-23) — 4 new rules, IOC module, 7 audit bug fixes, 146 new tests
 **Phase 4**: YARA migration + phrase database integration → ~45% coverage
 
 ---
 
-## Layer 2: Obfuscation Detection & Decoding — Tasks: 41/41 (COMPLETE)
+## Layer 2: Obfuscation Detection & Decoding — Tasks: 41/42 (98%)
 
-**Files**: `src/na0s/layer2/` (7 modules: `__init__.py`, `obfuscation.py`, `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py`, `ascii_art_detector.py`, `syllable_splitting.py`)
-**Backward-compat shims**: `src/na0s/obfuscation.py` (re-exports from layer2), `src/na0s/layer1/{morse_code,numeric_decode,whitespace_stego,ascii_art_detector,syllable_splitting}.py` (re-exports from layer2)
-**Tests**: `tests/test_obfuscation.py` (3 tests), `tests/test_l2_obfuscation_fixes.py` (34 tests), `tests/test_scan_d4_encoding_obfuscation.py` (51 tests), `tests/test_matryoshka.py` (58 tests), `tests/test_morse_code.py` (88 tests), `tests/test_numeric_decode.py` (110 tests), `tests/test_whitespace_stego.py` (72 tests), `tests/test_ascii_art_detector.py` (115 tests), `tests/test_syllable_splitting.py` (144 tests)
-**Status**: Fully implemented `layer2/` package (2026-02-26). Detects 12+ encoding/obfuscation types. All 7 modules complete with full test coverage. **Gap Closure Sprint (2026-02-28)**: content-type aware entropy thresholds (code/yaml/json get 5.5 vs 4.5), code fence exemption from high_entropy (with attack-keyword safety check), encoding chain depth/diversity scoring via `_analyze_encoding_chain()` (boost 0.0-0.20).
+### Description
+Layer 2 decodes obfuscated payloads and re-classifies them. When user input arrives, Layer 2 tries to peel off each encoding layer — Base64, hex, URL-encoding, ROT13, Caesar (all 25 shifts), leetspeak, reversed text, pig latin, Morse code, binary/octal/decimal ASCII, whitespace steganography — and feeds every decoded view back through Layer 1 rules and the ML classifier. If an attacker hides `"ignore previous instructions"` inside `base64(url("..."))`, Layer 2 unwraps both layers and Layer 1 catches the inner string. Recursive Matryoshka unwrapping goes 4 levels deep with SHA-256 cycle detection and a 10× expansion limit; every decoded view carries forensic provenance (`decoded_chain`, `encoding_chains`, `max_depth_reached`). Entropy is checked via 2-of-3 composite voting (Shannon + KL-divergence from English + compression ratio), content-type aware (code/yaml/json get a higher threshold so legitimate technical text doesn't false-positive). Four detectors are industry-first: Morse code (CipherChat showed 55.3% ASR on GPT-4 via Morse), decimal-ASCII (CipherChat ~100% ASR), SNOW-style whitespace steganography, and ASCII art (ArtPrompt ACL 2024 achieved 100% ASR against every moderation tool tested). Syllable-splitting de-hyphenation undoes 25 Unicode dash variants against 83 suspicious words with a 77-entry compound whitelist — Meta Prompt Guard 2 classifies hyphenated attacks as 98.9% safe; Layer 2 doesn't. Combined signal boosting ([signal_boost.py](src/na0s/signal_boost.py), 292 LOC) adds an additive bump (0.05–0.12 per combo, MAX_BOOST=0.3) when L1 persona/override/extraction rules co-occur with L2 encoding flags. Historical bug fixes and sprint history live in [CHANGELOG.md](CHANGELOG.md).
 
-### Updated Description
-Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-classification. Now organized as a proper package at `src/na0s/layer2/`. Handles Base64, hex, URL-encoding, ROT13, leetspeak, reversed text, Morse code, binary/octal/decimal ASCII, whitespace steganography, ASCII art detection (5-signal weighted voting, ArtPrompt defense), and syllable-splitting de-hyphenation (25 Unicode dash chars, 83 suspicious words, 63 compound whitelist), with entropy analysis (2-of-3 composite voting), punctuation flood detection, and casing transition analysis. Each decoded view is re-classified through both ML and L1 rules. Recursive Matryoshka unwrapping with encoding chain provenance tracking. **Remaining gaps**: Caesar cipher (non-13 shifts), pig-latin, combined signal boosting.
+**Target directory structure** (v1.0.0 refactor — `layer2/` → `obfuscation/`; 4 remaining `layer1/` shims deleted, `_env_utils` stays internal):
+```
+src/na0s/obfuscation/                              tests/obfuscation/
+│                                                  │
+├── __init__.py            ← public API + __all__  ├── __init__.py
+├── obfuscation.py         ← core decoders, entropy,├── test_obfuscation.py
+│                            Matryoshka unwrapper    ├── test_l2_obfuscation_fixes.py
+│                                                  │  ├── test_l2_coverage_gaps.py
+│                                                  │  ├── test_l2_externalized_constants.py
+│                                                  │
+├── morse_code.py          ← ITU-R M.1677 decoder  ├── test_morse_code.py     ← 88 tests
+├── numeric_decode.py      ← binary/octal/decimal  ├── test_numeric_decode.py ← 110 tests
+├── whitespace_stego.py    ← SNOW-style detection  ├── test_whitespace_stego.py ← 72 tests
+├── ascii_art_detector.py  ← 5-signal weighted vote├── test_ascii_art_detector.py ← 115 tests
+├── syllable_splitting.py  ← de-hyphenation        ├── test_syllable_splitting.py ← 144 tests
+│                                                  │
+└── _env_utils.py          ← internal env helpers  └── (no dedicated test — used via other modules)
+
+v1.0.0 deletions:
+  src/na0s/obfuscation.py                         (top-level shim — re-exports from layer2/)
+  src/na0s/layer1/morse_code.py                   (shim — obfuscation is the canonical home)
+  src/na0s/layer1/numeric_decode.py               (shim)
+  src/na0s/layer1/ascii_art_detector.py           (shim)
+  src/na0s/layer1/syllable_splitting.py           (shim)
+  Matryoshka tests at tests/ml/test_matryoshka.py → move to tests/obfuscation/test_matryoshka.py
+    (58 tests; the `ml/` location was incidental)
+
+Totals: 7 source files │ 11+ Layer-2-touching test files (official 9 + 2 uncataloged)
+```
+
+### Completed (41 items)
+
+Core pipeline: Shannon entropy with 2-of-3 composite voting (KL-divergence from English + compression ratio), punctuation-flood detection (≥30% ratio), casing-transition detection (≥6 transitions), Base64/hex/URL-encoding decoders, recursive `_scan_single_layer()` with `max_depth=4`, SHA-256 cycle detection, 10× expansion limit, and `DecodedView` dataclass for forensic encoding-chain provenance (`decoded_chain`, `encoding_chains`, `max_depth_reached`, `parent_index`). 3 audit fixes on 2026-02-20 (entropy threshold raised to composite voting, flat decode budget replaced with recursive unwrap, combined signal boosting added as `signal_boost.py` — 292 LOC, MAX_BOOST=0.3 cap, 45 tests). Decoder expansions: ROT13/Caesar brute-force (shifts 1–25 skip 13, 370k-word English dictionary validation, 10KB cap), Leetspeak normalizer (9 substitutions, 10% density gate), Reversed text (full-string + per-word), Morse code (ITU-R M.1677, 80% density gate, 4-layer FP defense — first-in-class), Binary/Octal/Decimal ASCII (three decoders, 70% printability gate, FP exemptions for Unix perms/IPs/versions — first-in-class), Pig Latin (consonant-cluster decoding, 50+ "-ay" exclusion set), Whitespace steganography (SNOW structural 0.95, statistical anomaly 0.70, simple binary 0.60, trailing-WS 0.50 — first-in-class), ASCII art detection (5-signal weighted vote summing to 1.0, Unicode box-drawing/braille/block — first-in-class against ArtPrompt ACL 2024), Syllable-splitting (25 Unicode dashes, 83 suspicious words, 77 compound whitelist, 50 safe prefixes — first-in-class against Meta Prompt Guard 2). Unicode Tag Character stego moved to Layer 0. Gap Closure Sprint 2026-02-28: content-type aware entropy thresholds (Track C — code/yaml/json raised 4.5→5.5, code-fence exemption, 26 tests) + encoding-chain depth/diversity scoring (Track D — depth bonus 0.05/level max 0.10, diversity bonus 0.02/type max 0.10, total boost [0.0, 0.20], 11 tests) + cross-track integration (27 tests). Package restructure: promoted from top-level/layer1 into `src/na0s/layer2/` on 2026-02-26 with backward-compat shims at old import paths. Hardcoded thresholds externalized via `_env_utils.py` (env-overridable). All 4 hardcoded values from the original TODO now live as named constants. See [CHANGELOG.md](CHANGELOG.md) v0.2.0 for the detailed per-feature history.
 
 ### TODO List
 
-#### DONE
-- [x] Shannon entropy calculation with configurable threshold — `obfuscation.py`
-- [x] Punctuation flood detection (≥30% ratio)
-- [x] Casing transition detection (≥6 transitions)
-- [x] Base64 validation + decoding
-- [x] Hex validation + decoding
-- [x] URL-encoded detection + decoding
-- [x] Recursive decode budget (`max_decodes=2`)
-- [x] Returns obfuscation_score, decoded_views, evasion_flags
-- [x] Decoded views re-classified through ML in predict.py
-- [x] Integration with both predict.py and cascade.py
-
-#### FIXES
-- [x] **FIX: Entropy threshold too low** — Replaced single threshold (4.0) with composite 2-of-3 voting: Shannon entropy (4.3/4.5) + KL-divergence from English + compression ratio. Added `_kl_divergence_from_english()`, `_compression_ratio()` helpers. 34 regression tests. ✅ DONE (2026-02-20) — Bug Bounty Team, verified by 2 independent agents
-- [x] **FIX: Flat decode budget** — Replaced flat `max_decodes=2` with recursive `_scan_single_layer()` + `obfuscation_scan()` (max_depth=4, cycle detection via SHA-256, expansion limit 10x). Peels nested base64(url("payload")) across multiple layers. ✅ DONE (2026-02-20) — Bug Bounty Team, verified by 2 independent agents
-- [x] **FIX: Combined signal boosting missing** — Multi-vector signal co-occurrence boost. When persona hijack / override / system extraction rules co-occur with encoding flags (base64, rot13, caesar_shift, pig_latin, etc.), additive boost (0.05-0.12 per combo) applied to composite score, capped at MAX_BOOST=0.3. Safety: context_suppressed bypass, single-signal-type guard, multi-encoding boost for layered obfuscation. `signal_boost.py` (292 lines), wired into `cascade.py` and `predict.py`. 45 tests. ✅ DONE (2026-02-28)
-
-#### NEW (Discovered by research)
-- [x] **ROT13/Caesar detection** — ROT13 decoder: applies `codecs.decode(text, 'rot_13')`, validates via attack-keyword matching (2+ unique hits). Explicit "ROT13:" label detection. Caesar brute-force (shifts 1-25, skip 13): 1150-word English dictionary validation + attack keyword matching, 10KB input cap. Decoded views fed through ML + L1 rules. Maps to D4.4. ✅ DONE (2026-02-21; Caesar brute-force 2026-02-28, 38 tests)
-- [x] **Leetspeak normalizer** — Substitution map (`0→o`, `1→i`, `3→e`, `4→a`, `5→s`, `7→t`, `@→a`, `$→s`, `!→i`), density threshold (>=10%), attack-keyword validation. Decoded views fed through ML + L1 rules. Maps to D4.5. ✅ DONE (2026-02-21)
-- [x] **Reversed text detection** — Full-string and per-word reversal with attack-keyword validation. Both variants added as decoded views for L1 rule matching. Maps to D4.6. ✅ DONE (2026-02-21)
-- [x] **Morse code detection** — ITU-R M.1677 Morse decoder with Unicode dot/dash normalization (6 dot + 4 dash variants), 80% density threshold, explicit label detection ("Morse:", "decode this morse:"), 4-layer FP defense (density gate, structure validation, min length, attack keyword validation). Integrated as obfuscation decoder + analyzer alt_view (step 6). First-in-class — CipherChat showed 55.3% ASR on GPT-4 via Morse; no competitor tool detects this. 88 tests. `morse_code.py`. Maps to D4.7. ✅ DONE (2026-02-25) — Review fix (2026-02-26): expanded HR regex to cover `***`/`___` markdown variants (+2 tests).
-- [x] **Binary/Octal/Decimal ASCII detection** — Three numeric decoders: binary (7/8-bit groups), octal (0-177), decimal (32-126). Quality-based disambiguation, explicit label detection ("binary:", "decimal ASCII:", "ascii codes:"), 5+ group minimum, 70% printability gate, FP exemptions (Unix perms, IPs, version numbers). Integrated as obfuscation decoder (D4.8) + analyzer alt_view (step 7). First-in-class — CipherChat showed ~100% ASR on GPT-4 via decimal ASCII; no competitor detects this. 110 tests. `numeric_decode.py`. ✅ DONE (2026-02-26) — Review fix (2026-02-26): hardened octal decode with per-char range validation (32-126 + whitespace) matching decimal's pattern.
-- [x] **Recursive Matryoshka unwrapper** — Enhanced `obfuscation_scan()` with `DecodedView` dataclass, encoding chain tracking (`decoded_chain`, `encoding_chains`, `max_depth_reached`), parent-child linkage via `parent_index`. Full backward compatibility — existing `decoded_views`/`evasion_flags`/`obfuscation_score` keys unchanged. First-in-class — no open-source prompt injection detector provides forensic encoding chain provenance. 58 tests. `test_matryoshka.py`. ✅ DONE (2026-02-26) — Review fix (2026-02-26): documented `_is_numeric_candidate` 3-tuple return as intentional deviation; moved 4 late imports to top-level in analyzer.py; updated analyzer docstring to list all 7 pre-processing steps.
-- [x] **Unicode Tag Character stego** — Extract hidden ASCII from U+E0001-U+E007F range. Implemented in L0 normalization.py Step 1.9. ✅ DONE (2026-02-22)
-- [x] **Whitespace stego (Snow-style)** — SNOW structural detection (0.95 confidence), statistical anomaly (0.70), simple binary encoding (0.60), trailing WS anomaly (0.50). CRLF-safe, env-configurable thresholds, 1MB input cap. First-in-class — no competitor detects this. 43 tests. `whitespace_stego.py`. ✅ DONE (2026-02-23)
-- [x] **ASCII art detection** — 5-signal weighted voting: art block detection (0.35), structural consistency (0.20), character concentration (0.20), vertical alignment (0.15), box patterns (0.10). Unicode box-drawing + braille + block element detection. Markdown table exemption, code fence penalty, alnum ratio penalty. First-in-class — ArtPrompt (ACL 2024) showed 100% ASR on all moderation tools. 67 tests. `ascii_art_detector.py`. ✅ DONE (2026-02-23)
-- [x] **Syllable-splitting detection** — De-hyphenation of 25 Unicode dash chars, ~75 suspicious words in 5 categories, ~60 compound whitelist, 40+ safe prefixes with override exception (over-ride→override). Integrated as analyzer alt_view (step 5). First-in-class — Meta Prompt Guard 2 classifies hyphenated attacks as 98.9% safe. 73 tests. `syllable_splitting.py`. ✅ DONE (2026-02-23)
-- [x] **Pig Latin detection** — Consonant-cluster decoding (`ignoreway`→`ignore`, `omptpray`→`prompt`), 50+ English "-ay" word exclusion set (today, play, okay...), 30% candidate threshold, attack-keyword + English dictionary validation. 10KB input cap. 36 tests. Integrated as obfuscation decoder in `_scan_single_layer()`. Maps to D4.6. ✅ DONE (2026-02-28)
-- [x] **Combined signal boosting** — Multi-vector co-occurrence detection. Frozenset combo pairs mapping categorised L1 rules (persona hijack, override/authority, system extraction, decode-execute) × L2 encoding flags to additive boost weights (0.05-0.12). Multi-encoding boost (0.10) for layered obfuscation (e.g. base64+hex). MAX_BOOST=0.3 cap. Wired into cascade.py and predict.py composite scoring. 45 tests + 27 cross-track integration tests. `signal_boost.py`. ✅ DONE (2026-02-28)
-- [x] **Content-type aware entropy thresholds (Track C)** — `_detect_content_type()` identifies code/yaml/json/config content; raises entropy threshold from 4.5 to 5.5 (`_CODE_ENTROPY_THRESHOLD`). `_is_inside_markdown_fence()` exempts code fence content from `high_entropy` flagging unless attack keywords are present. Eliminates FPs on legitimate technical content. 26 tests in test_fp_reduction.py. ✅ DONE (2026-02-28)
-- [x] **Encoding chain depth/diversity scoring (Track D)** — `_analyze_encoding_chain()` in obfuscation.py scores combined encoding chains: depth bonus (0.05 per nesting level beyond 1, max 0.10) + diversity bonus (0.02 per unique encoding type beyond 1, max 0.10). Returns boost in [0.0, 0.20] added to obfuscation_score. 11 tests in test_combined_obfuscation.py. ✅ DONE (2026-02-28)
-
-#### REMAINING (From original roadmap)
-- [x] ROT13 ← DONE (2026-02-21)
-- [x] Leetspeak ← DONE (2026-02-21)
-- [x] Reversed text ← DONE (2026-02-21)
-- [x] Binary encoding ← DONE (2026-02-26)
-- [x] Morse code ← DONE (2026-02-25)
-- [x] Whitespace injection ← done in L0 (invisible char stripping, whitespace canonicalization) + whitespace_stego.py (SNOW-style detection). ✅ DONE
-- [x] Unicode homoglyphs — angle bracket homoglyphs folded in L1 rules.py (2026-02-19); Cyrillic confusables handled in L0
-- [x] Invisible chars ← done in L0 normalization.py (Cf/Cc/Cn category stripping, post-normalization empty check). ✅ DONE
-
-### Hardcoded Values to Externalize
-| Value | Location | Current | Recommendation |
-|-------|----------|---------|----------------|
-| Entropy threshold | obfuscation.py | 4.3/4.5 | Now composite 2-of-3 voting (DONE) |
-| Punctuation ratio | obfuscation.py | 0.3 | Named constant |
-| Casing transitions | obfuscation.py | 6 | Named constant |
-| max_decodes | obfuscation.py | 2 | Raise to 5 with recursive unwrap |
-
-### Test Gaps (only 3 tests exist)
-- No test for: entropy detection, hex decoding, casing transitions, recursive decoding, edge cases (empty input, very large input), false positive scenarios
-
-### Implementation Plan
-**Phase 1 (P0)**: Fix entropy threshold, refactor to recursive unwrap loop, add ROT13 + reversed text detectors ✅ DONE (2026-02-20/21)
-**Phase 2 (P1)**: ~~Add leetspeak~~, Morse, binary/octal, syllable-splitting, ~~combined signal boosting~~ (leetspeak ✅ DONE 2026-02-21, signal boosting ✅ DONE 2026-02-28)
-**Phase 3 (P2)**: ~~Unicode tag stego~~✅ (moved to L0, 2026-02-22), ~~whitespace stego~~✅, ~~ASCII art detection~~✅ DONE (2026-02-23) — 3 first-in-class modules, 183 new tests, 8 audit fixes
-**Phase 4 (Restructuring)**: Promoted to `src/na0s/layer2/` package (2026-02-26). Moved `obfuscation.py`, `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py` from top-level/layer1 into `layer2/`. Backward-compat shims at old import paths. Zero regressions: 2862 tests passing.
-**Phase 5 (Full Implementation)**: Implemented `ascii_art_detector.py` (420+ lines, 5-signal weighted voting, Unicode box-drawing/braille/block detection, FP exemptions, 115 tests) and `syllable_splitting.py` (300+ lines, 25 Unicode dash chars, 83 suspicious words in 5 categories, 63 compound whitelist, 50+ safe prefixes with override exception, 144 tests). Created `test_whitespace_stego.py` (72 tests). Updated all backward-compat shims. Removed `@expectedFailure` from `test_d4_6_word_splitting` (now passes). 2955+ tests passing, zero regressions.
-
-#### REMAINING
-- [x] ~~**ascii_art_detector.py full implementation**~~ — DONE (2026-02-26). 5-signal weighted voting, Unicode detection, 115 tests.
-- [x] ~~**syllable_splitting.py full implementation**~~ — DONE (2026-02-26). 25 Unicode dashes, 83 suspicious words, 63 compound whitelist, 144 tests.
-- [x] ~~**FIX: Combined signal boosting missing**~~ — DONE (2026-02-28). Multi-vector co-occurrence boost in `signal_boost.py`, wired into cascade.py + predict.py. 45 tests. Security audit: 6/7 PASS, CPU exhaustion fixed with 10KB cap.
-- [x] ~~**Caesar cipher (non-13 shifts)**~~ — DONE (2026-02-28). Brute-force shifts 1-25 (skip 13), 1150-word English dictionary + attack keyword validation, 10KB input cap. 38 tests.
-- [x] ~~**Pig-latin detection**~~ — DONE (2026-02-28). Consonant-cluster decoding, 50+ English "-ay" word exclusion set, 10KB input cap. 36 tests.
-- [x] ~~**Cross-track integration tests**~~ — DONE (2026-02-28). 27 tests verifying signal boost + Caesar + Pig Latin work together. 4 formerly-xfail D4 tests now pass.
+**Documentation (identified 2026-04-16 by source-grounded audit):**
+- [ ] `obfuscation.py:136` — `shannon_entropy()` is a public function (exported from `__init__.py`) but has no docstring. Every other public function in Layer 2 is documented. **Fix**: add one-line docstring with Args/Returns.
 
 ---
 
-## Layer 3: Structural Feature Extraction — Tasks: 21/21 (COMPLETE)
+## Layer 3: Structural Feature Extraction — Tasks: 22/25 (88%)
 
-**Files**: `src/na0s/structural_features.py`
-**Tests**: `tests/test_structural_features.py` (135 tests)
-**Status**: Implemented and WIRED into predict.py (2026-02-14) — injection signals contribute weighted scores
+### Description
+Layer 3 extracts **29 numeric features** from input text that characterize prompt structure, style, and injection intent. Features span 7 groups: length metrics (3), casing patterns (3), punctuation analysis (4), structural markers (5), injection signals (6), context features (3), and advanced detection (5 — `many_shot_count` for many-shot jailbreaks, `delimiter_density` for markdown/XML injection, `template_marker_count` for `{{var}}`/`{placeholder}`/`<|slot|>` patterns, `language_mixing_score` across 6 Unicode script families, `repetition_score` via trigram-ratio for crescendo attacks). Returns a `StructuralFeatures` dataclass with dict-like access (`[]`, `.get()`, `in`, `.keys()`, `.items()`, `.to_dict()`) — 29 typed fields, backward compatible with the plain-dict callers that existed before the 2026-02-20 conversion. `normalize_features()` applies soft-cap clipping to [0,1] for 12 unbounded features (`char_count`, `word_count`, `quote_depth`, etc.) — raw values are preserved for threshold-based decisions in [predict.py](src/na0s/predict.py). Wired into the ML pipeline as of 2026-03-12: `scripts/features.py` fits a `StandardScaler` on structural features at training time, hstacks with sparse TF-IDF into a combined feature matrix, and serializes the scaler as `structural_scaler.pkl`; at inference time `_get_cached_scaler()` loads it with thread-safe caching and `_transform()` hstacks TF-IDF + scaled structural at all 5 inference sites (predict, concat-game decode, escape decode, decoded-view re-classification, cascade). Four helpers do the careful work: `_split_sentences()` with a 30-entry `_ABBREVIATIONS` frozenset (so "Dr. Smith" doesn't split), `_compute_quote_depth()` with an apostrophe heuristic (so `"it's"` doesn't mis-count), `_count_script_families()` for Unicode script detection, and `_compute_repetition_score()` for trigram ratios. Taxonomy mapping in `predict.py`'s `_STRUCTURAL_TECHNIQUE_MAP` connects 4 boolean features plus an entropy threshold to technique tags (D1/D2/D3/D4/D6/D8). Historical bug fixes and sprint-by-sprint detail in [CHANGELOG.md](CHANGELOG.md) v0.2.0.
 
-### Updated Description
-Layer 3 extracts 24 numeric features from input text that characterize prompt structure, style, and injection signals. Features span 6 groups: length metrics (3), casing patterns (3), punctuation analysis (4), structural markers (5), injection signal detection (6), and context features (3). The module is self-contained and functional (~0.3ms/sample). Wired into predict.py as of 2026-02-14 (injection signals contribute weighted scores). Returns `StructuralFeatures` dataclass with dict-like access (`[]`, `.get()`, `in`, `.keys()`, `.items()`, `.to_dict()`). Includes `normalize_features()` with soft caps for ML classifiers, abbreviation-aware sentence splitting, and apostrophe-safe quote depth.
+**Target directory structure** (v1.0.0 refactor — `structural_features.py` → `structural/` package for consistency with `input/`, `rules/`, `obfuscation/`):
+```
+src/na0s/structural/                               tests/structural/
+│                                                  │
+├── __init__.py           ← public API + __all__   ├── __init__.py
+├── features.py           ← StructuralFeatures     ├── test_features.py          ← 135 tests
+│                           dataclass + 29 fields  │
+├── extractors.py         ← extract_structural_    ├── test_extractors.py
+│                           features() + batch API │
+├── normalize.py          ← normalize_features()   ├── test_normalize.py
+│                           + UNBOUNDED_FEATURE_CAPS│
+├── sentences.py          ← _split_sentences +     ├── test_sentences.py
+│                           _ABBREVIATIONS          │
+├── quotes.py             ← _compute_quote_depth   ├── test_quotes.py
+│                           with apostrophe heuristic│
+└── patterns.py           ← imperative verbs,      └── test_patterns.py
+                            boundary patterns,
+                            URL/email regex
+                            (shared with rules/)
+
+v1.0.0 consolidation:
+  - `_BOUNDARY_PATTERNS` and `_IMPERATIVE_VERBS` currently duplicated with rules/; consolidate
+    into `structural/patterns.py` as canonical source, rules/ imports from there.
+  - `scripts/features.py` remains at top level (pipeline tool, not runtime).
+
+Note: the 5 new advanced-detection features (`many_shot_count`, `delimiter_density`,
+`template_marker_count`, `language_mixing_score`, `repetition_score`) stay on the
+same dataclass — they are features, not a separate subsystem.
+
+Totals: 6 source files │ tests organized under tests/structural/
+```
+
+### Completed (22 items)
+
+Core extraction: 29 features across 7 groups on a `StructuralFeatures` dataclass with full dict-like interface. Batch API `extract_structural_features_batch(texts, normalize=False)` → `numpy.ndarray` shape `(n, 29)`, pre-compiled regex patterns at import time, built-in `__main__` demo. `normalize_features()` with `UNBOUNDED_FEATURE_CAPS` (12 features capped to [0,1]). ML pipeline integration (2026-03-12): `scripts/features.py` builds the combined TF-IDF + scaled-structural matrix with `StandardScaler` fitted on structural features (chosen over `normalize_features()` to avoid double-scaling), serialized as `structural_scaler.pkl`. `_get_cached_scaler()` + `_transform()` integrate at 5 inference sites across [predict.py](src/na0s/predict.py) and [cascade.py](src/na0s/cascade.py); backward compatible (returns TF-IDF-only when scaler absent). 6 audit fixes on 2026-02-20: docstring count drift, apostrophe-safe quote depth, abbreviation-aware sentence splitting (30+ entry frozenset, single-letter initial detection), email regex TLD requirement, unbounded-value normalization via `UNBOUNDED_FEATURE_CAPS`, and dataclass conversion. 6 new features on 2026-02-26: taxonomy mapping via `_STRUCTURAL_TECHNIQUE_MAP` in predict.py, `many_shot_count` (D8, threshold ≥5), `delimiter_density` (D3, threshold >2.0), `template_marker_count` (D3.4, threshold ≥1), `language_mixing_score` (D6, threshold ≥2 across 6 script families), `repetition_score` (D8.1, trigram ratio >0.3). Test coverage: 135 tests in [tests/test_structural_features.py](tests/test_structural_features.py) covering edge cases (empty, None, very long), [0,1] value ranges, binary feature correctness, batch consistency, dataclass interface, quote-depth with apostrophes, abbreviation-aware sentence splitting, email regex TLD, `normalize_features()` soft caps. Structural features also exercised by ~12 other test files (~490 more tests). See [CHANGELOG.md](CHANGELOG.md) v0.2.0 for the per-feature history.
 
 ### TODO List
 
-#### DONE
-- [x] 24 structural features extracted from text — `structural_features.py`
-  - Length: `char_count`, `word_count`, `avg_word_length`
-  - Casing: `uppercase_ratio`, `title_case_words`, `all_caps_words`
-  - Punctuation: `exclamation_count`, `question_count`, `special_char_ratio`, `consecutive_punctuation`
-  - Structural: `line_count`, `has_code_block`, `has_url`, `has_email`, `newline_ratio`
-  - Injection signals: `imperative_start` (20-verb frozenset), `role_assignment`, `instruction_boundary`, `negation_command`, `quote_depth`, `text_entropy`
-  - Context: `question_sentence_ratio`, `first_person_ratio`, `second_person_ratio`
-- [x] Batch extraction: `extract_structural_features_batch(texts)` → `numpy.ndarray` shape `(n, 24)` dtype `float64`
-- [x] Pre-compiled regex patterns at import time
-- [x] Built-in `__main__` demo with 3 test prompts
+**Polish (low priority, cosmetic):**
+- [ ] **Externalize URL regex** — `_URL_PATTERN = re.compile(r"https?://...")` at `structural_features.py` covers only http/https. Consider ftp/file/custom schemes or move to a shared module. **Priority**: P3. **Effort**: Trivial.
+- [ ] **Externalize `_BOUNDARY_PATTERNS`** — 7 markers currently hardcoded in `structural_features.py`. They overlap with L1 rule patterns; consolidate into a shared pattern module in the v1.0.0 refactor. **Priority**: P3. **Effort**: Low.
+- [ ] **Externalize imperative-verb frozenset** — 33 verbs currently hardcoded. The v1.0.0 target-tree `structural/patterns.py` should be the canonical source, with rules/ importing from it. **Priority**: P3. **Effort**: Low.
 
-#### FIXES
-- [x] **FIX-L3-1 (LOW)**: Docstring says `~21 features` — actual count is 24. **Fix**: Update docstring. ✅ DONE (2026-02-20) — Module docstring updated with accurate description and Parameters/Returns sections
-- [x] **FIX-L3-2 (LOW)**: Quote depth logic — toggle-based stack doesn't handle mixed nested quotes correctly (e.g., `'He said "it's" here'`). Single-quote-as-apostrophe causes mis-counting. **Fix**: Track quote type separately or use regex-based quote matching. ✅ DONE (2026-02-20) — `_compute_quote_depth()` rewritten with apostrophe heuristic: single quote preceded by word char treated as apostrophe, not quote delimiter
-- [x] **FIX-L3-3 (MEDIUM)**: Sentence splitting regex `(?<=[.!?])["\')]*\s+` — confused by abbreviations (e.g., "Dr. Smith") and trailing quotes. **Fix**: Use `re.split(r'[.!?]+\s+', text)` or a sentence tokenizer. ✅ DONE (2026-02-20) — New `_split_sentences()` with `_ABBREVIATIONS` frozenset (30+ entries), single-letter initial detection, handles closing quotes/parens
-- [x] **FIX-L3-4 (MEDIUM)**: Email regex `\w+@\w+` too loose — matches `a@b` (2 chars), no domain TLD requirement. **Fix**: Use `r"\w+@\w+\.\w+"`. ✅ DONE (2026-02-20) — `_EMAIL_PATTERN = re.compile(r"\w+@\w+\.\w+")`
-- [x] **FIX-L3-5 (MEDIUM)**: Unbounded feature values — `char_count`, `word_count`, `quote_depth`, `text_entropy` have no normalization. When combined with ML classifier expecting [0,1] features, large counts cause numerical instability. **Fix**: Add min-max normalization or use `StandardScaler` in pipeline. ✅ DONE (2026-02-20) — `UNBOUNDED_FEATURE_CAPS` dict (12 features) + `normalize_features()` with soft-cap clipping to [0,1]. `extract_structural_features_batch(normalize=True)` parameter added. Raw values preserved for threshold-based decisions in predict.py.
-- [x] **FIX-L3-6 (MEDIUM)**: Returns plain `dict` instead of a dataclass — inconsistent with `Layer0Result`, `ScanResult`, etc. **Fix**: Create `StructuralFeatures` dataclass or `@dataclass` with typed fields. ✅ DONE (2026-02-20) — `StructuralFeatures` dataclass with 24 typed fields, dict-like interface (`[]`, `.get()`, `in`, `.keys()`, `.values()`, `.items()`, `.to_dict()`), backward compatible
-
-#### NEW (Discovered by research)
-- [x] **Taxonomy mapping** — Map structural features to technique IDs. `imperative_start`→D1.x, `role_assignment`→D2.x, `instruction_boundary`→D3.x, `text_entropy`→D4.x, `negation_command`→D1.x. **Priority**: P0. ✅ DONE (2026-02-26) — `_STRUCTURAL_TECHNIQUE_MAP` in predict.py maps 4 boolean features + entropy threshold to technique tags. 7 tests added.
-- [x] **Many-shot detection** — Count repeated instruction patterns (e.g., "Example 1:... Example 2:... Example 50:..."). Many-shot jailbreaking is a top attack. **Priority**: P1. ✅ DONE (2026-02-26) — `many_shot_count` feature in structural_features.py, threshold >=5 → `structural:many_shot` hit + D8 taxonomy tag. 6 unit + 2 integration tests.
-- [x] **Delimiter density** — Ratio of markdown/XML delimiters per line. High density = structural injection attempt. **Priority**: P1. ✅ DONE (2026-02-26) — `delimiter_density` feature (delimiters/line), threshold >2.0 → `structural:delimiter_density` hit + D3 taxonomy tag. 5 unit + 1 integration tests.
-- [x] **Prompt template markers** — Detect `{{variable}}`, `{placeholder}`, `<|slot|>` patterns that indicate template injection. **Priority**: P1. ✅ DONE (2026-02-26) — `template_marker_count` feature, threshold >=1 → `structural:template_marker` hit + D3.4 taxonomy tag. 6 unit + 2 integration tests.
-- [x] **Language mixing score** — Detect multiple languages in same prompt (multilingual bypass). **Priority**: P2. ✅ DONE (2026-02-26) — `language_mixing_score` feature (6 Unicode script families: Latin, Cyrillic, Arabic, CJK, Devanagari, Hebrew), threshold >=2 → `structural:language_mixing` hit + D6 taxonomy tag. 6 unit tests.
-- [x] **Repetition score** — N-gram repetition ratio. High repetition = resource exhaustion or crescendo attack. **Priority**: P2. ✅ DONE (2026-02-26) — `repetition_score` feature (word-level trigram ratio), threshold >0.3 → `structural:repetition` hit + D8.1 taxonomy tag. 5 unit + 2 integration tests.
-
-#### REMAINING (From original roadmap)
-- [x] **Wire into features.py** — `scipy.sparse.hstack([X_tfidf, X_structural_scaled])` to create combined feature matrix. StandardScaler fitted on structural features, saved as `structural_scaler.pkl`. **Priority**: P0. ✅ DONE (2026-03-12) — `scripts/features.py` extracts 29 structural features via `extract_structural_features_batch()`, fits `StandardScaler`, hstacks sparse TF-IDF + scaled structural, saves combined `features.pkl` + `structural_scaler.pkl`.
-- [x] **Wire into predict.py** — Call `extract_structural_features()` before ML prediction, stack with vectorizer output. **Priority**: P0. ✅ DONE (2026-02-14, extended 2026-03-12) — `_get_cached_scaler()` loads scaler with thread-safe caching. `_transform()` helper hstacks TF-IDF + scaled structural features at all 5 inference sites (predict, concat game, escape decode, decoded views). Backward compatible: returns TF-IDF-only when scaler not available.
-- [x] **Wire into cascade.py** — Same integration in `WeightedClassifier.classify()`. **Priority**: P0. ✅ DONE (2026-02-14, extended 2026-03-12) — Imports `_get_cached_scaler`, `_transform` from predict.py. `WeightedClassifier.classify()` uses `_transform()` for ML input.
-- [x] **Retrain model on combined features** — After wiring, retrain with 10029-dimensional feature vectors (10000 TF-IDF + 29 structural). **Priority**: P0. ✅ DONE (2026-03-12) — `scripts/features.py` produces combined matrix. `scripts/model.py` trains on whatever shape `features.pkl` provides (transparent).
-- [x] **Add feature normalization** — `StandardScaler` for structural features before combining with TF-IDF. **Priority**: P0. ✅ DONE (2026-03-12) — StandardScaler fitted on structural features during training, serialized as `structural_scaler.pkl`, loaded at inference via `_get_cached_scaler()`. Security audit: StandardScaler chosen over `normalize_features()` to avoid double-scaling.
-
-### Hardcoded Values to Externalize
-| Value | Location | Current | Recommendation |
-|-------|----------|---------|----------------|
-| Imperative verbs | structural_features.py:21-26 | 20-verb frozenset | Configurable list or data file |
-| Role patterns | structural_features.py:28-31 | 4 regex patterns | Shared with rules.py |
-| Boundary patterns | structural_features.py:33-37 | 7 markers | Shared with rules.py |
-| Email regex | structural_features.py:47 | `\w+@\w+` | Fix: require TLD |
-| URL regex | structural_features.py:45 | `https?://` | Add ftp, custom schemes |
-| Quote depth | structural_features.py:100-113 | Unbounded | Cap at ~10 |
-
-### Test Gaps
-- ~~Zero test coverage — no `test_structural_features.py` exists~~ ✅ RESOLVED (2026-02-20) — 135 tests in `tests/test_structural_features.py` covering: edge cases (empty, None, very long), feature value ranges [0,1], binary feature correctness, batch consistency, StructuralFeatures dataclass interface, quote depth with apostrophes, abbreviation-aware sentence splitting, email regex TLD requirement, normalize_features with soft caps
-- Remaining: performance benchmarks, taxonomy mapping validation
-
-### Implementation Plan
-**Phase 1 (P0 — Wire & Fix)**: ~~Wire into features.py~~ + ~~predict.py~~ + ~~cascade.py~~ ALL DONE (2026-03-12), ~~add feature normalization~~ DONE (StandardScaler), ~~retrain model~~ DONE (pipeline ready), ~~add taxonomy mapping~~ DONE, ~~fix email regex and unbounded features~~ DONE
-**Phase 2 (P1 — Expand)**: ~~Add many-shot detection, delimiter density, prompt template markers, create StructuralFeatures dataclass~~ ALL DONE
-**Phase 3 (P2 — Extend)**: ~~Language mixing score, repetition score, comprehensive test suite~~ ALL DONE
+**Performance / coverage gaps:**
+- [ ] **Benchmark `extract_structural_features()` throughput** — the original roadmap claimed "~0.3ms/sample" but no timing code or benchmark exists. Add `scripts/bench_structural.py` with a 1000-sample run; record median + p99 latency in `BENCHMARK_RESULTS.md`. **Priority**: P2. **Effort**: Trivial.
+- [ ] **Enforce quote-depth cap at compute site** — `_compute_quote_depth()` is unbounded; the cap lives in `UNBOUNDED_FEATURE_CAPS` (normalize-time) but not at extraction. Pathological input with thousands of nested quotes still produces a huge raw value. Add an in-function cap (~10) to short-circuit. **Priority**: P3. **Effort**: Trivial.
 
 ---
 
@@ -1123,7 +1021,7 @@ Layer 12 is the adversarial testing framework. Base classes (`Probe`, `Classifie
 ### Updated Description
 Layer 13 manages the full data lifecycle: discovery → download → integration → validation → training → deployment. `sync_datasets.py` downloads 23 external datasets (GitHub CSVs + HuggingFace) with SHA-256/commit-SHA freshness checking and lock files. `integrate_harvest.py` bridges harvest/scrape JSONL output into training CSVs. `process_data.py` merges all raw CSVs + JSONLs with Unicode-normalized SHA-256 deduplication and stable hash ordering. `validate_data.py` checks schema, text quality, class balance, duplicates, and label consistency. `features.py` extracts TF-IDF features (10K max). `model.py` trains a calibrated LogisticRegression. `deploy_model.py` copies models to package dir and updates KNOWN_HASHES programmatically. `auto-retrain.yml` orchestrates the full pipeline on schedule (Tuesday 8 AM UTC), after harvest/scraper workflows, or on manual trigger — creating a PR with the retrained model. Total dataset: **1.92M unique samples** (1.13M safe + 789K malicious, 88% accuracy).
 
-### TODO List
+### TODO
 
 #### DONE
 - [x] Registry-driven sync from `data/datasets.yaml` — SHA-256 hashes, git commit SHAs, lock file — `sync_datasets.py`

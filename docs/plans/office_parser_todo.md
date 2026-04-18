@@ -14,7 +14,7 @@
 |------|------:|---------|
 | `src/na0s/predict.py` | 1784 | Unified `scan()` entry point; 21-layer classification pipeline; returns `ScanResult` |
 | `src/na0s/cascade.py` | 1483 | `CascadeClassifier.scan()` -- whitelist + weighted voting + LLM judge; returns `ScanResult` |
-| `src/na0s/layer1/rules_registry.py` | ~800 | 110 pre-compiled regex rules; `classify_prompt()` delegates to `rule_score_detailed()` |
+| `src/na0s/layer1/rules_registry.py` | ~800 | 117 pre-compiled regex rules; `classify_prompt()` delegates to `rule_score_detailed()` |
 | `src/na0s/scan_result.py` | 48 | `ScanResult` dataclass -- label, risk_score, technique_tags, rule_hits, anomaly_flags, etc. |
 | `src/na0s/__init__.py` | 50 | Public API: `scan()`, `CascadeClassifier`, `scan_output()`, `scan_image()` |
 | `src/na0s/layer0/doc_extractor.py` | 673 | Naive doc extraction (PDF/DOCX/XLSX/PPTX/RTF) via 3rd-party libs; returns `DocResult` with flat text blob |
