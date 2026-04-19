@@ -1,0 +1,14 @@
+{
+  "total_new": 40478,
+  "timestamp": "2026-04-19T18:42:22.456666+00:00",
+  "sources": [
+    "twitter",
+    "datasets",
+    "reddit"
+  ],
+  "records_per_source": {
+    "twitter": 0,
+    "datasets": 86827,
+    "reddit": 0
+  }
+}
