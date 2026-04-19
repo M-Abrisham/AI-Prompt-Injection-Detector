@@ -125,7 +125,7 @@ except ImportError:
 
 # Layer 9: Output scanner — optional import
 try:
-    from .output_scanner import OutputScanner
+    from .output import OutputScanner
     _HAS_OUTPUT_SCANNER = True
 except ImportError:
     _HAS_OUTPUT_SCANNER = False

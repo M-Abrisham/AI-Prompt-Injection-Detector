@@ -7,9 +7,9 @@ from unittest import mock
 
 import pytest
 
-from na0s.rag_attribution import RAGAttributionChecker
-from na0s.segment_grader import SegmentGrader
-from na0s.output_scanner import OutputScanner
+from na0s.output import RAGAttributionChecker
+from na0s.output import SegmentGrader
+from na0s.output import OutputScanner
 
 
 # ──────────────────────────────────────────────────────────────

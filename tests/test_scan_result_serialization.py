@@ -5,7 +5,7 @@ import json
 import pytest
 
 from na0s.scan_result import ScanResult
-from na0s.output_scanner import OutputScanResult
+from na0s.output import OutputScanResult
 
 
 # ---------------------------------------------------------------------------

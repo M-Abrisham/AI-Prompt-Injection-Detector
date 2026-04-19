@@ -17,7 +17,7 @@ import unittest
 # Disable scan timeout for test environment
 os.environ["SCAN_TIMEOUT_SEC"] = "0"
 
-from na0s.output_scanner import OutputScanner, OutputScanResult
+from na0s.output import OutputScanner, OutputScanResult
 
 
 def _make_scanner(sensitivity="medium"):

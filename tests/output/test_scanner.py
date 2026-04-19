@@ -27,7 +27,7 @@ import sys
 import unittest
 
 
-from na0s.output_scanner import OutputScanner, OutputScanResult
+from na0s.output import OutputScanner, OutputScanResult
 
 
 # ---------------------------------------------------------------------------

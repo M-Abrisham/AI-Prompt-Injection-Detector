@@ -11,8 +11,8 @@ from __future__ import annotations
 import threading
 from typing import Optional
 
-from na0s.rag.output_scanner import OutputScanner, OutputScanResult
-from na0s.rag.propagation import PropagationScanner
+from .scanner import OutputScanner, OutputScanResult
+from .propagation import PropagationScanner
 
 
 # ---------------------------------------------------------------------------
