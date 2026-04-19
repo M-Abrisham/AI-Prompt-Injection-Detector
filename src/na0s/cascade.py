@@ -20,7 +20,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from .predict import _get_cached_models, _get_cached_scaler, _transform, _get_model_version
-from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN
+from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .config import THRESHOLDS, MAX_INPUT_LENGTH
 from .layer2 import obfuscation_scan
 from .layer0 import layer0_sanitize

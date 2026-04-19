@@ -65,29 +65,14 @@ except ImportError:  # pragma: no cover
     EmbeddingDriftDetector = None  # type: ignore[misc,assignment]
 
 try:
-    from na0s.layer16.detectors.pattern_recall import PatternRecallDetector
+    from na0s.layer16.detectors.cot_compliance import CoTComplianceDetector
 except ImportError:  # pragma: no cover
-    PatternRecallDetector = None  # type: ignore[misc,assignment]
+    CoTComplianceDetector = None  # type: ignore[misc,assignment]
 
 try:
-    from na0s.layer16.detectors.mutual_information import MutualInformationDetector
+    from na0s.layer16.detectors.scheming import SchemingDetector
 except ImportError:  # pragma: no cover
-    MutualInformationDetector = None  # type: ignore[misc,assignment]
-
-try:
-    from na0s.layer16.detectors.conversation_fsm import ConversationFSMDetector
-except ImportError:  # pragma: no cover
-    ConversationFSMDetector = None  # type: ignore[misc,assignment]
-
-try:
-    from na0s.layer16.detectors.code_switching import CodeSwitchingDetector
-except ImportError:  # pragma: no cover
-    CodeSwitchingDetector = None  # type: ignore[misc,assignment]
-
-try:
-    from na0s.layer16.detectors.change_point import ChangePointDetector
-except ImportError:  # pragma: no cover
-    ChangePointDetector = None  # type: ignore[misc,assignment]
+    SchemingDetector = None  # type: ignore[misc,assignment]
 
 
 def _compute_recommendation(alerts: List[Alert]) -> str:
@@ -152,16 +137,10 @@ class ConversationSecurityMonitor:
             detectors.append(BehavioralStylometryDetector())
         if EmbeddingDriftDetector is not None:
             detectors.append(EmbeddingDriftDetector())
-        if PatternRecallDetector is not None:
-            detectors.append(PatternRecallDetector())
-        if MutualInformationDetector is not None:
-            detectors.append(MutualInformationDetector())
-        if ConversationFSMDetector is not None:
-            detectors.append(ConversationFSMDetector())
-        if CodeSwitchingDetector is not None:
-            detectors.append(CodeSwitchingDetector())
-        if ChangePointDetector is not None:
-            detectors.append(ChangePointDetector())
+        if CoTComplianceDetector is not None:
+            detectors.append(CoTComplianceDetector())
+        if SchemingDetector is not None:
+            detectors.append(SchemingDetector())
         return detectors
 
     # ------------------------------------------------------------------

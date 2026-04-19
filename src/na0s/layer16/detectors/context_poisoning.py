@@ -191,6 +191,16 @@ def _has_false_reference(text: str, has_prior_agreement: bool, has_prior_turns: 
     return not has_prior_agreement
 
 
+def _count_false_references(state: ConversationState) -> int:
+    """Return the count of user turns containing false prior-agreement references.
+
+    Thin wrapper over :func:`_false_reference_turn_indices` kept as a stable
+    module-level helper for callers (and performance regression tests) that
+    only need the count, not the turn indices.
+    """
+    return len(_false_reference_turn_indices(state))
+
+
 def _false_reference_turn_indices(state: ConversationState) -> List[int]:
     """Return global turn indices where false prior references are detected."""
     indices: List[int] = []
