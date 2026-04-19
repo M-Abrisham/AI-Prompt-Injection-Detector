@@ -876,12 +876,24 @@ class TestPerformance(unittest.TestCase):
     """Performance tests for homoglyph normalization."""
 
     def test_normal_text_10k_words(self):
-        """10,000 words of normal text normalizes in under 500ms."""
+        """10,000 words of normal text normalizes in under 1 second.
+
+        Rationale for the 1s bound (vs the original 500ms target):
+        Local dev hardware runs this in ~60-80ms (well under 500ms), but
+        GitHub Actions shared runners -- especially the Python 3.10 image --
+        exhibit significant variance and intermittently hit 500-550ms on
+        this input.  The 500ms bound was too tight for CI hardware.
+
+        1.0s leaves ~15x headroom over the fast path and ~2x over the
+        observed CI p99, while still catching any real algorithmic
+        regression (the function is O(n) in input size, so a quadratic
+        bug would blow well past 1s on 310k chars).
+        """
         text = "normal text without any tricks " * 10000
         start = time.monotonic()
         normalize_homoglyphs(text)
         elapsed = time.monotonic() - start
-        self.assertLess(elapsed, 0.5,
+        self.assertLess(elapsed, 1.0,
                         "Too slow: {:.3f}s for 10k words".format(elapsed))
 
     def test_adversarial_all_mixed_words(self):

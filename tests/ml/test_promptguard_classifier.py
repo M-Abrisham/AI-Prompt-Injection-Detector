@@ -174,25 +174,31 @@ class TestModelLoading:
 
     def test_ensure_loaded_failure_sets_init_failed(self):
         original = pgc._HAS_TRANSFORMERS
-        # Ensure the module-level names exist for mocking
-        had_at = hasattr(pgc, "AutoTokenizer")
-        had_am = hasattr(pgc, "AutoModelForSequenceClassification")
+        # Always replace the module-level names with fresh MagicMocks so we
+        # can set .side_effect regardless of whether transformers is really
+        # installed in the environment (CI installs it; local dev may not).
+        # Preserve originals for restoration in the finally block.
+        _sentinel = object()
+        orig_at = getattr(pgc, "AutoTokenizer", _sentinel)
+        orig_am = getattr(pgc, "AutoModelForSequenceClassification", _sentinel)
         try:
             pgc._HAS_TRANSFORMERS = True
-            if not had_at:
-                pgc.AutoTokenizer = mock.MagicMock()
-            if not had_am:
-                pgc.AutoModelForSequenceClassification = mock.MagicMock()
+            pgc.AutoTokenizer = mock.MagicMock()
+            pgc.AutoModelForSequenceClassification = mock.MagicMock()
             clf = pgc.PromptGuardClassifier(model_name="bad-model")
             pgc.AutoTokenizer.from_pretrained.side_effect = OSError("not found")
             assert clf._ensure_loaded() is False
             assert clf._init_failed is True
         finally:
             pgc._HAS_TRANSFORMERS = original
-            if not had_at:
+            if orig_at is _sentinel:
                 delattr(pgc, "AutoTokenizer")
-            if not had_am:
+            else:
+                pgc.AutoTokenizer = orig_at
+            if orig_am is _sentinel:
                 delattr(pgc, "AutoModelForSequenceClassification")
+            else:
+                pgc.AutoModelForSequenceClassification = orig_am
 
     def test_ensure_loaded_skips_after_failure(self):
         clf = pgc.PromptGuardClassifier()
@@ -207,14 +213,17 @@ class TestModelLoading:
     def test_thread_safety_of_loading(self):
         """Multiple threads calling _ensure_loaded concurrently should load once."""
         original = pgc._HAS_TRANSFORMERS
-        had_at = hasattr(pgc, "AutoTokenizer")
-        had_am = hasattr(pgc, "AutoModelForSequenceClassification")
+        # Always replace module-level transformers names with fresh MagicMocks
+        # so that .from_pretrained can be reassigned. If transformers is truly
+        # installed, these attributes are real classes whose bound methods
+        # can't be patched by simple attribute assignment on the function.
+        _sentinel = object()
+        orig_at = getattr(pgc, "AutoTokenizer", _sentinel)
+        orig_am = getattr(pgc, "AutoModelForSequenceClassification", _sentinel)
         try:
             pgc._HAS_TRANSFORMERS = True
-            if not had_at:
-                pgc.AutoTokenizer = mock.MagicMock()
-            if not had_am:
-                pgc.AutoModelForSequenceClassification = mock.MagicMock()
+            pgc.AutoTokenizer = mock.MagicMock()
+            pgc.AutoModelForSequenceClassification = mock.MagicMock()
 
             clf = pgc.PromptGuardClassifier(model_name="mock-model")
             load_count = {"n": 0}
@@ -249,10 +258,14 @@ class TestModelLoading:
             assert clf._model is not None
         finally:
             pgc._HAS_TRANSFORMERS = original
-            if not had_at:
+            if orig_at is _sentinel:
                 delattr(pgc, "AutoTokenizer")
-            if not had_am:
+            else:
+                pgc.AutoTokenizer = orig_at
+            if orig_am is _sentinel:
                 delattr(pgc, "AutoModelForSequenceClassification")
+            else:
+                pgc.AutoModelForSequenceClassification = orig_am
 
 
 # -----------------------------------------------------------------------

@@ -236,9 +236,26 @@ class TestDetectorEmbeddingIntegration:
         assert result["confidence"] == 0.0
 
 
+def _live_embedding_available() -> bool:
+    """True only if sentence-transformers is installed AND the model loads.
+
+    Installing the package is not sufficient: in sandboxed CI the model
+    weights may not be cached locally and cannot be downloaded, so
+    ``_EmbeddingSimilarity`` falls back to an unavailable state and
+    returns all zeros.  These live tests assert on real similarity values,
+    so skip them unless a working scorer is present.
+    """
+    if not _HAS_SENTENCE_TRANSFORMERS:
+        return False
+    try:
+        return _EmbeddingSimilarity.get_instance().available
+    except Exception:
+        return False
+
+
 @pytest.mark.skipif(
-    not _HAS_SENTENCE_TRANSFORMERS,
-    reason="sentence-transformers not installed",
+    not _live_embedding_available(),
+    reason="sentence-transformers model not loadable (offline / uncached)",
 )
 class TestEmbeddingSimilarityLive:
     """Tests that run only when sentence-transformers is actually installed."""

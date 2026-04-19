@@ -10,10 +10,23 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 # Ensure the scripts directory is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+
+
+def _recent_iso(days_ago=1):
+    """Return an ISO-8601 Z-suffixed timestamp ``days_ago`` days in the past.
+
+    Test fixtures use these so the ``since_days`` cutoff in the scanners
+    always falls before them regardless of the calendar date on which the
+    suite runs.  Hardcoding a fixed date would make the tests drift out of
+    the window over time.
+    """
+    dt = datetime.now(timezone.utc) - timedelta(days=days_ago)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # ===================================================================
@@ -100,7 +113,7 @@ class TestScanHuggingFace(unittest.TestCase):
         mock_get.return_value = _make_http_response(json_data=[
             {
                 "id": "user/prompt-injection-v1",
-                "lastModified": "2026-02-27T12:00:00Z",
+                "lastModified": _recent_iso(days_ago=1),
                 "description": "A prompt injection dataset",
             },
         ])
@@ -116,9 +129,10 @@ class TestScanHuggingFace(unittest.TestCase):
     def test_scan_hf_filters_known(self, mock_get, mock_sleep):
         from weekly_harvest import scan_huggingface
 
+        recent = _recent_iso(days_ago=1)
         mock_get.return_value = _make_http_response(json_data=[
-            {"id": "user/known-ds", "lastModified": "2026-02-27T12:00:00Z"},
-            {"id": "user/new-ds", "lastModified": "2026-02-27T12:00:00Z"},
+            {"id": "user/known-ds", "lastModified": recent},
+            {"id": "user/new-ds", "lastModified": recent},
         ])
 
         results = scan_huggingface(
@@ -168,7 +182,7 @@ class TestScanHuggingFace(unittest.TestCase):
             return _make_http_response(json_data=[
                 {
                     "id": f"user/ds-{call_count['n']}",
-                    "lastModified": "2026-02-27T12:00:00Z",
+                    "lastModified": _recent_iso(days_ago=1),
                 },
             ])
 
@@ -188,7 +202,7 @@ class TestScanHuggingFace(unittest.TestCase):
         mock_get.return_value = _make_http_response(json_data=[
             {
                 "id": "org/dataset-name",
-                "lastModified": "2026-02-27T12:00:00Z",
+                "lastModified": _recent_iso(days_ago=1),
                 "description": "Some description",
             },
         ])
@@ -222,7 +236,7 @@ class TestScanArxiv(unittest.TestCase):
                 "arxiv_id": "http://arxiv.org/abs/2402.12345",
                 "title": "Prompt Injection Attacks",
                 "abstract": "We study prompt injection attacks on LLMs.",
-                "published": "2026-02-25T00:00:00Z",
+                "published": _recent_iso(days_ago=1),
             },
         ])
         mock_get.return_value = _make_http_response(
@@ -244,7 +258,7 @@ class TestScanArxiv(unittest.TestCase):
                 "arxiv_id": "http://arxiv.org/abs/2402.99999",
                 "title": "Paper with GitHub link",
                 "abstract": "Our code is at https://github.com/user/repo and more text.",
-                "published": "2026-02-25T00:00:00Z",
+                "published": _recent_iso(days_ago=1),
             },
         ])
         mock_get.return_value = _make_http_response(
@@ -265,7 +279,7 @@ class TestScanArxiv(unittest.TestCase):
                 "arxiv_id": "http://arxiv.org/abs/2402.11111",
                 "title": "Paper with HF link",
                 "abstract": "Dataset at https://huggingface.co/datasets/org-ds for details.",
-                "published": "2026-02-25T00:00:00Z",
+                "published": _recent_iso(days_ago=1),
             },
         ])
         mock_get.return_value = _make_http_response(
