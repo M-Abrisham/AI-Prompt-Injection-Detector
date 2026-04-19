@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Multi-layer prompt injection detection for LLM applications"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
     {name = "Mehrnoosh Abrishamchian"},
 ]
@@ -17,7 +17,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -89,6 +88,7 @@ data = [
     "langdetect>=1.0",
     "tqdm>=4.65",
     "pyarrow>=14.0",
+    "pandas>=2.0,<3",
 ]
 threatintel = [
     "PyYAML>=6.0.1,<7",
@@ -97,7 +97,7 @@ audit = [
     "cleanlab>=2.6.0",
 ]
 dev = [
-    "na0s[all]",
+    "na0s[all,data]",
     "coverage>=7.0",
     "flake8>=6.0",
     "groq>=0.4",

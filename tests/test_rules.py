@@ -106,8 +106,8 @@ class TestRulesListIntegrity(unittest.TestCase):
     """B. Tests that the RULES list is well-formed and complete."""
 
     def test_total_rule_count(self):
-        """There should be exactly 117 rules in the RULES list."""
-        self.assertEqual(len(RULES), 117)
+        """There should be exactly 120 rules in the RULES list."""
+        self.assertEqual(len(RULES), 120)
 
     def test_all_rule_names_are_unique(self):
         """No two rules should have the same name (except known variants).
@@ -269,6 +269,9 @@ class TestRulesListIntegrity(unittest.TestCase):
             "override_and_replace", "forget_then_query",
             "document_access_request", "pii_summarization",
             "verbatim_completion_extraction",
+            # E1.3 completion-trick declarative openers (critical, PL1)
+            "completion_my_instructions", "completion_system_prompt_says",
+            "completion_developer_told",
 
         }
         actual = {r.name for r in RULES}
