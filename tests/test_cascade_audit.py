@@ -326,22 +326,31 @@ class TestLastL0ThreadSafety:
         """REGRESSION: Two concurrent scan() calls should not interfere.
 
         Each call should get its own l0 from the _classify_full return tuple.
+
+        NOTE: unittest.mock.patch is not thread-safe — concurrent
+        __enter__/__exit__ races can leave module attributes pointing at
+        a MagicMock forever.  We apply a single module-level patch with a
+        side_effect that returns a fresh L0 result per call, so each
+        thread still gets its own sanitized_text without racing on the
+        patch lifecycle.
         """
         cc = _make_cascade()
         results = {}
 
         def scan_thread(text, key):
-            with patch("na0s.cascade.layer0_sanitize", return_value=_make_l0(text)), \
-                 patch("na0s.cascade.rule_score_detailed", return_value=[]):
-                result = cc.scan(text)
-                results[key] = result.sanitized_text
+            result = cc.scan(text)
+            results[key] = result.sanitized_text
 
-        t1 = threading.Thread(target=scan_thread, args=("text one", "t1"))
-        t2 = threading.Thread(target=scan_thread, args=("text two", "t2"))
-        t1.start()
-        t2.start()
-        t1.join(timeout=5)
-        t2.join(timeout=5)
+        # Single patch, thread-safe side_effect based on input text.
+        with patch("na0s.cascade.layer0_sanitize",
+                   side_effect=lambda t: _make_l0(t)), \
+             patch("na0s.cascade.rule_score_detailed", return_value=[]):
+            t1 = threading.Thread(target=scan_thread, args=("text one", "t1"))
+            t2 = threading.Thread(target=scan_thread, args=("text two", "t2"))
+            t1.start()
+            t2.start()
+            t1.join(timeout=5)
+            t2.join(timeout=5)
 
         assert "t1" in results and "t2" in results, "Both threads should complete"
         assert results["t1"] == "text one"
@@ -359,7 +368,21 @@ class TestStatCounterAtomicity:
     """Stat counters should not lose increments under concurrent access."""
 
     def test_concurrent_stat_counters(self):
-        """Concurrent classify() calls should not lose stat increments."""
+        """Concurrent classify() calls should not lose stat increments.
+
+        NOTE: unittest.mock.patch is NOT thread-safe — its __enter__/__exit__
+        replace module attributes non-atomically.  When multiple threads
+        enter/exit `with patch(...)` blocks concurrently, one thread can
+        save another thread's mock as the "original", leaving the module
+        attribute as a MagicMock after the test completes.  That state
+        leak broke downstream test_cascade_integration tests.
+
+        Fix: apply the patch ONCE at the module level (outside the threads)
+        so there is a single __enter__/__exit__ pair.  The threads share
+        the same mocked layer0_sanitize, which is fine because every thread
+        uses the same input text.
+        """
+        text = "What is Python?"
         cc = _make_cascade()
 
         n_threads = 10
@@ -371,18 +394,18 @@ class TestStatCounterAtomicity:
             try:
                 barrier.wait(timeout=5)
                 for _ in range(n_calls):
-                    text = "What is Python?"
-                    with patch("na0s.cascade.layer0_sanitize",
-                               return_value=_make_l0(text)):
-                        cc.classify(text)
+                    cc.classify(text)
             except Exception as e:
                 errors.append(e)
 
-        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=30)
+        # Single patch lifecycle — not concurrent patch() entry/exit.
+        with patch("na0s.cascade.layer0_sanitize",
+                   return_value=_make_l0(text)):
+            threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=30)
 
         assert not errors, f"Threads raised exceptions: {errors}"
         stats = cc.stats()

@@ -230,6 +230,39 @@ RULES = [
          paranoia_level=3,
          description="Completion/continuation trick for prompt leakage"),
 
+    # 9a. E1.3 Completion-trick declarative openers (critical, PL1).
+    # Attacker starts a sentence the AI is invited to complete with its
+    # actual instructions.  Highly specific patterns that require the
+    # trailing colon ("My instructions are:", "The developer told me to:").
+    # Near-zero FP risk — legitimate prose does not phrase declarations
+    # about "my instructions / the developer told me to" with a trailing
+    # colon.  Critical severity ensures the E1 fingerprint floor in
+    # predict.py fires and pushes the composite above the 0.55 threshold.
+    Rule("completion_my_instructions",
+         r"\b(?:my|the|your)\s+"
+         r"(?:instructions?|directives?|guidelines?|rules?|configuration)\s+"
+         r"(?:are|say|state|read|tell\s+me\s+to|specify)\s*:",
+         technique_ids=["E1.3", "E1"],
+         severity="critical",
+         paranoia_level=1,
+         description="E1.3 completion trick: 'my/the/your instructions are: '"),
+    Rule("completion_system_prompt_says",
+         r"\b(?:my|the|your)\s+(?:system\s+)?prompt\s+"
+         r"(?:says?|reads?|states?|is)\s*:",
+         technique_ids=["E1.3", "E1"],
+         severity="critical",
+         paranoia_level=1,
+         description="E1.3 completion trick: 'my/the/your (system) prompt says: '"),
+    Rule("completion_developer_told",
+         r"\b(?:the\s+)?"
+         r"(?:developer|creator|designer|engineer|programmer)\s+"
+         r"(?:told|instructed|asked|programmed|configured)\s+"
+         r"(?:me|you)\s+to\s*:",
+         technique_ids=["E1.3", "E1"],
+         severity="critical",
+         paranoia_level=1,
+         description="E1.3 completion trick: 'the developer told me to: '"),
+
     # 10. E2.2 Tool/function discovery.
     Rule("tool_enumeration",
          r"(?:list|show|enumerate|describe|what\s+are)"
