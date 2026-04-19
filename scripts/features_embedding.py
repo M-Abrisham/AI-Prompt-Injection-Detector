@@ -31,7 +31,7 @@ except ImportError:
 from sklearn.preprocessing import StandardScaler
 
 from na0s.safe_pickle import safe_dump
-from na0s.structural_features import extract_structural_features_batch
+from na0s.structural import extract_structural_features_batch
 
 # ---------------------------------------------------------------------------
 # Paths

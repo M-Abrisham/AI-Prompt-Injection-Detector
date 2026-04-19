@@ -50,7 +50,7 @@ from na0s.layer0 import layer0_sanitize
 from na0s.models import get_model_path
 from .faiss_classifier import get_faiss_classifier
 from na0s.scan_result import ScanResult
-from na0s.structural_features import extract_structural_features
+from na0s.structural import extract_structural_features
 
 _log = logging.getLogger(__name__)
 
