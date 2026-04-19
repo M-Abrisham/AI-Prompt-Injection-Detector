@@ -54,3 +54,4 @@ htmlcov/
 
 # Claude Code config
 .claude/
+data/raw/**/
