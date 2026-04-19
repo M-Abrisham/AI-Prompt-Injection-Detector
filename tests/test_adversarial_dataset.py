@@ -8,11 +8,18 @@ requirements from BENCHMARK_SPRINT.md:
   - All required fields present (text, label, source, evasion_type, original)
   - At least 7 different evasion_type values
   - No empty texts, no duplicates
+
+The dataset lives under data/benchmark/ which is gitignored (generated
+artifact, not committed).  If the file is missing at import time we
+auto-materialize it by running scripts/generate_adversarial.py — the
+generator is deterministic (seed=42), stdlib-only, and takes <1 second.
 """
 
 import hashlib
 import json
 import os
+import subprocess
+import sys
 import unittest
 
 # Path to the dataset
@@ -20,6 +27,29 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DATASET_PATH = os.path.join(
     _PROJECT_ROOT, "data", "benchmark", "adversarial_evasion.jsonl"
 )
+_GENERATOR_PATH = os.path.join(_PROJECT_ROOT, "scripts", "generate_adversarial.py")
+
+
+def _ensure_dataset_materialized():
+    """Run the generator if the dataset file is missing.
+
+    data/benchmark/*.jsonl is gitignored; developers cloning the repo
+    won't have the file until someone (or this hook) runs the generator.
+    """
+    if os.path.isfile(_DATASET_PATH):
+        return
+    if not os.path.isfile(_GENERATOR_PATH):
+        return  # generator gone — tests will fail with a clear FileNotFoundError
+    subprocess.run(
+        [sys.executable, _GENERATOR_PATH],
+        check=False,
+        cwd=_PROJECT_ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+_ensure_dataset_materialized()
 
 # Required fields per the schema
 _REQUIRED_FIELDS = {"text", "label", "source", "evasion_type", "original"}

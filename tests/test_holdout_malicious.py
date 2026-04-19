@@ -20,9 +20,23 @@ import pathlib
 import unittest
 from collections import Counter
 
+import pytest
+
 # Resolve the corpus path relative to the project root.
 _PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 _CORPUS_PATH = _PROJECT_ROOT / "data" / "holdout" / "malicious_holdout.jsonl"
+
+# Skip every test in this module when the holdout data artifact is not
+# materialized in the working tree. Regenerate with
+# ``scripts/gen_malicious_holdout.py`` (or ``scripts/gen_all_datasets.py``)
+# or pull it from the data remote before running these tests.
+pytestmark = pytest.mark.skipif(
+    not _CORPUS_PATH.exists(),
+    reason=(
+        f"holdout data not materialized at {_CORPUS_PATH} "
+        "- run scripts/gen_malicious_holdout.py or dvc pull"
+    ),
+)
 
 # Required fields for every record.
 _REQUIRED_FIELDS = {"text", "label", "source", "category"}

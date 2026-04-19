@@ -18,11 +18,25 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 HOLDOUT_PATH = PROJECT_ROOT / "data" / "holdout" / "safe_holdout.jsonl"
+
+# Skip every test in this module when the holdout data artifact is not
+# materialized in the working tree. Regenerate with
+# ``scripts/generate_safe_holdout.py`` (or ``scripts/gen_all_datasets.py``)
+# or pull it from the data remote before running these tests.
+pytestmark = pytest.mark.skipif(
+    not HOLDOUT_PATH.exists(),
+    reason=(
+        f"holdout data not materialized at {HOLDOUT_PATH} "
+        "- run scripts/generate_safe_holdout.py or dvc pull"
+    ),
+)
 
 REQUIRED_FIELDS = {"text", "label", "source", "category"}
 EXPECTED_CATEGORIES = {
