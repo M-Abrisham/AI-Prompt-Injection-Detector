@@ -89,6 +89,7 @@ data = [
     "langdetect>=1.0",
     "tqdm>=4.65",
     "pyarrow>=14.0",
+    "pandas>=2.0,<3",
 ]
 threatintel = [
     "PyYAML>=6.0.1,<7",
@@ -97,7 +98,7 @@ audit = [
     "cleanlab>=2.6.0",
 ]
 dev = [
-    "na0s[all]",
+    "na0s[all,data]",
     "coverage>=7.0",
     "flake8>=6.0",
     "groq>=0.4",
