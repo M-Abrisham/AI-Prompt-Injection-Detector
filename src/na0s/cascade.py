@@ -82,7 +82,7 @@ _PARANOID_UPPER = 0.65
 
 # Layer 3: Structural features — optional import
 try:
-    from .structural_features import extract_structural_features
+    from .structural import extract_structural_features
     _HAS_STRUCTURAL = True
 except ImportError:
     _HAS_STRUCTURAL = False

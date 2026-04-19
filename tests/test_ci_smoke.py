@@ -34,7 +34,7 @@ class TestCoreImports(unittest.TestCase):
         self.assertIsNotNone(cascade)
 
     def test_import_structural_features(self):
-        from na0s import structural_features
+        from na0s import structural as structural_features
         self.assertIsNotNone(structural_features)
 
 

@@ -97,7 +97,7 @@ _FP_EXEMPT_HITS = FP_EXEMPT_HITS
 
 # Layer 3: Structural Features — optional import
 try:
-    from .structural_features import (
+    from .structural import (
         extract_structural_features,
         extract_structural_features_batch,
     )
