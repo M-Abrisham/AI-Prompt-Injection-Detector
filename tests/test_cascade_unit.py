@@ -28,8 +28,13 @@ class TestBlendVerdicts:
         assert 0.0 <= conf <= 1.0
 
     def test_zero_confidence_judge(self):
+        # Judge confidence uses P(label correct) semantics: SAFE @ 0.0 confidence
+        # means "judge claims SAFE but has zero certainty" -> P(malicious)=1.0.
+        # Blended with high-confidence MALICIOUS from stage 2, the fail-safe
+        # verdict stays MALICIOUS (a zero-confidence judge cannot flip a
+        # high-confidence ML malicious call).
         label, conf = _blend_verdicts("MALICIOUS", 0.9, "SAFE", 0.0)
-        assert label == "SAFE"
+        assert label == "MALICIOUS"
         assert 0.0 <= conf <= 1.0
 
     def test_full_confidence_both(self):

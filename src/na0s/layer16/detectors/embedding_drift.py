@@ -12,8 +12,10 @@ Two detection signals:
    falls below DRIFT_AVG_THRESHOLD (default 0.5).
 
 Graceful degradation: if sentence-transformers is not installed, analyze()
-returns an empty list.  The model is loaded lazily on first analyze() call
-and cached as a class-level attribute to avoid repeated loading.
+returns an empty list (the hashing fallback is not semantic enough to
+distinguish drift from normal topic flow, so we prefer zero-signal over
+false-positive noise).  The model is loaded lazily on first analyze()
+call and cached as a class-level attribute to avoid repeated loading.
 
 Reference: ZEDD (arXiv 2601.12359), DeepContext (arXiv 2602.16935).
 """
@@ -166,6 +168,18 @@ class EmbeddingDriftDetector(MultiTurnDetector):
 
     def analyze(self, state: ConversationState) -> List[Alert]:  # noqa: C901
         if not ENABLE_EMBEDDING_DRIFT:
+            return []
+
+        # Disable alerting when the real sentence-transformer model is unavailable.
+        # The hashing-based fallback embedding (_fallback_embedding) is deterministic
+        # but not semantic: any two non-overlapping token sets yield cosine
+        # similarity ~0.0, which would cause every benign multi-turn conversation
+        # to trip the "sharp pivot" threshold. Graceful degradation = no alerts,
+        # not noisy false-positive alerts.
+        #
+        # The _get_embeddings instance override (used by unit tests to inject
+        # synthetic vectors) takes precedence so that algorithmic tests still run.
+        if not _HAS_EMBEDDINGS and "_get_embeddings" not in self.__dict__:
             return []
 
         if state is None or state.is_empty:

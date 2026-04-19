@@ -840,6 +840,12 @@ def _caesar_brute_force(text: str) -> "tuple[bool, str, int]":
     best_english_ratio = 0.0
     best_total_words = 0
 
+    # Baseline: how "English-like" is the raw input?  If the input already
+    # reads as English, any Caesar shift will mostly produce gibberish with
+    # a few coincidental dictionary hits ("u", "a", etc.), which we must
+    # NOT treat as a successful decode.
+    input_english_ratio, input_attack_hits, _ = _validate_english(text)
+
     for shift in range(1, 26):
         if shift == 13:
             continue  # handled by ROT13 decoder
@@ -855,10 +861,19 @@ def _caesar_brute_force(text: str) -> "tuple[bool, str, int]":
             best_english_ratio = english_ratio
             best_total_words = total_words
 
-    # Selection criteria
-    if best_attack_hits >= 2:
+    # Selection criteria.  Require the decoded text to score MEANINGFULLY
+    # HIGHER on the dictionary than the raw input (otherwise normal English
+    # would always "decode" into lower-scoring gibberish that still beats
+    # our absolute thresholds).
+    _MIN_ENGLISH_GAIN = 0.15  # decoded must beat input by >=15 pp
+
+    if best_attack_hits >= 2 and best_attack_hits > input_attack_hits:
         return True, best_decoded, best_shift
-    if best_english_ratio >= 0.5 and best_total_words >= 3:
+    if (
+        best_english_ratio >= 0.5
+        and best_total_words >= 3
+        and best_english_ratio >= input_english_ratio + _MIN_ENGLISH_GAIN
+    ):
         return True, best_decoded, best_shift
 
     return False, "", 0
