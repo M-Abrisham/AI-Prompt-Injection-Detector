@@ -14,7 +14,7 @@ Na0S uses a **defense-in-depth cascade** where multiple independent detection
 layers vote on whether an input is malicious. No single layer is trusted alone.
 
 ```
-Input → L0 Sanitize → L1 Rules (98 patterns) → L2 Obfuscation Decode
+Input → L0 Sanitize → L1 Rules (117 patterns) → L2 Obfuscation Decode
       → L3 Structural Features (29 numeric) → L4 TF-IDF ML Classifier
       → L5 Embedding Classifier → L6 Cascade Voting (60/40 blend)
       → L7 LLM Judge (ambiguous cases only) → L8 Positive Validation
@@ -26,7 +26,7 @@ Input → L0 Sanitize → L1 Rules (98 patterns) → L2 Obfuscation Decode
 | Layer | Type | What It Does | Independence |
 |-------|------|-------------|--------------|
 | L0 | Preprocessing | Normalize Unicode, strip invisible chars, detect encoding, parse documents | Always runs |
-| L1 | Pattern matching | 98 regex rules across 29 attack categories with severity weights | Always runs |
+| L1 | Pattern matching | 117 regex rules across 68 technique IDs with severity weights | Always runs |
 | L2 | Decoder | Unwrap obfuscation: Base64, hex, ROT13, leetspeak, Morse, Caesar (1–25), Pig Latin, steganography. Recursive Matryoshka unwrapping with provenance tracking | Always runs |
 | L3 | Feature extraction | 29 numeric features: quote depth, entropy, many-shot indicators, structural anomalies | Always runs |
 | L4 | ML classifier | TF-IDF + Logistic Regression trained on 126,245 samples | Always runs |
@@ -167,10 +167,14 @@ The training pipeline includes:
 |--------|-------|---------------|
 | Total tests | 8,568 | `pytest tests/ --collect-only -q` |
 | Test files | 258 | `find tests/ -name "test_*.py" \| wc -l` |
-| Detection rules | 98 | `grep -c "Rule(" src/na0s/layer1/rules_registry.py` |
+| Detection rules | 117 | `grep -c "Rule(" src/na0s/layer1/rules_registry.py` |
 | Attack categories | 29 | `data/taxonomy.yaml` |
 | Office parser fixtures | 16 real binary files | `tests/fixtures/office/` |
 | Probe framework | 29 probes × 8 mutation buffs | `scripts/taxonomy/` |
+
+> **Per-file test counts**: do not hardcode these in docs — they drift. For the
+> live inventory of any specific test file, run:
+> `pytest tests/<path>.py --collect-only -q`
 
 ### Mutation Buffs
 

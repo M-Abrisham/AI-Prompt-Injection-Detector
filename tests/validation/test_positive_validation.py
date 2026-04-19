@@ -19,16 +19,16 @@ import os
 import tempfile
 import unittest
 
-from na0s.positive_validation import (
+from na0s.validation import (
+    AllowlistDB,
     DEFAULT_VALIDATION_WEIGHTS,
-    VALIDATION_TAXONOMY_MAP,
     PositiveValidator,
     TrustBoundary,
+    VALIDATION_TAXONOMY_MAP,
     ValidationResult,
     validate_output,
 )
-from na0s.validation_allowlist import AllowlistDB
-from na0s.multi_turn_validator import MultiTurnValidator
+from na0s.detectors.multi_turn import MultiTurnValidator
 
 
 # ====================================================================

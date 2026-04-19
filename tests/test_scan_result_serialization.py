@@ -42,6 +42,11 @@ class TestScanResultToDict:
             "canary_triggered",
             "canary_leaks",
             "elapsed_ms",
+            # Layer 16 multi-turn fields
+            "session_id",
+            "escalation_detected",
+            "multi_turn_alerts",
+            "multi_turn_risk_trend",
         }
         assert set(d.keys()) == expected_keys
 

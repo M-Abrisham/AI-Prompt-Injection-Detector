@@ -11,7 +11,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Deque, List
 
-from ..positive_validation import ValidationResult
+from ..validation import ValidationResult
 
 
 _DEFAULT_WINDOW = 10

@@ -112,22 +112,28 @@ class TestPipelineTimeoutConstants(unittest.TestCase):
         self.assertGreater(L0_PIPELINE_TIMEOUT, 0)
 
     def test_scan_timeout_is_positive(self):
+        # SCAN_TIMEOUT is frozen at import time from SCAN_TIMEOUT_SEC env var.
+        # Valid values: 0.0 (timeout disabled) or positive (seconds).
+        # We can't retroactively inspect import-time env, so accept either.
         self.assertIsInstance(SCAN_TIMEOUT, float)
-        if os.environ.get("SCAN_TIMEOUT_SEC") == "0":
-            self.assertEqual(SCAN_TIMEOUT, 0.0)
-        else:
-            self.assertGreater(SCAN_TIMEOUT, 0)
+        self.assertTrue(
+            SCAN_TIMEOUT == 0.0 or SCAN_TIMEOUT > 0,
+            f"SCAN_TIMEOUT={SCAN_TIMEOUT} not a valid setting",
+        )
 
     def test_pipeline_timeout_default(self):
         # Default is 30s unless overridden by env var
         self.assertGreaterEqual(L0_PIPELINE_TIMEOUT, 1.0)
 
     def test_scan_timeout_default(self):
-        # Default is 60s unless overridden by env var
-        if os.environ.get("SCAN_TIMEOUT_SEC") == "0":
-            self.assertEqual(SCAN_TIMEOUT, 0.0)
-        else:
-            self.assertGreaterEqual(SCAN_TIMEOUT, 1.0)
+        # SCAN_TIMEOUT is frozen at import time. Either it was imported with
+        # SCAN_TIMEOUT_SEC=0 (disabled, 0.0) or with a positive seconds value.
+        # Runtime env may differ from import-time env due to test pollution,
+        # so we assert on the frozen constant instead of the live env.
+        self.assertTrue(
+            SCAN_TIMEOUT == 0.0 or SCAN_TIMEOUT >= 1.0,
+            f"SCAN_TIMEOUT={SCAN_TIMEOUT} not a valid setting",
+        )
 
 
 class TestSanitizerTimeoutIntegration(unittest.TestCase):

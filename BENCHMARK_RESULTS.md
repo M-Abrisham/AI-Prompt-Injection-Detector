@@ -12,7 +12,7 @@
 
 **Date**: 2026-03-04
 **Dataset**: `data/canary/canary_eval.csv` — 100 injection + 100 benign, hand-curated, never trained on
-**Rules**: 110 pre-compiled regex rules covering 10 technique categories
+**Rules**: 110 pre-compiled regex rules covering 10 technique categories (rule count as of 2026-03-04; current count: 117 — see Layer 1 in ROADMAP_V2.md)
 
 ### Results
 

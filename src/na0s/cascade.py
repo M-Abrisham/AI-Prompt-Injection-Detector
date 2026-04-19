@@ -118,7 +118,7 @@ except ImportError:
 
 # Layer 8: Positive validation — optional import
 try:
-    from .positive_validation import PositiveValidator
+    from .validation import PositiveValidator
     _HAS_POSITIVE_VALIDATION = True
 except ImportError:
     _HAS_POSITIVE_VALIDATION = False

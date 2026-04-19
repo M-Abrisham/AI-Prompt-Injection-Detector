@@ -18,11 +18,11 @@ from na0s.rules import (
     ROLE_ASSIGNMENT_PATTERN,
     RULES,
 )
-from na0s.positive_validation import (
-    _PERSONA_OVERRIDE_PATTERNS,
+from na0s.validation import (
     PositiveValidator,
     ValidationResult,
 )
+from na0s.validation.positive import _PERSONA_OVERRIDE_PATTERNS
 
 
 # ============================================================================
