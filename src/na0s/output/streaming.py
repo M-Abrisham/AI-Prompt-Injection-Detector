@@ -13,7 +13,7 @@ import re
 import threading
 from typing import Optional
 
-from na0s.rag.output_scanner import (
+from .scanner import (
     OutputScanner,
     OutputScanResult,
     _SECRET_PATTERNS,

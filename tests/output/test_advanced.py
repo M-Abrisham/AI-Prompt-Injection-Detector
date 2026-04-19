@@ -18,10 +18,10 @@ import codecs
 import pytest
 import urllib.parse
 
-from na0s.output_scanner import OutputScanner, OutputScanResult
+from na0s.output import OutputScanner, OutputScanResult
 from na0s.scan_result import ScanResult
-from na0s.rag_attribution import verify_attribution, RAGAttributionChecker
-from na0s.segment_grader import SegmentGrader
+from na0s.output import verify_attribution, RAGAttributionChecker
+from na0s.output import SegmentGrader
 
 
 # ---------------------------------------------------------------------------

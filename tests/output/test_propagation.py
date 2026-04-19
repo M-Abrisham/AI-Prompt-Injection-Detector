@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from na0s.worm_detector import WormSignatureDetector, WORM_PATTERNS
-from na0s.propagation_scanner import PropagationScanner
-from na0s.dual_scanner import DualDirectionScanner
-from na0s.output_scanner import OutputScanner
+from na0s.output import PropagationScanner
+from na0s.output import DualDirectionScanner
+from na0s.output import OutputScanner
 from na0s.scan_result import ScanResult
 
 
@@ -287,7 +287,7 @@ class TestWormSignatureDetector:
 class TestPropagationScanner:
     """Tests for running input classifier on LLM output."""
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_safe_output(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.05,
@@ -299,7 +299,7 @@ class TestPropagationScanner:
         assert result["is_propagation_risk"] is False
         assert result["risk_score"] < 0.5
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_malicious_output(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.85,
@@ -313,7 +313,7 @@ class TestPropagationScanner:
         assert "instruction_override" in result["technique_tags"]
         assert result["detected_payload"] != ""
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_threshold_boundary_below(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.49,
@@ -324,7 +324,7 @@ class TestPropagationScanner:
         result = scanner.scan("Some borderline text.")
         assert result["is_propagation_risk"] is False
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_threshold_boundary_at(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.50,
@@ -335,7 +335,7 @@ class TestPropagationScanner:
         result = scanner.scan("Exactly at threshold.")
         assert result["is_propagation_risk"] is True
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_custom_threshold(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.65,
@@ -357,7 +357,7 @@ class TestPropagationScanner:
         result = scanner.scan(None)
         assert result["is_propagation_risk"] is False
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_worm_detection_integration(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.3,
@@ -372,7 +372,7 @@ class TestPropagationScanner:
         assert "worm_propagation" in result["technique_tags"]
         assert result["worm_analysis"]["is_worm"] is True
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_output_input_feedback_loop_wired(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.1,
@@ -388,7 +388,7 @@ class TestPropagationScanner:
         assert result["worm_analysis"]["replication_score"] >= 0.8
         assert "input_output_replication" in result["worm_analysis"]["matched_patterns"]
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_worm_boost_score(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.4,
@@ -415,7 +415,7 @@ class TestPropagationScanner:
         with patch.dict(os.environ, {"NA0S_PROPAGATION_SCAN": "true"}):
             assert PropagationScanner.is_enabled() is True
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_thread_safety(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.1,
@@ -436,7 +436,7 @@ class TestPropagationScanner:
             t.join()
         assert len(results) == 4
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_result_structure(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.2,
@@ -464,7 +464,7 @@ class TestPropagationScanner:
 class TestDualDirectionScanner:
     """Tests for combined input/output scanning with cross-reference."""
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_clean_input_and_output(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.05,
@@ -482,7 +482,7 @@ class TestDualDirectionScanner:
         assert "propagation_scan" in result
         assert "cross_reference" in result
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_suspicious_output_only(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.05,
@@ -497,7 +497,7 @@ class TestDualDirectionScanner:
         assert result["is_suspicious"] is True
         assert result["output_scan"]["is_suspicious"] is True
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_propagation_risk_in_output(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.9,
@@ -512,7 +512,7 @@ class TestDualDirectionScanner:
         assert result["is_suspicious"] is True
         assert result["propagation_scan"]["is_propagation_risk"] is True
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_dual_scanner_wires_input_to_replication_feedback(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.1,
@@ -529,7 +529,7 @@ class TestDualDirectionScanner:
         assert worm["replication_score"] >= 0.8
         assert "input_output_replication" in worm["matched_patterns"]
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_cross_reference_both_flagged(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.9,
@@ -644,7 +644,7 @@ class TestDualDirectionScanner:
         )
         assert both_flagged["cross_ref_score"] > role_break_only["cross_ref_score"]
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_system_prompt_leak_detection(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.05,
@@ -660,7 +660,7 @@ class TestDualDirectionScanner:
         )
         assert result["is_suspicious"] is True
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_overall_risk_max_of_scanners(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.7,
@@ -675,7 +675,7 @@ class TestDualDirectionScanner:
         # Overall risk should be at least the propagation risk
         assert result["overall_risk"] >= 0.7
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_custom_scanners(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.05,
@@ -695,7 +695,7 @@ class TestDualDirectionScanner:
         assert "output_scan" in result
         assert "propagation_scan" in result
 
-    @patch("na0s.propagation_scanner.PropagationScanner._run_input_classifier")
+    @patch("na0s.output.propagation.PropagationScanner._run_input_classifier")
     def test_thread_safety(self, mock_cls):
         mock_cls.return_value = {
             "risk_score": 0.05,

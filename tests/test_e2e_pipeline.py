@@ -397,11 +397,11 @@ class TestScanOutput(unittest.TestCase):
         self.assertTrue(callable(scan_output))
 
     def test_output_scanner_importable(self):
-        from na0s.output_scanner import OutputScanner, OutputScanResult
+        from na0s.output import OutputScanner, OutputScanResult
         self.assertTrue(callable(OutputScanner))
 
     def test_output_scan_result_has_is_suspicious(self):
-        from na0s.output_scanner import OutputScanResult
+        from na0s.output import OutputScanResult
         # OutputScanResult should have is_suspicious
         self.assertTrue(hasattr(OutputScanResult, "__init__"))
 

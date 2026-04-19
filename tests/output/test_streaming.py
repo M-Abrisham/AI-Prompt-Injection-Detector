@@ -10,8 +10,8 @@ import threading
 
 import pytest
 
-from na0s.output_scanner import OutputScanner, OutputScanResult
-from na0s.streaming_scanner import StreamingOutputScanner
+from na0s.output import OutputScanner, OutputScanResult
+from na0s.output import StreamingOutputScanner
 
 
 # ===================================================================

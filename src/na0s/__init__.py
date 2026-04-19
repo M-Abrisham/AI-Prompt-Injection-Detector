@@ -43,8 +43,7 @@ try:
     from na0s.ensemble import ensemble_scan, EnsembleClassifier
 except ImportError:
     pass  # Embedding dependency may not be installed
-from na0s.output_scanner import OutputScanner, OutputScanResult
-from na0s.streaming_scanner import StreamingOutputScanner
+from na0s.output import OutputScanner, OutputScanResult, StreamingOutputScanner
 from na0s.validation import TrustBoundary
 from na0s.canary import CanaryManager, CanaryToken
 
