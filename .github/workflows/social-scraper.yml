@@ -58,7 +58,7 @@ jobs:
           git commit -m "Add scraped prompt injection data ($(date +%Y-%m-%d))"
           git push -u origin "$BRANCH"
           gh pr create \
-            --title "New scraped data: $(date +%Y-%m-%d %H:%M)" \
+            --title "New scraped data: $(date +'%Y-%m-%d %H:%M')" \
             --body "## Social Scraper Report
 
           Automated social media scrape found **${{ steps.check.outputs.new_count }}** new prompt injection content.

@@ -879,12 +879,34 @@ def run_scrape(
         _write_jsonl(new_records, snapshot_path)
         _log(f"Wrote {len(new_records)} records -> {snapshot_path}", verbose)
 
-        # Append to running merged file
+        # Merge into bounded running file (keeps last MERGED_MAX_RECORDS).
+        # Pure-append would grow unboundedly; GitHub rejects files >100 MB and
+        # warns above 50 MB.  Cap keeps the file under ~50 MB indefinitely.
         merged_path = os.path.join(output_dir, "merged_scrape.jsonl")
-        with open(merged_path, "a", encoding="utf-8") as fh:
-            for rec in new_records:
+        MERGED_MAX_RECORDS = 30_000
+        existing = []
+        if os.path.isfile(merged_path):
+            with open(merged_path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        existing.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        combined = (existing + new_records)[-MERGED_MAX_RECORDS:]
+        tmp_path = merged_path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            for rec in combined:
                 fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        _log(f"Appended to {merged_path}", verbose)
+        os.replace(tmp_path, merged_path)
+        dropped = max(0, len(existing) + len(new_records) - len(combined))
+        _log(
+            f"Merged {len(new_records)} records into {merged_path} "
+            f"(total={len(combined)}, cap={MERGED_MAX_RECORDS}, dropped={dropped})",
+            verbose,
+        )
 
         # Update known hashes
         known_hashes.update(new_hashes)
