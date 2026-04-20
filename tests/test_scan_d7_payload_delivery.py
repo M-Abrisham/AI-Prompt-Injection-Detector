@@ -1324,7 +1324,6 @@ class TestD7_DetectionQuality(unittest.TestCase):
             "flags={}, hits={}".format(r.anomaly_flags, r.rule_hits),
         )
 
-    @unittest.expectedFailure
     def test_code_block_hiding_has_structural_signal(self):
         """Code-block injection should have has_code_block structural feature.
 

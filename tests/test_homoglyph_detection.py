@@ -908,14 +908,19 @@ class TestPerformance(unittest.TestCase):
                         "Too slow: {:.3f}s for adversarial text".format(elapsed))
 
     def test_pure_cyrillic_10k_words(self):
-        """10,000 words of pure Cyrillic does not cause slowdown."""
+        """10,000 words of pure Cyrillic does not cause slowdown.
+
+        Bound calibrated 2026-04-20: original 0.2s was too aggressive on
+        CI 3.10 runners (shared GitHub hardware). Local is ~0.06s. 0.4s
+        still catches any real O(n) -> O(n^2) regression on 60k chars.
+        """
         word = "\u041f\u0440\u0438\u0432\u0435\u0442"  # "Привет"
         text = " ".join([word] * 10000)
         start = time.monotonic()
         result, count = normalize_homoglyphs(text)
         elapsed = time.monotonic() - start
         self.assertEqual(count, 0)
-        self.assertLess(elapsed, 0.2,
+        self.assertLess(elapsed, 0.4,
                         "Too slow: {:.3f}s for pure Cyrillic".format(elapsed))
 
     def test_full_pipeline_with_homoglyphs(self):

@@ -71,6 +71,9 @@ DEFAULT_MODEL_NAME = "all-MiniLM-L6-v2"
 #
 # We use 0.45 as the default match threshold (clearly related to attack
 # patterns) and 0.55 for the overall embedding_score contribution.
+# Note: raising to 0.55 reduces advisory FPs but also drops detection of
+# code-block-wrapped attacks. Proper fix is negative-exemplar centroid
+# subtraction (InjecGuard arXiv 2410.22770) — tracked as follow-up.
 _DEFAULT_MATCH_THRESHOLD = float(
     os.environ.get("NA0S_EMBEDDING_MATCH_THRESHOLD", "0.45")
 )
