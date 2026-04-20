@@ -1485,22 +1485,21 @@ Cross-cutting track (Option C, chosen 2026-04-20) running in parallel to layer w
 - [ ] **Isotonic calibration on composite score** — new `src/na0s/calibration.py`, `sklearn.IsotonicRegression`, fit per hardware fingerprint (.pkl per Linux-x86 vs M1). Wire at `predict.py:603`. **Priority**: P1. **Effort**: 4-6hr.
 - [ ] **Temperature scaling on ML classifier logits** — Guo 2017 pattern, LBFGS, ~20 LOC per `gpleiss/temperature_scaling`. **Priority**: P1. **Effort**: 2hr.
 - [ ] **ECE regression metric** — `tests/test_calibration.py`, CI gate on `ECE < 0.03`. **Priority**: P1. **Effort**: 1hr.
-- [ ] **Negative-exemplar FAISS index** — InjecGuard (arXiv 2410.22770) two-centroid contrast for advisory FP fix. Addresses `test_security_advisory_reveal` known gap. Tracked as GitHub Issue (pending). **Priority**: P1. **Effort**: 4-6hr.
-- [ ] **Severity weight precision audit** — per-rule FP/TP measurement on gold corpus, downgrade any `severity="critical"` rule with precision < 0.95. Tracked as GitHub Issue (pending). **Priority**: P1. **Effort**: 4-6hr.
+- [ ] **Negative-exemplar FAISS index** — InjecGuard (arXiv 2410.22770) two-centroid contrast for advisory FP fix. Addresses `test_security_advisory_reveal` known gap. Tracked as [#58](https://github.com/M-Abrisham/Na0S/issues/58). **Priority**: P1. **Effort**: 4-6hr.
+- [ ] **Severity weight precision audit** — per-rule FP/TP measurement on gold corpus, downgrade any `severity="critical"` rule with precision < 0.95. Tracked as [#59](https://github.com/M-Abrisham/Na0S/issues/59). **Priority**: P1. **Effort**: 4-6hr.
 
 ### TODO List — Multi-signal fusion (Week 2 architectural)
 - [ ] **Wire `bayesian_fusion.py`** — file exists at `src/na0s/fusion/bayesian.py`, never imported into pipeline. Replace linear composite sum with Noisy-OR to fix multi-rule under-aggregation (Agent D's bug #3: 7 rules fire → composite only 0.525). **Priority**: P1. **Effort**: 2hr.
 - [ ] **Session plumbing for payload_assembly** — thread `session_history` through `predict.py` / `cascade.py`; add sliding-window concat scanner. Fixes multi-turn `code_injection_4turn` detection gap. **Priority**: P1. **Effort**: 3-4hr.
 
 ### TODO List — Known remaining gaps
-- [ ] **Advisory FP (`test_security_advisory_reveal`)** — `risk=0.570` with `embedding_similarity` rule firing on benign advisory text. Deferred to negative-exemplar work above. Tracked as GitHub Issue (pending).
+- [ ] **Advisory FP (`test_security_advisory_reveal`)** — `risk=0.570` with `embedding_similarity` rule firing on benign advisory text. Deferred to negative-exemplar work above. Tracked as [#58](https://github.com/M-Abrisham/Na0S/issues/58).
 - [ ] **Local Mac Python 3.14 `test_code_block_hiding_has_structural_signal`** — passes on CI Linux 3.10/3.11/3.12, fails local 3.14. Hardware divergence in embedding scores; acceptable given 3.14 is not a supported Python. **Priority**: P3.
 
-### Open GitHub Issue drafts (to file)
-Three issue bodies were drafted 2026-04-20 by an audit agent (pending `gh issue create`):
-1. **Redesign embedding_drift with co-signal requirement** — partially addressed by commit `eb5adc6`; issue tracks remaining TP validation work.
-2. **Negative-exemplar FAISS centroid** — fixes advisory FP.
-3. **Severity weight scaling follow-up — audit critical-rule precision** — ensures Option B weights are backed by measured precision.
+### Open GitHub Issues (filed 2026-04-20)
+1. [#57](https://github.com/M-Abrisham/Na0S/issues/57) — **Redesign embedding_drift with co-signal requirement** — partially addressed by commits `eb5adc6` + `9050375`; issue tracks remaining TP validation + docstring work.
+2. [#58](https://github.com/M-Abrisham/Na0S/issues/58) — **Negative-exemplar FAISS centroid** — fixes advisory FP (`test_security_advisory_reveal`).
+3. [#59](https://github.com/M-Abrisham/Na0S/issues/59) — **Severity weight precision audit** — ensures Option B weights are backed by measured precision.
 
 ---
 
