@@ -164,6 +164,33 @@ class EmbeddingDriftDetector(MultiTurnDetector):
         # Graceful degradation path: low-cost hashing embeddings.
         return [_fallback_embedding(t) for t in texts]
 
+    # ----- Co-signal gate -----------------------------------------------------
+    #
+    # Topic drift alone is a NOISY signal: benign conversations legitimately
+    # pivot ("thanks, goodbye!") producing cosine <0.1 without being attacks.
+    # To separate benign drift from adversarial drift, we require a co-signal
+    # on the pivoting turn before emitting an alert. A co-signal is any of:
+    #   - turn.risk_score >= 0.4 (single-turn scanner flagged elevated risk)
+    #   - turn.label in {"malicious", "uncertain"} (classifier decision)
+    #   - len(turn.flags) > 0 (any rule/technique fired)
+    # Drift + co-signal = adversarial. Drift alone = normal conversation flow.
+    # Sharp_pivot:     check turn AFTER the pivot (attacker's new content)
+    # Sustained_drift: check ANY turn in window (attack somewhere in span)
+    # Baseline_shift:  check latest turn (divergence means new turn is off)
+
+    _CO_SIGNAL_RISK_MIN = 0.4
+
+    @staticmethod
+    def _turn_has_cosignal(turn) -> bool:
+        """True when the turn itself shows single-turn attack signal."""
+        if turn.risk_score >= EmbeddingDriftDetector._CO_SIGNAL_RISK_MIN:
+            return True
+        if turn.label in ("malicious", "uncertain"):
+            return True
+        if turn.flags:
+            return True
+        return False
+
     # ----- Main detection logic -----------------------------------------------
 
     def analyze(self, state: ConversationState) -> List[Alert]:  # noqa: C901
@@ -216,7 +243,19 @@ class EmbeddingDriftDetector(MultiTurnDetector):
         # --- Signal 1: Sharp pivot -------------------------------------------
         min_sim = min(similarities)
         min_idx = similarities.index(min_sim)
-        if min_sim < DRIFT_SHARP_THRESHOLD:
+        # Co-signal gate: require the turn AFTER the pivot to show attack signal.
+        # Benign pivots ("thanks!") don't carry rule hits or elevated risk.
+        pivot_after_idx = min_idx + 1
+        pivot_after_turn = (
+            window_turns[pivot_after_idx]
+            if pivot_after_idx < len(window_turns)
+            else None
+        )
+        sharp_has_cosignal = (
+            pivot_after_turn is not None
+            and self._turn_has_cosignal(pivot_after_turn)
+        )
+        if min_sim < DRIFT_SHARP_THRESHOLD and sharp_has_cosignal:
             # Confidence: how far below the threshold
             # At threshold -> DRIFT_CONFIDENCE_MIN; at 0.0 -> ~1.0
             raw_conf = 1.0 - (min_sim / DRIFT_SHARP_THRESHOLD)
@@ -247,7 +286,9 @@ class EmbeddingDriftDetector(MultiTurnDetector):
 
         # --- Signal 2: Sustained drift ---------------------------------------
         avg_sim = sum(similarities) / len(similarities)
-        if avg_sim < DRIFT_AVG_THRESHOLD:
+        # Co-signal gate: require ANY turn in window to carry attack signal.
+        sustained_has_cosignal = any(self._turn_has_cosignal(t) for t in window_turns)
+        if avg_sim < DRIFT_AVG_THRESHOLD and sustained_has_cosignal:
             raw_conf = 1.0 - (avg_sim / DRIFT_AVG_THRESHOLD)
             confidence = max(DRIFT_CONFIDENCE_MIN, min(1.0, raw_conf))
             confidence = round(confidence, 4)
@@ -277,7 +318,9 @@ class EmbeddingDriftDetector(MultiTurnDetector):
             prior_centroid = _centroid(embeddings[:-1])
             latest_vs_prior = _cosine_similarity(prior_centroid, embeddings[-1])
             baseline_threshold = max(0.0, DRIFT_AVG_THRESHOLD - 0.1)
-            if latest_vs_prior < baseline_threshold:
+            # Co-signal gate: require the latest turn to carry attack signal.
+            latest_has_cosignal = self._turn_has_cosignal(window_turns[-1])
+            if latest_vs_prior < baseline_threshold and latest_has_cosignal:
                 raw_conf = 1.0 - (latest_vs_prior / max(0.05, baseline_threshold))
                 confidence = max(DRIFT_CONFIDENCE_MIN, min(1.0, raw_conf))
                 confidence = round(confidence, 4)

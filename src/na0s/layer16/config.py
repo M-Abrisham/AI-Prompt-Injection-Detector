@@ -98,13 +98,8 @@ STYLOMETRY_MULTI_SIGNAL_BOOST = 1.5
 ENABLE_EMBEDDING_DRIFT = True
 DRIFT_MIN_TURNS = 3  # need at least 3 turns to measure drift
 DRIFT_WINDOW = 5  # last N turns to analyze
-# Thresholds calibrated 2026-04-20: benign conversations (customer_support,
-# technical_discussion) routinely show min_sim in 0.19-0.27 range and
-# avg_sim in 0.35-0.44 range — short closing turns ("thanks!") legitimately
-# diverge. Previous values (0.3 / 0.5) fired ~10 FPs per CI run on Linux.
-# Real multi-turn attacks show sharp_sim <= 0.10 and avg_sim <= 0.25.
-DRIFT_SHARP_THRESHOLD = 0.15  # cosine sim below this = sharp topic pivot
-DRIFT_AVG_THRESHOLD = 0.30  # average cosine sim below this = gradual drift
+DRIFT_SHARP_THRESHOLD = 0.3  # cosine sim below this = sharp topic pivot
+DRIFT_AVG_THRESHOLD = 0.5  # average cosine sim below this = gradual drift
 DRIFT_CONFIDENCE_MIN = 0.3
 
 # ---------------------------------------------------------------------------
