@@ -63,3 +63,26 @@ WHITELIST_CONFIDENCE = 0.99
 WHITELIST_RISK_SCORE = 0.01
 PARANOID_LOWER = 0.35
 PARANOID_UPPER = 0.65
+
+# -- Confidence bands (cross-hardware consistency) --
+# Per Stripe Radar / Perspective API / Feedzai pattern: classify into
+# {safe, uncertain, malicious} instead of binary-on-threshold. Middle band
+# absorbs ~0.05 floating-point drift between Mac (NEON) and Linux (AVX).
+# is_malicious stays tied to DEFAULT_THRESHOLD=0.55 for backward compat;
+# confidence_band is informational and lets callers opt into stricter policy.
+T_LOW: float = float(os.getenv("NA0S_T_LOW", 0.45))
+T_HIGH: float = float(os.getenv("NA0S_T_HIGH", 0.65))
+
+
+def classify_band(risk_score: float) -> str:
+    """Map a risk score to {safe, uncertain, malicious}.
+
+    - risk < T_LOW       -> "safe"
+    - T_LOW <= risk < T_HIGH -> "uncertain"  (marginal; may flip across hardware)
+    - risk >= T_HIGH     -> "malicious"
+    """
+    if risk_score < T_LOW:
+        return "safe"
+    if risk_score < T_HIGH:
+        return "uncertain"
+    return "malicious"

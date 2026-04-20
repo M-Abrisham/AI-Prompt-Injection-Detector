@@ -40,6 +40,15 @@ class ScanResult:
     escalation_detected: bool = False
     session_id: str = ""
 
+    # Confidence band: {"safe", "uncertain", "malicious"} — derived from
+    # risk_score in __post_init__. "uncertain" absorbs ~0.05 hardware drift
+    # near the threshold boundary. See config.classify_band.
+    confidence_band: str = "safe"
+
+    def __post_init__(self):
+        from na0s.config import classify_band
+        self.confidence_band = classify_band(self.risk_score)
+
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
 

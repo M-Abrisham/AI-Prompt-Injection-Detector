@@ -47,6 +47,8 @@ class TestScanResultToDict:
             "escalation_detected",
             "multi_turn_alerts",
             "multi_turn_risk_trend",
+            # Cross-hardware confidence band (derived from risk_score)
+            "confidence_band",
         }
         assert set(d.keys()) == expected_keys
 
