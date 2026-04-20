@@ -1129,6 +1129,20 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                 composite = max(composite, threshold + 0.01)
                 label = "MALICIOUS"
 
+    # --- O2.1 javascript protocol injection floor ---
+    # javascript: URIs in href/src/action are a deterministic XSS vector;
+    # a single critical O2.1 hit should always label malicious regardless
+    # of composite (mirrors the E1 floor pattern above).
+    _has_critical_o2 = any(
+        dh.severity == "critical" and any(
+            "O2.1" in tid for tid in _RULE_TECHNIQUE_IDS.get(dh.name, [])
+        )
+        for dh in detailed_hits
+    )
+    if _has_critical_o2 and "SAFE" in label:
+        composite = max(composite, threshold + 0.01)
+        label = "MALICIOUS"
+
     # --- D5 Unicode obfuscation signal ---
     _UNICODE_OBFUSCATION_FLAGS = frozenset({
         "combining_diacritics_stripped",
