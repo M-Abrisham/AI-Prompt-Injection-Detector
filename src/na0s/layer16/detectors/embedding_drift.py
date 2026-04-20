@@ -170,15 +170,22 @@ class EmbeddingDriftDetector(MultiTurnDetector):
     # pivot ("thanks, goodbye!") producing cosine <0.1 without being attacks.
     # To separate benign drift from adversarial drift, we require a co-signal
     # on the pivoting turn before emitting an alert. A co-signal is any of:
-    #   - turn.risk_score >= 0.4 (single-turn scanner flagged elevated risk)
+    #   - turn.risk_score >= 0.55 (at or above decision threshold — the
+    #     single-turn scanner itself would call this turn malicious)
     #   - turn.label in {"malicious", "uncertain"} (classifier decision)
     #   - len(turn.flags) > 0 (any rule/technique fired)
     # Drift + co-signal = adversarial. Drift alone = normal conversation flow.
     # Sharp_pivot:     check turn AFTER the pivot (attacker's new content)
     # Sustained_drift: check ANY turn in window (attack somewhere in span)
     # Baseline_shift:  check latest turn (divergence means new turn is off)
+    #
+    # Threshold rationale: 0.55 matches config.DEFAULT_THRESHOLD, so a turn
+    # only qualifies as a co-signal when the standalone classifier would
+    # itself label it malicious. Elevated-but-below-threshold risk (e.g.
+    # 0.45 on a security research conversation) is NOT a co-signal — those
+    # are legitimate suspicious-looking but benign inputs.
 
-    _CO_SIGNAL_RISK_MIN = 0.4
+    _CO_SIGNAL_RISK_MIN = 0.55
 
     @staticmethod
     def _turn_has_cosignal(turn) -> bool:

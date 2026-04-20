@@ -49,8 +49,9 @@ L16 Multi-Turn | L17 Doc Scanning (35%) | L18 RAG Security | L19 Agent/MCP | L20
 | **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
 | **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
 | **Hardening** | `██████████████░░░░░░` | **10/14** | 71% |
+| **Calibration** | `████░░░░░░░░░░░░░░░░` | **4/18** | 22% — dataset + calibration stack (added 2026-04-20) |
 | **Infra** | `████████████████████` | **—** | Repo reorg (13 phases), CI, Dependabot, CodeQL, SECURITY.md |
-|        |                        | **608/768** | **79%** |
+|        |                        | **612/786** | **78%** |
 
 ---
 
@@ -1429,7 +1430,7 @@ Core stateful pipeline shipped: `ConversationSecurityMonitor` singleton with dou
 ### TODO List
 
 **Polish (deferred):**
-- [ ] **Cross-turn embedding similarity** — wire a sentence-embedding similarity signal into the embedding-drift detector for semantic-drift / sudden-topic-shift detection. **Priority**: P2. **Effort**: Medium.
+- [x] **Cross-turn embedding similarity** — shipped 2026-04-20 as `embedding_drift` detector. Redesigned same day with co-signal gate (commit `eb5adc6`) — drift alerts require `risk_score >= 0.4` OR `label ∈ {malicious, uncertain}` OR `flags` non-empty on the pivoting turn. See "Detection Calibration & Datasets" section for details.
 - [ ] **Cross-session injection correlation** — fingerprint attack patterns across sessions via `UserRiskProfileStore`. **Priority**: P2. **Effort**: Medium.
 - [ ] **`cascade.py` session_id integration** — `CascadeClassifier.classify()` currently ignores session_id; only `predict.scan()` routes into L16. **Priority**: P2. **Effort**: Low.
 - [ ] **CLI session commands** — `na0s sessions list|inspect|expire` for operator triage. **Priority**: P3. **Effort**: Low.
@@ -1443,6 +1444,63 @@ Core stateful pipeline shipped: `ConversationSecurityMonitor` singleton with dou
 - [ ] **Two shipped detectors never wired into the monitor** — `detectors/cot_compliance.py` (D1.23) and `detectors/scheming.py` (D1.22-scheming) exist, have dedicated test files (`test_cot_compliance.py`, `test_scheming.py`), but `conversation_monitor.py` does not import or instantiate either. They ship dead. **Severity**: medium (feature-complete code with no runtime path). **Priority**: P1. **Effort**: Trivial. **Files**: `src/na0s/layer16/detectors/cot_compliance.py`, `src/na0s/layer16/detectors/scheming.py`, `src/na0s/layer16/conversation_monitor.py:37-90`.
 - [ ] **`conversation_monitor.py` at 525 lines** — orchestrator, detector registry, dedup logic, graduated-response wiring, and profile-store threading all in one file. Candidate for split once v1.0.0 rename lands. **Severity**: low. **Priority**: P3. **Effort**: Medium. **File**: `src/na0s/layer16/conversation_monitor.py:1-525`.
 - [ ] **Roadmap prior-claim mismatch** — previous section asserted "3 detectors" while 8 detector modules exist under `detectors/` and 6 are wired. Metric drift; now corrected in this rewrite. **Severity**: low (doc hygiene). **Priority**: P3.
+
+---
+
+## Detection Calibration & Datasets — Tasks: 4/18 (22%)
+
+### Description
+Cross-cutting track (Option C, chosen 2026-04-20) running in parallel to layer work. Na0S's detection decisions have historically been principle-based; this track adds empirical validation via a labeled corpus plus calibration machinery. Motivation: severity weights, threshold bands, co-signal thresholds, and FP/FN trade-offs are currently judgment calls because no human-verified held-out corpus exists to measure against. Builds the scoreboard that calibration work depends on.
+
+**Existing infrastructure** (verified by 2026-04-20 agent audit):
+- 4 GitHub workflows already run: `social-scraper.yml` (3h), `weekly-harvest.yml` (Mon), `threat_intel_sync.yml` (Sun), `auto-retrain.yml` (Tue) — full pipeline: sync → integrate_harvest → quarantine (3 stages) → gen_all_datasets → process_data → validate_data → mine_hard_negatives → features → model → canary_eval → deploy_model with canary TPR/TNR gates.
+- `data/datasets.yaml` (52 sources) + `data/datasets.lock` — reproducibility.
+- `scripts/quarantine.py` (5-stage lifecycle), `scripts/cleanlab_audit.py`, `scripts/mine_hard_negatives.py`, `scripts/near_duplicate.py` (SimHash+MinHash/LSH) already exist.
+- `scripts/generate_taxonomy.py` + `scripts/merge_taxonomy.py` drive 30 probe classes.
+- `dvc.yaml` exists as scaffolding (not verified end-to-end).
+
+**Gaps** (what's actually missing — this track's real work):
+- Only 200 canary rows are human-verified. 40K scraped rows auto-labeled by source (e.g., "from r/ChatGPTJailbreak → label=1"), conflating attack *discussion* with attack *prompts*.
+- No stratified train/val/test split by taxonomy category — currently random 80/10/10.
+- License tracking partial: `license_checker.py` exists but not invoked in `auto-retrain.yml`.
+- Quarantine auto-promotes without human gating, defeating the quarantine purpose.
+- Derived artifacts (`combined_data.csv`, splits) not under DVC — regenerated each CI run, so calibration thresholds are irreproducible across retrains.
+
+### Completed (4 items)
+- [x] **Severity weights calibrated (Option B)** — `SEVERITY_WEIGHTS` in `src/na0s/layer1/result.py`: `critical` 0.30→0.45, `high` 0.20→0.30, `medium` 0.10→0.15, `low` 0.05→0.07, `critical_content` 0.45→0.55. Removed 3 planned per-technique floors (O2.1, E1, P1.3) that were workarounds for under-weighted critical tier. Commit `41c42f5`, 2026-04-20.
+- [x] **Confidence bands on `ScanResult`** — new `confidence_band: str ∈ {safe, uncertain, malicious}` field, computed via `classify_band()` in `src/na0s/config.py`. Thresholds `T_LOW=0.45`, `T_HIGH=0.65` (env-overridable via `NA0S_T_LOW`/`NA0S_T_HIGH`). Absorbs ~0.05 cross-hardware FP drift per Stripe Radar/Perspective API pattern. 15 new tests in `tests/test_confidence_band.py`. Commit `41c42f5`, 2026-04-20.
+- [x] **Layer 16 embedding_drift co-signal gate** — architectural redesign after 60% FP rate on benign conversations. Alerts only emit when pivoting turn has `risk_score >= 0.4` OR `label ∈ {malicious, uncertain}` OR `flags` non-empty. `_turn_has_cosignal()` helper in `embedding_drift.py`, 4 new tests. Replaced original plan to disable the detector. Commit `eb5adc6`, 2026-04-20.
+- [x] **Layer 16 drift thresholds recalibrated** — reverted `DRIFT_SHARP_THRESHOLD` to 0.3 and `DRIFT_AVG_THRESHOLD` to 0.5 in `layer16/config.py` once co-signal gate was in place. Threshold tuning was a stopgap; co-signal handles precision properly. Commit `eb5adc6`, 2026-04-20.
+
+### TODO List — Dataset corpus (blocks calibration)
+- [ ] **Build hand-labeled gold corpus** — target 1k/taxonomy category × 30 = 30k examples, human-verified. Currently only 200 canary rows are hand-verified. Promote `cleanlab_audit.py` into `auto-retrain.yml` to catch label noise before training. **Priority**: P0. **Effort**: 2-3 days (initial 2-5k slice); ongoing curation.
+- [ ] **Stratified train/val/test split** by taxonomy category AND attack technique (not random 80/10/10). Modify `scripts/merge_taxonomy.py`. **Priority**: P0. **Effort**: 4hr.
+- [ ] **Per-source provenance + license column** on every row in `combined_data.csv`. Invoke `scripts/license_checker.py` in `auto-retrain.yml`; emit `data/license_report.json`. **Priority**: P1. **Effort**: 2hr.
+- [ ] **Decouple scrape discovery from scrape labeling** — route everything new from `social_scraper.py` through human review, not auto-label by subreddit. 40K `merged_scrape.jsonl` has never been reviewed. **Priority**: P1. **Effort**: 1 day setup + ongoing.
+- [ ] **DVC-version derived artifacts** — `data/processed/splits/*.jsonl` under DVC so calibration thresholds reproducible across retrains. **Priority**: P1. **Effort**: 4hr.
+- [ ] **Gate quarantine promotion on human review** — currently `auto-retrain.yml` auto-promotes validated samples; defeats the quarantine purpose. **Priority**: P1. **Effort**: 4hr.
+- [ ] **Negative exemplar corpus** (`data/embedding_negatives.jsonl`) — 200-500 CVE descriptions + OWASP LLM Top 10 excerpts + security advisories. Feeds Issue #2 (negative-exemplar FAISS centroid). **Priority**: P1. **Effort**: 4hr.
+
+### TODO List — Calibration stack
+- [ ] **Isotonic calibration on composite score** — new `src/na0s/calibration.py`, `sklearn.IsotonicRegression`, fit per hardware fingerprint (.pkl per Linux-x86 vs M1). Wire at `predict.py:603`. **Priority**: P1. **Effort**: 4-6hr.
+- [ ] **Temperature scaling on ML classifier logits** — Guo 2017 pattern, LBFGS, ~20 LOC per `gpleiss/temperature_scaling`. **Priority**: P1. **Effort**: 2hr.
+- [ ] **ECE regression metric** — `tests/test_calibration.py`, CI gate on `ECE < 0.03`. **Priority**: P1. **Effort**: 1hr.
+- [ ] **Negative-exemplar FAISS index** — InjecGuard (arXiv 2410.22770) two-centroid contrast for advisory FP fix. Addresses `test_security_advisory_reveal` known gap. Tracked as GitHub Issue (pending). **Priority**: P1. **Effort**: 4-6hr.
+- [ ] **Severity weight precision audit** — per-rule FP/TP measurement on gold corpus, downgrade any `severity="critical"` rule with precision < 0.95. Tracked as GitHub Issue (pending). **Priority**: P1. **Effort**: 4-6hr.
+
+### TODO List — Multi-signal fusion (Week 2 architectural)
+- [ ] **Wire `bayesian_fusion.py`** — file exists at `src/na0s/fusion/bayesian.py`, never imported into pipeline. Replace linear composite sum with Noisy-OR to fix multi-rule under-aggregation (Agent D's bug #3: 7 rules fire → composite only 0.525). **Priority**: P1. **Effort**: 2hr.
+- [ ] **Session plumbing for payload_assembly** — thread `session_history` through `predict.py` / `cascade.py`; add sliding-window concat scanner. Fixes multi-turn `code_injection_4turn` detection gap. **Priority**: P1. **Effort**: 3-4hr.
+
+### TODO List — Known remaining gaps
+- [ ] **Advisory FP (`test_security_advisory_reveal`)** — `risk=0.570` with `embedding_similarity` rule firing on benign advisory text. Deferred to negative-exemplar work above. Tracked as GitHub Issue (pending).
+- [ ] **Local Mac Python 3.14 `test_code_block_hiding_has_structural_signal`** — passes on CI Linux 3.10/3.11/3.12, fails local 3.14. Hardware divergence in embedding scores; acceptable given 3.14 is not a supported Python. **Priority**: P3.
+
+### Open GitHub Issue drafts (to file)
+Three issue bodies were drafted 2026-04-20 by an audit agent (pending `gh issue create`):
+1. **Redesign embedding_drift with co-signal requirement** — partially addressed by commit `eb5adc6`; issue tracks remaining TP validation work.
+2. **Negative-exemplar FAISS centroid** — fixes advisory FP.
+3. **Severity weight scaling follow-up — audit critical-rule precision** — ensures Option B weights are backed by measured precision.
 
 ---
 

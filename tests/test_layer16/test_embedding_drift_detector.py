@@ -13,7 +13,7 @@ from na0s.layer16.detectors.embedding_drift import (
 from na0s.layer16.models import ConversationState, ConversationTurn
 
 
-def _make_state(texts, *, cosignal_turn_idx=None, cosignal_risk=0.6):
+def _make_state(texts, *, cosignal_turn_idx=None, cosignal_risk=0.7):
     """Build a ConversationState. If cosignal_turn_idx is given, that turn
     carries an elevated risk_score so the drift co-signal gate opens.
     """
