@@ -49,7 +49,7 @@ L16 Multi-Turn | L17 Doc Scanning (35%) | L18 RAG Security | L19 Agent/MCP | L20
 | **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
 | **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
 | **Hardening** | `██████████████░░░░░░` | **10/14** | 71% |
-| **Calibration** | `████░░░░░░░░░░░░░░░░` | **4/18** | 22% — dataset + calibration stack (added 2026-04-20) |
+| **Calibration** | `█████░░░░░░░░░░░░░░░` | **5/19** | 26% — dataset + calibration stack (added 2026-04-20) |
 | **Infra** | `████████████████████` | **—** | Repo reorg (13 phases), CI, Dependabot, CodeQL, SECURITY.md |
 |        |                        | **612/786** | **78%** |
 
@@ -1447,7 +1447,7 @@ Core stateful pipeline shipped: `ConversationSecurityMonitor` singleton with dou
 
 ---
 
-## Detection Calibration & Datasets — Tasks: 4/18 (22%)
+## Detection Calibration & Datasets — Tasks: 5/19 (26%)
 
 ### Description
 Cross-cutting track (Option C, chosen 2026-04-20) running in parallel to layer work. Na0S's detection decisions have historically been principle-based; this track adds empirical validation via a labeled corpus plus calibration machinery. Motivation: severity weights, threshold bands, co-signal thresholds, and FP/FN trade-offs are currently judgment calls because no human-verified held-out corpus exists to measure against. Builds the scoreboard that calibration work depends on.
@@ -1469,8 +1469,9 @@ Cross-cutting track (Option C, chosen 2026-04-20) running in parallel to layer w
 ### Completed (4 items)
 - [x] **Severity weights calibrated (Option B)** — `SEVERITY_WEIGHTS` in `src/na0s/layer1/result.py`: `critical` 0.30→0.45, `high` 0.20→0.30, `medium` 0.10→0.15, `low` 0.05→0.07, `critical_content` 0.45→0.55. Removed 3 planned per-technique floors (O2.1, E1, P1.3) that were workarounds for under-weighted critical tier. Commit `41c42f5`, 2026-04-20.
 - [x] **Confidence bands on `ScanResult`** — new `confidence_band: str ∈ {safe, uncertain, malicious}` field, computed via `classify_band()` in `src/na0s/config.py`. Thresholds `T_LOW=0.45`, `T_HIGH=0.65` (env-overridable via `NA0S_T_LOW`/`NA0S_T_HIGH`). Absorbs ~0.05 cross-hardware FP drift per Stripe Radar/Perspective API pattern. 15 new tests in `tests/test_confidence_band.py`. Commit `41c42f5`, 2026-04-20.
-- [x] **Layer 16 embedding_drift co-signal gate** — architectural redesign after 60% FP rate on benign conversations. Alerts only emit when pivoting turn has `risk_score >= 0.4` OR `label ∈ {malicious, uncertain}` OR `flags` non-empty. `_turn_has_cosignal()` helper in `embedding_drift.py`, 4 new tests. Replaced original plan to disable the detector. Commit `eb5adc6`, 2026-04-20.
+- [x] **Layer 16 embedding_drift co-signal gate** — architectural redesign after 60% FP rate on benign conversations. Alerts only emit when pivoting turn has `risk_score >= 0.55` (aligned to DEFAULT_THRESHOLD) OR `label ∈ {malicious, uncertain}` OR `flags` non-empty. `_turn_has_cosignal()` helper in `embedding_drift.py`, 7 new tests. Replaced original plan to disable the detector. Commits `eb5adc6` (initial 0.4) + `9050375` (threshold aligned to 0.55 after `flat_high_risk` edge-case surfaced), 2026-04-20.
 - [x] **Layer 16 drift thresholds recalibrated** — reverted `DRIFT_SHARP_THRESHOLD` to 0.3 and `DRIFT_AVG_THRESHOLD` to 0.5 in `layer16/config.py` once co-signal gate was in place. Threshold tuning was a stopgap; co-signal handles precision properly. Commit `eb5adc6`, 2026-04-20.
+- [x] **CI merge-ready state achieved** — from 18 pre-session failures to 1 known-gap (test_security_advisory_reveal, tracked #58). Final CI run: 24690772175 on commit `930a423`, 8751 passed / 1 failed / 53 skipped / 68 xfailed across py3.10/3.11/3.12. 2026-04-20.
 
 ### TODO List — Dataset corpus (blocks calibration)
 - [ ] **Build hand-labeled gold corpus** — target 1k/taxonomy category × 30 = 30k examples, human-verified. Currently only 200 canary rows are hand-verified. Promote `cleanlab_audit.py` into `auto-retrain.yml` to catch label noise before training. **Priority**: P0. **Effort**: 2-3 days (initial 2-5k slice); ongoing curation.
