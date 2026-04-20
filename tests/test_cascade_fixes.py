@@ -405,18 +405,19 @@ class TestBugL6_5_JudgeBlending(unittest.TestCase):
             label, confidence, hits, stage = clf.classify("test prompt")
 
         # Stage 2: _voting.weighted_decision computes composite.
-        # ML: 0.6*0.83 = 0.498, rule: 0.1, base composite = 0.598.
-        # Multi-layer agreement boost: ML (0.83>0.5) + rules (0.1>0) = 2 layers,
-        # weak anchor (medium), ml_prob_malicious > 0.45 → +0.10 boost → 0.698.
-        # label=MALICIOUS, confidence=0.698.
+        # ML: 0.6*0.83 = 0.498, rule: 0.15 (medium severity, Option B),
+        # base composite = 0.648.
+        # Multi-layer agreement boost: ML (0.83>0.5) + rules (0.15>0) = 2 layers,
+        # weak anchor (medium), ml_prob_malicious > 0.45 → +0.10 boost → 0.748.
+        # label=MALICIOUS, confidence=0.748.
         # Judge invoked because label=MALICIOUS and conf < 0.85.
-        # stage2_p_mal = 0.698 (MALICIOUS → confidence = composite)
+        # stage2_p_mal = 0.748 (MALICIOUS → confidence = composite)
         # judge_p_mal = 1.0 - 0.85 = 0.15 (judge says SAFE, flip)
-        # blended_p_mal = 0.3 * 0.698 + 0.7 * 0.15 = 0.2094 + 0.105 = 0.3144
-        # label = SAFE (judge wins), confidence = 1.0 - 0.3144 = 0.6856
+        # blended_p_mal = 0.3 * 0.748 + 0.7 * 0.15 = 0.2244 + 0.105 = 0.3294
+        # label = SAFE (judge wins), confidence = 1.0 - 0.3294 = 0.6706
         self.assertEqual(stage, "judge")
         self.assertEqual(label, "SAFE")
-        expected_stage2_composite = 0.698  # includes agreement boost
+        expected_stage2_composite = 0.748  # includes agreement boost
         expected_blended_p_mal = 0.3 * expected_stage2_composite + 0.7 * 0.15
 
         expected_confidence = round(1.0 - expected_blended_p_mal, 4)

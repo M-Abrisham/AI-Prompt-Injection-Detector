@@ -761,7 +761,6 @@ class TestO2_2_LinkInjection(unittest.TestCase):
             "O2.2 persistent link injection. " + _fmt(result),
         )
 
-    @unittest.expectedFailure
     def test_url_replacement_injection(self):
         """URL replacement attack detected via ML + high_entropy.
 

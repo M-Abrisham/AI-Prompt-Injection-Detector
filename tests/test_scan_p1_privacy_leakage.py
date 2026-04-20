@@ -759,7 +759,6 @@ class TestP1_5_APIKeyExtraction(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_p1_5_subtle_credential_probe(self):
         """Subtle probe for credentials via technical question.
 
