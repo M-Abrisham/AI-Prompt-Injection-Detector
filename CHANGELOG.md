@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **L13 scraper/registry drift** — `scripts/social_scraper.py` hardcoded 14 of its own regex patterns for `_classify_injection`, a strict subset of the canonical Layer 1 `RULES` (120 patterns across 27+ categories). Every 3-hour scrape was silently labeling benign 18+ rule categories (exfiltration, api_key_extraction, E1.3 completion tricks, tool_enumeration, worm_signature, gaslighting, authority_escalation, destructive_action, etc.) and poisoning the downstream training corpus. `INJECTION_PATTERNS` is now sourced from `na0s.layer1.rules_registry.RULES` at import time (filtered by critical/critical_content/high severity) so the scraper cannot drift again. Added `tests/test_scraper_coverage.py` regression test asserting every strong-severity registry rule is present in the scraper's pattern list. `_classify_injection` scoring logic and the 6-entry `WEAK_SIGNALS` topic-discussion list are unchanged; all 58 pre-existing scraper behaviour tests still pass.
+
+---
+
 ## [0.2.0] — 2026-04-12
 
 Major hardening, reorganization, and feature release. Na0S grows from 12 to 21

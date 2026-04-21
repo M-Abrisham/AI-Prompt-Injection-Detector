@@ -76,25 +76,17 @@ SEARCH_KEYWORDS = [
     "indirect prompt injection",
 ]
 
-# Regex patterns that strongly indicate prompt injection content
+# Sourced from the canonical Layer 1 rules registry at import time so the
+# scraper cannot drift away from the real classifier.  "Strong" = rules
+# flagged critical_content / critical / high severity.  Covers all 27+
+# rule categories (override, system_prompt, roleplay, named_jailbreak_persona,
+# exfiltration, api_key_extraction, completion_trick family, tool_enumeration,
+# worm_signature, destructive_action, ...).
+from na0s.layer1.rules_registry import RULES as _NA0S_RULES
+
 INJECTION_PATTERNS = [
-    re.compile(r"ignore\s+(all\s+)?previous\s+instructions", re.I),
-    re.compile(r"disregard\s+(all\s+)?prior\s+(instructions|rules|guidelines)", re.I),
-    re.compile(r"you\s+are\s+now\s+(DAN|evil|unrestricted|jailbroken)", re.I),
-    re.compile(r"do\s+anything\s+now", re.I),
-    re.compile(r"developer\s+mode\s+(enabled|activated)", re.I),
-    re.compile(r"(act|behave)\s+as\s+(a\s+)?(evil|unrestricted|unfiltered)", re.I),
-    re.compile(r"bypass\s+(your\s+)?(safety|restrictions|guidelines|rules)", re.I),
-    re.compile(r"override\s+(your\s+)?(restrictions|safety|rules)", re.I),
-    re.compile(r"reveal\s+(your\s+)?(system\s+prompt|instructions|rules)", re.I),
-    re.compile(
-        r"what\s+(is|are)\s+your\s+(system\s+prompt|initial\s+instructions)", re.I
-    ),
-    re.compile(r"pretend\s+(you|that)\s+(are|have)\s+no\s+(restrictions|rules)", re.I),
-    re.compile(r"\bSTAN\s+mode\b", re.I),
-    re.compile(r"\bopposite\s+mode\b", re.I),
-    re.compile(r"(new|special)\s+instructions?\s*:", re.I),
-    re.compile(r"\[system\]|\[INST\]|<\|system\|>", re.I),
+    r._compiled for r in _NA0S_RULES
+    if r.severity in ("critical_content", "critical", "high")
 ]
 
 # Weaker signals -- injection-adjacent but not conclusive alone
