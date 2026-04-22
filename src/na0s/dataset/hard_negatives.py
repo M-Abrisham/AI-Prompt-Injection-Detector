@@ -26,7 +26,26 @@ from na0s.safe_pickle import safe_load
 # ---------------------------------------------------------------------------
 # Paths (relative to project root)
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+def _find_project_root() -> str:
+    """Walk upward from this file looking for pyproject.toml; fall back to cwd.
+
+    The module was promoted from ``scripts/`` to ``src/na0s/dataset/``; a naive
+    ``dirname(dirname(__file__))`` now points inside ``src/``, not the project
+    root. Walking up until we find ``pyproject.toml`` keeps the path constants
+    anchored to the repo regardless of where the module lives.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    cur = here
+    while True:
+        if os.path.isfile(os.path.join(cur, "pyproject.toml")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return os.getcwd()
+        cur = parent
+
+
+PROJECT_ROOT = _find_project_root()
 MODEL_PATH = os.path.join(PROJECT_ROOT, "data", "processed", "model.pkl")
 VECTORIZER_PATH = os.path.join(
     PROJECT_ROOT, "data", "processed", "tfidf_vectorizer.pkl"
