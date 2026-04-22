@@ -51,7 +51,7 @@ pydantic_core==2.41.5
 pyflakes==3.4.0
 Pygments==2.20.0
 PySocks==1.7.1
-pytest==8.4.2
+pytest==9.0.3
 python-dateutil==2.9.0.post0
 pytz==2025.2
 PyYAML==6.0.3
