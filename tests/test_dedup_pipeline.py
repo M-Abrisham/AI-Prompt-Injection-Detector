@@ -19,7 +19,7 @@ SCRIPTS_DIR = os.path.join(ROOT, "scripts")
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
-from near_duplicate import simhash, hamming_distance, minhash_signature, jaccard_from_minhash
+from na0s.dataset.near_duplicate import simhash, hamming_distance, minhash_signature, jaccard_from_minhash
 from scripts.data.dedup_pipeline import (
     normalise_text,
     dedup_jsonl_streaming,
