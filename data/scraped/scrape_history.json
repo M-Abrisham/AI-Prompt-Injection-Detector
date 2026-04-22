@@ -30,5 +30,21 @@
       "injection": 40478,
       "benign": 0
     }
+  },
+  {
+    "timestamp": "2026-04-22T16:07:08.181477+00:00",
+    "new_count": 40478,
+    "total_raw": 86827,
+    "duplicates_removed": 46349,
+    "sources": {
+      "twitter": 0,
+      "datasets": 86827,
+      "reddit": 0
+    },
+    "elapsed_seconds": 39.4,
+    "label_distribution": {
+      "injection": 40478,
+      "benign": 0
+    }
   }
 ]
