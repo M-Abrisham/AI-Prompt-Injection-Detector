@@ -30,6 +30,7 @@ stages:
     cmd: python scripts/near_duplicate.py --input data/processed/combined_data.csv --output data/processed/combined_data_deduped.csv
     deps:
       - scripts/near_duplicate.py
+      - src/na0s/dataset/near_duplicate.py
       - data/processed/combined_data.csv
     outs:
       - data/processed/combined_data_deduped.csv
