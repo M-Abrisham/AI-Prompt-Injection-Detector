@@ -1,10 +1,10 @@
-"""Tests for na0s.data_schema — label mappings, validation, edge cases."""
+"""Tests for na0s.dataset.schema — label mappings, validation, edge cases."""
 
 from __future__ import annotations
 
 import pytest
 
-from na0s.data_schema import (
+from na0s.dataset.schema import (
     DataLabel,
     DataSplit,
     Na0SSample,
@@ -203,3 +203,35 @@ class TestValidateSampleStrict:
         s = Na0SSample(text="", label=DataLabel.BENIGN, source="s", license="L")
         errs = validate_sample_strict(s)
         assert any("empty" in e for e in errs)
+
+
+def test_data_schema_shim_emits_warning():
+    import sys
+    import warnings
+
+    sys.modules.pop("na0s.data_schema", None)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        import na0s.data_schema  # noqa: F401
+        matching = [
+            x for x in w
+            if issubclass(x.category, DeprecationWarning)
+            and "na0s.data_schema is deprecated" in str(x.message)
+        ]
+    assert matching, (
+        "na0s.data_schema shim did not emit its DeprecationWarning on first import; "
+        f"captured warnings: {[(x.category.__name__, str(x.message)) for x in w]}"
+    )
+    # Re-exported public surface must still resolve through the shim — all 5 symbols.
+    from na0s.data_schema import (
+        DataLabel,
+        DataSplit,
+        Na0SSample,
+        validate_sample,
+        validate_sample_strict,
+    )
+    assert DataLabel.INJECTION == "injection"
+    assert DataSplit.TRAIN == "train"
+    assert callable(validate_sample)
+    assert callable(validate_sample_strict)
+    assert Na0SSample is not None

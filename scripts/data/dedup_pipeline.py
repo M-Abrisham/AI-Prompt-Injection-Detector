@@ -47,7 +47,7 @@ from near_duplicate import (
     find_minhash_duplicates,
     build_clusters,
 )
-from src.na0s.data_schema import Na0SSample, DataLabel
+from na0s.dataset.schema import Na0SSample, DataLabel
 
 # ── Text normalisation ────────────────────────────────────────────
 
@@ -175,7 +175,7 @@ def _sample_from_dict(d: dict) -> Na0SSample:
     label = d.get("label", "benign")
     if isinstance(label, str):
         label = DataLabel(label)
-    from src.na0s.data_schema import DataSplit
+    from na0s.dataset.schema import DataSplit
     split_val = d.get("split", "train")
     if isinstance(split_val, str):
         split_val = DataSplit(split_val)

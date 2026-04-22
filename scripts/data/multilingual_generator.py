@@ -41,7 +41,7 @@ from typing import Any
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
-from na0s.data_schema import DataLabel, Na0SSample  # noqa: E402
+from na0s.dataset.schema import DataLabel, Na0SSample  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

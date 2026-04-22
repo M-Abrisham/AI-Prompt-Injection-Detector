@@ -71,7 +71,7 @@ stages:
       - scripts/generate_taxonomy.py
       - scripts/taxonomy/
       - data/taxonomy.yaml
-      - src/na0s/data_schema.py
+      - src/na0s/dataset/schema.py
     outs:
       - data/staging/taxonomy_samples.jsonl
 
@@ -86,7 +86,7 @@ stages:
       - scripts/merge_taxonomy.py
       - data/staging/taxonomy_samples.jsonl
       - data/processed/combined_data_deduped.csv
-      - src/na0s/data_schema.py
+      - src/na0s/dataset/schema.py
     outs:
       - data/processed/splits/train.jsonl
       - data/processed/splits/val.jsonl

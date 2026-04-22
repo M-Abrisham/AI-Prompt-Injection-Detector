@@ -21,7 +21,7 @@ from multilingual_generator import (  # noqa: E402
     main,
     write_jsonl,
 )
-from na0s.data_schema import DataLabel, Na0SSample  # noqa: E402
+from na0s.dataset.schema import DataLabel, Na0SSample  # noqa: E402
 
 
 class TestLanguageCoverage:

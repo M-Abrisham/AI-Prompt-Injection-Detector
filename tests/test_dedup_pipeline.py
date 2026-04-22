@@ -27,7 +27,7 @@ from scripts.data.dedup_pipeline import (
     _assign_dedup_flags,
     _sample_from_dict,
 )
-from src.na0s.data_schema import Na0SSample, DataLabel
+from na0s.dataset.schema import Na0SSample, DataLabel
 
 
 # ── Helpers ───────────────────────────────────────────────────────
