@@ -33,12 +33,8 @@ from typing import Optional
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
-# Also ensure scripts/ is importable for near_duplicate
-SCRIPTS_DIR = os.path.join(ROOT, "scripts")
-if SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, SCRIPTS_DIR)
 
-from near_duplicate import (
+from na0s.dataset.near_duplicate import (
     simhash,
     hamming_distance,
     minhash_signature,
