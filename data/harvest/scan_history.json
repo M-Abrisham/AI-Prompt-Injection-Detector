@@ -1,0 +1,19 @@
+[
+  {
+    "scan_time": "2026-04-20T07:53:57Z",
+    "since_days": 7,
+    "sources_scanned": [
+      "arxiv",
+      "github",
+      "hf"
+    ],
+    "total_discovered": 54,
+    "total_new": 54,
+    "per_source_counts": {
+      "huggingface": 7,
+      "arxiv": 45,
+      "github": 2
+    },
+    "errors": {}
+  }
+]
