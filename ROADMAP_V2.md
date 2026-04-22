@@ -137,7 +137,7 @@ One branch per step so `main` stays green throughout:
 1. `refactor/create-validation-package` — new `validation/` pulls in `positive_validation.py` (split into `positive.py` + `trust_boundary.py`) + `validation_allowlist.py` canonical. `multi_turn_validator` moves to `conversation/` instead (conversation-scoped).
 2. `refactor/create-output-package` — new `output/` pulls in the 4 scanners currently in `rag/` (output_scanner, propagation, streaming, dual_scanner) + `segment_grader.py`.
 3. `refactor/create-features-package` — done-ish (L3 structural); also absorb any misplaced top-level feature code.
-4. `refactor/create-dataset-package` — new `dataset/` absorbs `data_schema.py` + library code from `scripts/` (trust_score, quarantine, near_duplicate, social_scraper, weekly_harvest).
+4. `refactor/create-dataset-package` — new `dataset/` absorbs `data_schema.py` + library code from `scripts/` (trust_score, quarantine, near_duplicate, social_scraper, weekly_harvest). **Schema slice SHIPPED** in PR #77 (`b71ea82`…`c398f64`, branch `refactor/create-dataset-package-schema`); 7 scripts/ promotions pending as separate PRs — next: `near_duplicate.py`.
 5. `refactor/create-eval-package` — new `eval/` absorbs `scripts/evaluate_*.py` + `scripts/benchmark_*.py` + regression-dashboard library code.
 6. `refactor/create-probes-package` — new `probes/` absorbs `scripts/taxonomy/` (library) with thin CLI wrappers in `scripts/`.
 7. `refactor/create-agents-package` — new `agents/` absorbs `detectors/mcp_tool.py` (misfiled) + stubs for planned L19 modules.
@@ -1214,6 +1214,13 @@ Full pipeline end-to-end: registry-driven sync of 23 external sources (14 inject
 - [ ] **`deploy_model.py`** — backup/rollback paths, `KNOWN_HASHES` regex replacement, failure-mode assertions. **Priority**: P1.
 - [ ] **`integrate_harvest.py`** — end-to-end JSONL → staging routing through quarantine, confidence filter, malformed-line tolerance. **Priority**: P1.
 - [ ] **`features.py` + `model.py`** — thin CLI wrappers around ml/tfidf but no direct tests. **Priority**: P2.
+
+**Near-duplicate detector improvements (identified 2026-04-22):**
+- [ ] **Paraphrase-aware near-duplicate detection** — current SimHash/MinHash are token-level; they catch "ignore previous" vs "ignore all previous" but miss "disregard prior prompts" vs "overlook earlier instructions" (semantically identical, zero shared tokens). Add a third method (`method="embedding"`) using sentence-transformer embeddings + cosine similarity, reusing existing `src/na0s/ml/embeddings/` infrastructure. **Priority**: P1. **Effort**: 2-4d.
+- [ ] **Cross-language near-duplicate detection** — attackers translate ("Ignore previous instructions" EN vs FR vs ZH share no tokens but are the same attack). Free ride-along with the paraphrase item above if the embedding model is multilingual (e.g. `paraphrase-multilingual-mpnet-base-v2`). **Priority**: P1. **Effort**: 0.5d as add-on.
+- [ ] **Obfuscation-normalized fingerprinting** — attackers use homoglyphs (Latin "o" vs Cyrillic "о"), zero-width characters, and leet-speak to slip past dedup. Plug the existing `layer0` Unicode/homoglyph normalizers in as a pre-step before SimHash/MinHash hashing. **Priority**: P2. **Effort**: 1-2d.
+- [ ] **Auto-calibrated dedup thresholds** — `SIMHASH_THRESHOLD` and `MINHASH_JACCARD_THRESHOLD` are hardcoded. Add a calibration script that samples N pairs, plots the Hamming/Jaccard distribution, picks a knee point, and writes per-corpus thresholds to `data/dedup_thresholds.yaml`. **Priority**: P2. **Effort**: 1-2d.
+- [ ] **Compiled inner loop for scale** — pure-Python SimHash/LSH is fine at 1.9M samples but scales linearly with dataset size. Swap in `datasketch` for MinHash (battle-tested, C-optimized) or Cython-compile the hot SimHash loop. Expected: minutes → seconds. **Priority**: P2. **Effort**: 1-3d.
 
 **Bugs / smells discovered during audit (2026-04-18):**
 - [ ] **MEDIUM — Duplicate license-check implementations** — both `scripts/license_check.py` and `scripts/license_checker.py` exist, covering overlapping functionality (registry parse + HF license classification). Pick one, delete the other, redirect callers. **File**: `scripts/license_check.py`, `scripts/license_checker.py`.
