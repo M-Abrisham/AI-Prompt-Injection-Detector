@@ -25,7 +25,7 @@ from synthetic_augmentation import (  # noqa: E402
     paraphrase,
     write_jsonl,
 )
-from na0s.data_schema import DataLabel, Na0SSample  # noqa: E402
+from na0s.dataset.schema import DataLabel, Na0SSample  # noqa: E402
 
 
 def _make_sample(

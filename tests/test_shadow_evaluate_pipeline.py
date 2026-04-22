@@ -35,7 +35,7 @@ compute_shadow_metrics = _shadow_data_mod.compute_shadow_metrics
 select_for_active_learning = _shadow_data_mod.select_for_active_learning
 model_promotion_gate = _shadow_data_mod.model_promotion_gate
 
-from na0s.data_schema import DataLabel, Na0SSample
+from na0s.dataset.schema import DataLabel, Na0SSample
 
 
 # ---------------------------------------------------------------------------

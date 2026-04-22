@@ -21,7 +21,7 @@ sys.path.insert(0, _script_dir)
 sys.path.insert(0, os.path.join(_project_root, "src"))
 
 from taxonomy import ALL_PROBES
-from na0s.data_schema import DataLabel, Na0SSample
+from na0s.dataset.schema import DataLabel, Na0SSample
 
 
 def _generate_samples(probe_classes, categories=None):

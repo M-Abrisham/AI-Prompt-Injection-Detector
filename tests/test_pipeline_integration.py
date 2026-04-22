@@ -13,7 +13,7 @@ from typing import List
 
 import pytest
 
-from na0s.data_schema import DataLabel, DataSplit, Na0SSample, validate_sample
+from na0s.dataset.schema import DataLabel, DataSplit, Na0SSample, validate_sample
 from na0s.scan_result import ScanResult
 
 # ---------------------------------------------------------------------------
