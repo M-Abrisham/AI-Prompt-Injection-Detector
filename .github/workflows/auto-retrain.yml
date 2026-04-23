@@ -102,8 +102,34 @@ jobs:
           echo "tnr_line=${TNR_LINE}" >> $GITHUB_OUTPUT
           exit 0
 
-      - name: Deploy model and update hashes
+      # Shadow evaluation: compare freshly-trained candidate (data/processed/)
+      # against current production (src/na0s/models/). Catches regressions the
+      # canary gate alone misses -- e.g. F1 drops 5%, FPR doubles -- BEFORE
+      # deploy_model.py overwrites production. Was previously dead code (file
+      # existed at scripts/shadow_evaluate.py, never invoked here).
+      - name: Run shadow evaluation
+        id: shadow
         if: steps.canary.outputs.result == 'PASSED'
+        continue-on-error: true
+        run: |
+          python scripts/shadow_evaluate.py \
+            --candidate data/processed/ \
+            --production src/na0s/models/ \
+            --holdout data/canary/canary_eval.csv \
+            --output models/shadow_results.json 2>&1 | tee shadow_output.txt
+          SHADOW_EXIT=${PIPESTATUS[0]}
+          echo "exit_code=${SHADOW_EXIT}" >> $GITHUB_OUTPUT
+          if [ "$SHADOW_EXIT" -eq 0 ]; then
+            echo "result=PASSED" >> $GITHUB_OUTPUT
+            echo "Shadow evaluation PASSED -- candidate meets all promotion gates"
+          else
+            echo "result=FAILED" >> $GITHUB_OUTPUT
+            echo "::error::Shadow evaluation FAILED -- candidate regresses on FPR or recall vs production"
+          fi
+          exit 0
+
+      - name: Deploy model and update hashes
+        if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED'
         run: python scripts/deploy_model.py
 
       - name: Check for model changes
@@ -118,7 +144,7 @@ jobs:
           fi
 
       - name: Create PR with retrained model
-        if: steps.canary.outputs.result == 'PASSED' && steps.diff.outputs.changed == 'true'
+        if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED' && steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CANARY_RESULT: ${{ steps.canary.outputs.result }}
@@ -197,4 +223,12 @@ jobs:
           echo "::error::Canary evaluation failed. Deploy and PR were skipped."
           echo "TPR gate: ${{ steps.canary.outputs.tpr_line }}"
           echo "TNR gate: ${{ steps.canary.outputs.tnr_line }}"
+          exit 1
+
+      - name: Fail workflow if shadow did not pass
+        if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'FAILED'
+        run: |
+          echo "::error::Shadow evaluation failed. Deploy and PR were skipped."
+          echo "Candidate regresses vs production on one or more promotion gates"
+          echo "(max 1% FPR increase, max 0.5% recall drop). See shadow_output.txt."
           exit 1
