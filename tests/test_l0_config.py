@@ -17,7 +17,7 @@ class TestNormalizationConstants(unittest.TestCase):
 
     def _reload_module(self):
         """Force-reload the module so module-level env reads re-execute."""
-        import src.na0s.layer0.normalization as mod
+        import na0s.layer0.normalization as mod
         importlib.reload(mod)
         return mod
 
@@ -107,7 +107,7 @@ class TestTokenizationConstants(unittest.TestCase):
     """Tests for tokenization.py configurable thresholds."""
 
     def _reload_module(self):
-        import src.na0s.layer0.tokenization as mod
+        import na0s.layer0.tokenization as mod
         importlib.reload(mod)
         return mod
 
@@ -225,7 +225,7 @@ class TestEncodingConstants(unittest.TestCase):
     """Tests for encoding.py configurable thresholds."""
 
     def _reload_module(self):
-        import src.na0s.layer0.encoding as mod
+        import na0s.layer0.encoding as mod
         importlib.reload(mod)
         return mod
 

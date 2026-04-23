@@ -198,7 +198,7 @@ jobs:
           8. Extracted TF-IDF features (10K max)
           9. Trained calibrated LogisticRegression
           10. Deployed model + updated \`KNOWN_HASHES\`
-          11. Ran canary evaluation (200 hand-verified samples)
+          11. Ran canary evaluation (230 hand-verified samples)
 
           **Training samples:** ~${SAMPLE_COUNT}
 

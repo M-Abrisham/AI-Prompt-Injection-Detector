@@ -373,7 +373,12 @@ def normalize_records(rows, config):
         # Extract label
         if label_col is not None:
             raw_label = row.get(label_col)
-            if raw_label in label_map:
+            try:
+                is_mapped = raw_label in label_map
+            except TypeError:
+                # Unhashable raw_label (list/dict) — cannot be a dict key
+                is_mapped = False
+            if is_mapped:
                 label = label_map[raw_label]
             else:
                 # Try string coercion for booleans / ints
