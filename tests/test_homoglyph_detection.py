@@ -875,13 +875,15 @@ class TestDoubleEncodingAndCombined(unittest.TestCase):
 class TestPerformance(unittest.TestCase):
     """Performance tests for homoglyph normalization."""
 
+    # Thresholds sized for GitHub hosted runners (~10x slower than an M-series
+    # laptop). Local dev sees ~50-100ms; CI legitimately lands at 500-600ms.
     def test_normal_text_10k_words(self):
-        """10,000 words of normal text normalizes in under 500ms."""
+        """10,000 words of normal text normalizes in under 2s (CI headroom)."""
         text = "normal text without any tricks " * 10000
         start = time.monotonic()
         normalize_homoglyphs(text)
         elapsed = time.monotonic() - start
-        self.assertLess(elapsed, 0.5,
+        self.assertLess(elapsed, 2.0,
                         "Too slow: {:.3f}s for 10k words".format(elapsed))
 
     def test_adversarial_all_mixed_words(self):
@@ -892,7 +894,7 @@ class TestPerformance(unittest.TestCase):
         start = time.monotonic()
         normalize_homoglyphs(text)
         elapsed = time.monotonic() - start
-        self.assertLess(elapsed, 0.5,
+        self.assertLess(elapsed, 2.0,
                         "Too slow: {:.3f}s for adversarial text".format(elapsed))
 
     def test_pure_cyrillic_10k_words(self):
@@ -903,7 +905,7 @@ class TestPerformance(unittest.TestCase):
         result, count = normalize_homoglyphs(text)
         elapsed = time.monotonic() - start
         self.assertEqual(count, 0)
-        self.assertLess(elapsed, 0.2,
+        self.assertLess(elapsed, 1.0,
                         "Too slow: {:.3f}s for pure Cyrillic".format(elapsed))
 
     def test_full_pipeline_with_homoglyphs(self):
@@ -912,7 +914,7 @@ class TestPerformance(unittest.TestCase):
         start = time.monotonic()
         normalize_text(attack)
         elapsed = time.monotonic() - start
-        self.assertLess(elapsed, 0.2,
+        self.assertLess(elapsed, 1.0,
                         "Full pipeline too slow: {:.3f}s".format(elapsed))
 
 
