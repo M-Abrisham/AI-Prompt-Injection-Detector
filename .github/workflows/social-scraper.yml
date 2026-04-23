@@ -22,7 +22,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install requests kaggle
+        run: |
+          pip install requests kaggle
+          pip install -e .
 
       - name: Run social scraper
         id: scrape
