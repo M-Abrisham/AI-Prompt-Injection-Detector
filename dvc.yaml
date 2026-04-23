@@ -20,6 +20,7 @@ stages:
     cmd: python scripts/aggregate_datasets.py --output-dir data/aggregated
     deps:
       - scripts/aggregate_datasets.py
+      - src/na0s/dataset/aggregate.py
       - data/benchmark/deepset_pi.jsonl
       - data/benchmark/benign_alpaca.jsonl
       - data/benchmark/benign_dolly.jsonl
