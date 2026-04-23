@@ -40,6 +40,9 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 
 DEFAULT_HOLDOUT = os.path.join(ROOT, "data", "canary", "canary_eval.csv")
 DEFAULT_OUTPUT = os.path.join(ROOT, "models", "shadow_results.json")
+# Production model lives in the package directory; deploy_model.py copies
+# data/processed/ -> src/na0s/models/ on promotion.
+DEFAULT_PRODUCTION = os.path.join(ROOT, "src", "na0s", "models")
 
 # ── Promotion gates ──────────────────────────────────────────────────
 # Candidate must meet ALL criteria to pass:
@@ -83,27 +86,39 @@ def load_eval_dataset(path: str) -> pd.DataFrame:
 # ── Model loading ────────────────────────────────────────────────────
 
 def _load_model_pair(directory: str):
-    """Load a (model, vectorizer) pair from a directory.
+    """Load a (model, vectorizer, scaler) triple from a directory.
 
-    Looks for ``model.pkl`` and ``tfidf_vectorizer.pkl`` inside *directory*.
-    Returns ``(model, vectorizer)`` or raises ``FileNotFoundError``.
+    Looks for ``model.pkl``, ``tfidf_vectorizer.pkl``, and (optional)
+    ``structural_scaler.pkl`` inside *directory*. The scaler, when present,
+    indicates the model was trained with the L3 structural-features concat
+    (29 features hstacked after TF-IDF). Returns ``(model, vectorizer, scaler)``
+    where scaler may be ``None`` if no structural_scaler.pkl is found.
+    Mirrors the production feature pipeline at ``src/na0s/predict.py:_transform``.
     """
     from na0s.safe_pickle import safe_load
 
     model_path = os.path.join(directory, "model.pkl")
     vec_path = os.path.join(directory, "tfidf_vectorizer.pkl")
+    scaler_path = os.path.join(directory, "structural_scaler.pkl")
 
     if not os.path.isfile(model_path):
         raise FileNotFoundError(f"model.pkl not found in {directory}")
     if not os.path.isfile(vec_path):
         raise FileNotFoundError(f"tfidf_vectorizer.pkl not found in {directory}")
 
-    return safe_load(model_path), safe_load(vec_path)
+    scaler = safe_load(scaler_path) if os.path.isfile(scaler_path) else None
+    return safe_load(model_path), safe_load(vec_path), scaler
 
 
-def load_production_model():
-    """Load the current production model from ``data/processed/``."""
-    prod_dir = os.path.join(ROOT, "data", "processed")
+def load_production_model(prod_dir: str = DEFAULT_PRODUCTION):
+    """Load the current production model from the given directory.
+
+    Defaults to ``src/na0s/models/`` (the package directory the SDK ships
+    with). The previous default of ``data/processed/`` was wrong because
+    that path holds the freshly-trained CANDIDATE in the auto-retrain
+    workflow, not production -- comparing candidate against itself made
+    the gate a no-op.
+    """
     return _load_model_pair(prod_dir)
 
 
@@ -147,9 +162,31 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     }
 
 
-def predict_with_model(model, vectorizer, texts: pd.Series) -> np.ndarray:
-    """Run model prediction on a Series of text strings."""
+def predict_with_model(model, vectorizer, texts: pd.Series, scaler=None) -> np.ndarray:
+    """Run model prediction on a Series of text strings.
+
+    When *scaler* is provided, the L3 structural feature pipeline is applied:
+    extract 29 structural features per text -> scale via the fitted
+    StandardScaler -> hstack after TF-IDF. Mirrors production's
+    ``src/na0s/predict.py:_transform``. Without the scaler, models trained
+    with structural concat will raise a feature-dimension ValueError.
+    """
     X = vectorizer.transform(texts)
+    if scaler is not None:
+        try:
+            import scipy.sparse
+            from na0s.structural import extract_structural_features_batch
+            struct_arr = extract_structural_features_batch(list(texts))
+            struct_scaled = scaler.transform(struct_arr)
+            X = scipy.sparse.hstack(
+                [X, scipy.sparse.csr_matrix(struct_scaled)], format="csr"
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Structural feature concat failed: {e}. "
+                "Production model expects TF-IDF + structural; without scaler "
+                "the X matrix will be the wrong shape."
+            ) from e
     return model.predict(X)
 
 
@@ -244,6 +281,7 @@ def shadow_evaluate(
     candidate_path: str,
     holdout_path: str = DEFAULT_HOLDOUT,
     output_path: str = DEFAULT_OUTPUT,
+    production_path: str = DEFAULT_PRODUCTION,
 ) -> dict:
     """Run shadow evaluation comparing candidate against production.
 
@@ -255,19 +293,20 @@ def shadow_evaluate(
     y_true = eval_df["label"].values.astype(int)
     print(f"  {len(eval_df)} samples ({(y_true == 1).sum()} malicious, {(y_true == 0).sum()} safe)")
 
-    # Load models
-    print(f"Loading production model...")
-    prod_model, prod_vec = load_production_model()
+    # Load models (each triple: model, vectorizer, optional structural scaler)
+    print(f"Loading production model from {production_path}...")
+    prod_model, prod_vec, prod_scaler = load_production_model(production_path)
 
     print(f"Loading candidate model: {candidate_path}")
-    cand_model, cand_vec = load_candidate_model(candidate_path)
+    cand_model, cand_vec, cand_scaler = load_candidate_model(candidate_path)
 
-    # Run predictions
+    # Run predictions (scaler enables L3 structural feature concat to match
+    # production model's expected feature dimensionality)
     print("Running production model predictions...")
-    y_prod = predict_with_model(prod_model, prod_vec, eval_df["text"])
+    y_prod = predict_with_model(prod_model, prod_vec, eval_df["text"], prod_scaler)
 
     print("Running candidate model predictions...")
-    y_cand = predict_with_model(cand_model, cand_vec, eval_df["text"])
+    y_cand = predict_with_model(cand_model, cand_vec, eval_df["text"], cand_scaler)
 
     # Compute metrics
     prod_metrics = compute_metrics(y_true, y_prod)
@@ -338,9 +377,13 @@ def main():
         "--output", default=DEFAULT_OUTPUT,
         help=f"JSON report output path (default: {DEFAULT_OUTPUT})",
     )
+    parser.add_argument(
+        "--production", default=DEFAULT_PRODUCTION,
+        help=f"Path to production model directory (default: {DEFAULT_PRODUCTION})",
+    )
     args = parser.parse_args()
 
-    report = shadow_evaluate(args.candidate, args.holdout, args.output)
+    report = shadow_evaluate(args.candidate, args.holdout, args.output, args.production)
     sys.exit(0 if report["verdict"] == "PASS" else 1)
 
 
