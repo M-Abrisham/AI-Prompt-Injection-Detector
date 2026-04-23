@@ -48,6 +48,7 @@ L16 Multi-Turn | L17 Doc Scanning (35%) | L18 RAG Security | L19 Agent/MCP | L20
 | **L18**| `░░░░░░░░░░░░░░░░░░░░` | **0/18**   | NOT STARTED |
 | **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
 | **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
+| **L21**| `░░░░░░░░░░░░░░░░░░░░` | **0/8**    | DRAFT (NEW 2026-04-23) |
 | **Hardening** | `██████████████░░░░░░` | **10/14** | 71% |
 | **Infra** | `████████████████████` | **—** | Repo reorg (13 phases), CI, Dependabot, CodeQL, SECURITY.md |
 |        |                        | **608/768** | **79%** |
@@ -1215,6 +1216,61 @@ Full pipeline end-to-end: registry-driven sync of 23 external sources (14 inject
 - [ ] **`integrate_harvest.py`** — end-to-end JSONL → staging routing through quarantine, confidence filter, malformed-line tolerance. **Priority**: P1.
 - [ ] **`features.py` + `model.py`** — thin CLI wrappers around ml/tfidf but no direct tests. **Priority**: P2.
 
+**Pipeline Architecture v2 — harvest → classify → label → dedup → train (approved 2026-04-23):**
+
+The current dataset pipeline is binary (injection/safe) and dumps everything into `data/processed/`. The v2 architecture explicitly separates the harvest funnel from the training set and adds attack-type classification + multi-stage labeling + cross-batch dedup. Inspired by garak (probes-vs-data split), PyRIT (typed seed metadata), promptfoo (multi-framework taxonomy crosswalk).
+
+*Architecture (target `data/` tree):*
+```
+data/
+├── raw/                # what scrapers/harvesters write (hunted)
+│   ├── github_advisories/   nvd_cves/   arxiv/   reddit/   twitter/
+│   ├── hf_mirror/      # one-shot mirrors of HF datasets
+│   └── competitor_corpora/  # garak DAN, PyRIT seeds, llm-attacks AdvBench
+├── classified/         # NEW STAGE — recognized into attack type
+│   ├── owasp_llm_01_prompt_injection/
+│   ├── owasp_agentic_asi01_goal_hijack/
+│   ├── mitre_atlas_exfiltration/
+│   └── unclassified/   # awaiting human/LLM review
+├── labeled/            # NEW STAGE — heuristic + LLM-judge consensus
+│   ├── high_confidence/   needs_review/   rejected/
+├── training/           # rename of current data/processed/
+│   ├── train.csv  val.csv  test.csv  combined_data.csv
+├── benchmark/  canary/  holdout/    # eval sets (existing, unchanged)
+└── _meta/              # registry + history
+    ├── datasets.yaml   classification_taxonomy.yaml   harvest_history/
+```
+
+- [ ] **A1 — Data tree restructure** — multi-PR migration: rename `data/processed/` → `data/training/`, create `data/raw/` `data/classified/` `data/labeled/` `data/_meta/`, move `data/scraped/` → `data/raw/reddit/+twitter/`, move `data/harvest/` → `data/raw/{arxiv,hf_mirror,...}/`. Each subdir gets a README explaining what writes there. Update every script + DVC stage that reads/writes affected paths. **Priority**: P0 (blocks all subsequent v2 work). **Effort**: 2-3d.
+- [ ] **A2 — New DVC stages: `classify`, `label`, `dedup_against_training`** — three new stages between existing `aggregate` and `train`. `classify` assigns OWASP+ATLAS+tactics labels; `label` runs heuristic + LLM-judge consensus (reuses `src/na0s/judge/` per the L13 LLM-audit-bridge item below); `dedup_against_training` checks new samples against existing training set (not just within-batch). **Priority**: P1. **Effort**: 3-5d.
+- [ ] **A3 — `Na0SSample` schema additions (9 fields, all optional)** — for interop with HarmBench / WildJailbreak / TensorTrust / NotInject / promptfoo: `tactics: list[str]`, `semantic_category: str?`, `functional_category: str?`, `compliance_tags: list[str]` (OWASP+ATLAS+NIST+EU-AI-Act crosswalk — promptfoo's biggest moat), `context_string: str?`, `expected_completion: str?`, `paired_benign_id: str?`, `trigger_words: list[str]`, `stable_id: str` (SHA-256(text) for cross-dataset dedup). Plus `to_harmbench_row()` / `to_wildjailbreak_row()` adapters for export interop. **Priority**: P1. **Effort**: 1d (backward-compatible).
+- [ ] **A4 — `data/_meta/classification_taxonomy.yaml`** — single canonical taxonomy file (garak's MISP TSV pattern) crosswalking OWASP LLM Top 10, OWASP Agentic ASI01-10, MITRE ATLAS tactics, NIST AI RMF measures, EU AI Act articles, ISO/IEC 42001. Drives the `classify` DVC stage. **Priority**: P1. **Effort**: 2d.
+- [ ] **A5 — Privacy: migrate training data to HuggingFace private dataset** — create `Na0S/training-data` HF private repo, push `data/training/` via `huggingface_hub`, add `HF_TOKEN` to GitHub Actions secrets, update CI to `hf download` before training. 100GB free private tier covers Na0S (~5-50GB). Native gating provides license-capture + EU-disallow + per-user audit logs + revocation. Mitigation: monthly S3 mirror as backstop (HF can revoke per ToS). **Priority**: P1. **Effort**: 1d.
+- [ ] **A6 — `data/_meta/datasets.yaml` audit + cleanup** — ROADMAP claims 23 sources; actual is 49. Reconcile, deduplicate, retire stale entries. **Priority**: P2. **Effort**: 0.5d.
+
+**New harvest sources (ranked by ROI, identified via competitor audit 2026-04-23):**
+
+*Tier 1 — Zero-competitor opportunities (Na0S would lead):*
+- [ ] **GHSA prompt-injection feed scraper** — `scan_ghsa()` in `weekly_harvest.py` using GitHub `/advisories` GraphQL with `query: "prompt injection"`. **144 entries today**, growing, CC-BY licensed, machine-readable. Examples already in feed: GHSA-2r2p-4cgf-hv7h (engram CSRF→indirect injection), GHSA-3hjv-c53m-58jj (Flowise), GHSA-6r77-hqx7-7vw8 (Flowise), GHSA-gfmx-pph7-g46x (OpenClaw). **No competitor (garak/PyRIT/promptfoo) ingests this.** **Priority**: P0. **Effort**: 1d.
+- [ ] **NVD CVE LLM-PI subset scraper** — `scan_nvd_cves()` using NVD REST API (`services.nvd.nist.gov/rest/json/cves/2.0`) with keyword `LLM prompt injection` plus a denylist for SQL/command-injection collisions. Yields ~30-50 real LLM-PI CVEs with CVSS scores: CVE-2023-29374 (LangChain), CVE-2024-5826 (Vanna), CVE-2024-12366 (PandasAI), CVE-2024-10950 (gpt_academic), CVE-2025-31363 (Mattermost), CVE-2025-52573, CVE-2025-67510, CVE-2026-30856 (WeKnora), CVE-2026-33654 (nanobot). Public-domain license. **Priority**: P0. **Effort**: 1-2d.
+- [ ] **MITRE ATLAS YAML ingestion** — clone `github.com/mitre-atlas/atlas-data` `ATLAS.yaml`. 70+ AI-attack techniques, 14 tactics, ~30 case studies. MIT licensed. Drives the `compliance_tags` field (A3) + `classify` stage taxonomy (A4). **Priority**: P0. **Effort**: 1d (single YAML pull + parse).
+
+*Tier 2 — Competitor parity (close largest gap in one PR):*
+- [ ] **garak corpora mirror** — one-shot mirror of `inthewild_jailbreak_llms.json`, `slurprompts.jsonl`, `dan/` (15+ DAN files: DAN_Jailbreak, DUDE, STAN, Dan_6.0–11.0, Dev_Mode_v2/RANTI), `autodan/`, `gcg/`, `tap/`, `beast/`, `fitd/`, `dra/`, `packagehallucination/`, `ldnoobw-en.txt`. Apache-2.0. Source: `github.com/NVIDIA/garak/tree/main/garak/data`. **Priority**: P1. **Effort**: 1d.
+- [ ] **PyRIT seed_datasets mirror** — `local/` + `remote/` seed dirs, `jailbreak/many_shot_examples.json`, `jailbreak/templates/*.yaml`, `lexicons/`, `harm_definition/`. MIT. Source: `github.com/microsoft/PyRIT/tree/main/pyrit/datasets` (note: redirect from `Azure/PyRIT` archive 2026-03-27). **Priority**: P1. **Effort**: 1d.
+- [ ] **llm-attacks AdvBench (original)** — `harmful_behaviors.csv` (~520 behaviors, the canonical AdvBench source by Zou et al., GCG paper). MIT. Source: `github.com/llm-attacks/llm-attacks`. Note: Na0S already pulls AdvBench via walledai mirror, but the original has extended set. **Priority**: P1. **Effort**: 0.5d.
+- [ ] **HarmBench multimodal behaviors** — `behavior_datasets/harmbench_behaviors_multimodal_*.csv` + `multimodal_behavior_images/` (~110 multimodal behaviors). MIT. Currently Na0S only pulls text behaviors via HF mirror. **Priority**: P2. **Effort**: 1d (multimodal handling overhead).
+- [ ] **GPTFuzz seed corpora** — `question_list.csv` (~100) + `GPTFuzzer.csv` (~75 templates). MIT. Source: `github.com/sherdencooper/GPTFuzz`. **Priority**: P2. **Effort**: 0.5d.
+- [ ] **AutoDAN AdvBench variant** — `data/advbench`. Source: `github.com/SheltonLiu-N/AutoDAN`. **Priority**: P2. **Effort**: 0.5d.
+
+*Tier 3 — Lower priority / unverified:*
+- [ ] **HackerOne / Bugcrowd public PI disclosures** — UNVERIFIED in 2026-04-23 recon (WebFetch could not reach `/hacktivity`). Investigate whether public PI bounties exist + are scrapeable before committing effort. **Priority**: P3. **Effort**: TBD pending viability check.
+- [ ] **Academic paper appendices** — many 2024-2026 prompt-injection papers ship attack corpora as supplementary material. Build a curated URL list from arxiv harvest (already runs weekly), fetch + extract via `trafilatura`. **Priority**: P3. **Effort**: 2d.
+
+*Cleanup of `social-scraper.yml` + `weekly-harvest.yml` workflows:*
+- [ ] **Add `pip install -e .` to `social-scraper.yml`** — same latent bug as `auto-retrain.yml` (already fixed in PR #82): the workflow does `from na0s.layer1.rules_registry import RULES` at L85 of `social_scraper.py` (post drift-fix PR #46) but has no editable install. Currently broken; one-line fix. **Priority**: P0. **Effort**: 5min.
+- [ ] **Reduce scraper redundancy** — currently produces same ~40,478 records per 3h run, generating duplicate auto-PRs. Add a "skip if no net-new content vs last scrape" gate to `social_scraper.py` so it doesn't spam PRs with redundant data. **Priority**: P1. **Effort**: 0.5d.
+
 **Defensive / negative-exemplar corpus (gap identified 2026-04-22, blocks Issue #58):**
 The scraper currently pulls attack data heavily but has near-zero "defensive/educational" content — text that mentions attack vocabulary in a defensive frame (CVEs, OWASP entries, MITRE descriptions, security blogs). Without these, the FAISS centroid can't distinguish "actual attack" from "discussion of attack" → false positives like `test_security_advisory_reveal` (Issue #58).
 - [ ] **Hand-curated bootstrap negative-exemplar dataset (~75-100 samples)** — unblocks open Issue #58 immediately while upstream sources below are wired up. Mix: ~30 OWASP/MITRE entries (hand-copy public-domain text) + ~30 arXiv abstracts from prompt-injection papers + ~30 LLM-generated security-advisory templates. Output: `data/embedding_negatives.jsonl`. **Distinct from** the canary evaluation set (line 2285 — hand-verified evaluation gate, not a training corpus). **Priority**: P0 (blocks Issue #58). **Effort**: 4-6h.
@@ -1948,6 +2004,81 @@ Static taxonomy in `data/taxonomy.yaml` (19 categories × 103+ techniques) with 
 - [ ] `diff_engine.py` and `incident_to_sample.py` already exist at `src/na0s/layer15/diff_engine.py:1` (280 LOC) and `src/na0s/layer15/incident_to_sample.py:1` (406 LOC). The pre-rewrite roadmap listed both as L20 deliverables — they must NOT be re-implemented under `taxonomy/`. L20 owns only the orchestration on top; the primitives stay in L15.
 - [ ] Original roadmap metadata listed `scripts/generate_taxonomy_samples.py` under L20, but `scripts/taxonomy/` is a Probe subclass library (30+ probe modules, see `scripts/taxonomy/__init__.py:_discover_probes`) — semantically it belongs with the probe/adversarial-generation tooling (closer to the benchmark harness) rather than taxonomy automation. Clarify ownership before v1.0.0.
 - [ ] `data/atlas_mapping.yaml` does not exist yet; the L15 ATLAS sync writes incident-style dumps, not the per-technique ID mapping L20 expects. Authoring this file is a hand-curation task, not an automation task — flag for product-level decision.
+
+---
+
+## Layer 21: Telemetry & Feedback Loop (NEW — DRAFT) — Tasks: 0/8 (0%)
+
+### Description (placeholder, expand when work starts)
+
+Layer 21 will close the loop between **production Na0S deployments** and the **training dataset** so attack patterns observed in the wild flow back into the next model release. Today Na0S is a pure local SDK with **zero telemetry infrastructure** — every deployment is an island. This is intentional for the v0.x privacy posture, but it caps the dataset's growth at "what we can scrape from the public internet," missing the long tail of in-the-wild attacks Na0S customers actually see.
+
+**Hard constraints (drive every design decision below):**
+- **Default OFF, opt-in only.** Na0S is a *defensive* SDK; the second customers feel surveilled, they switch. No silent telemetry.
+- **Self-host option.** Telemetry server itself is open-source; high-compliance customers run their own.
+- **Zero customer content sent without canary-token attribution OR explicit per-call consent.** A customer prompt that doesn't trigger a Na0S canary cannot be exfiltrated by default — period.
+- **GDPR/CCPA/HIPAA compliant.** Data export + deletion endpoints, signed DPAs available.
+- **Annual public transparency report.** "X customers opted in, Y reports submitted, Z made it into training, here are the 10 most-common patterns."
+
+**Architecture sketch (5-layer telemetry, all separately toggled):**
+- Layer 1 — **anonymous metrics** (counts per category, latency p50/p95) → low signal, low risk
+- Layer 2 — **hashed fingerprints** (SimHash + feature vector + verdict, no recoverable text) → medium signal
+- Layer 3 — **canary-triggered raw capture** (full prompt sent ONLY when a Na0S-issued canary token matches; legitimate user prompts can't naturally contain our canaries — same principle as email spam-traps for 20 years) → high signal, near-zero privacy risk; **reuses existing `src/na0s/canary/` infrastructure**
+- Layer 4 — **explicit customer submission API** — `na0s.report_attack(prompt, verdict, consent=True)` for customer-curated false-negative/false-positive feedback → highest trust, lowest volume
+- Layer 5 — **federated aggregation** (k-anonymity, differential privacy noise, only share if N customers see the same fingerprint) → maximum privacy preservation; defer to v1.x
+
+### Target directory structure (sketch — finalize when work starts)
+```
+src/na0s/telemetry/                  tests/telemetry/
+├── __init__.py                      ├── __init__.py
+├── config.py        ← consent flags ├── test_config.py
+├── metrics.py       ← Layer 1       ├── test_metrics.py
+├── fingerprints.py  ← Layer 2       ├── test_fingerprints.py
+├── canary_capture.py← Layer 3       ├── test_canary_capture.py
+│                     (uses canary/) │
+├── submit.py        ← Layer 4 API   ├── test_submit.py
+└── client.py        ← HTTP/gRPC     └── test_client.py
+                       transport
+
+Server (separate repo, also open-source — `na0s-telemetry-server/`):
+├── ingest/          ← receive + validate
+├── store/           ← per-tenant isolated S3/PG buckets
+├── aggregate/       ← anonymize + cluster
+├── promote/         ← reviewed samples → main training pipeline (PR back to Na0S)
+└── transparency/    ← annual report generator
+
+Public docs:
+  docs/TELEMETRY.md         (clear English what/when/why)
+  docs/PRIVACY.md           (legal + data flow diagrams)
+  docs/SELF_HOST.md         (run-your-own instructions)
+```
+
+### Completed (0 items)
+None — this layer is a placeholder. Work starts after the L13 pipeline-v2 architecture lands.
+
+### TODO List
+
+**P0 — Privacy + consent foundation (must precede any data flow):**
+- [ ] **`telemetry/config.py` — consent flags + first-run notice** — typed config dataclass with all 4 telemetry layers defaulting to `False`. First-run notice prints once: "Na0S sends zero data by default. Read about optional telemetry at <link>." Explicit env-var precedence (`NA0S_TELEMETRY_*`) for CI/container use.
+- [ ] **`docs/TELEMETRY.md` + `docs/PRIVACY.md`** — plain-English what-we-collect/what-we-don't matrix, signed DPA template, GDPR/CCPA/HIPAA compliance statement, link to self-host instructions.
+- [ ] **GDPR data-export + deletion endpoints** — `na0s telemetry export --tenant-id X` and `--delete --tenant-id X` CLI; server-side enforces 30-day deletion SLA.
+
+**P1 — Layers 1-4 core capture (in order):**
+- [ ] **Layer 1: `telemetry/metrics.py`** — anonymous counts + latency stats; ships first because lowest risk + highest dev-loop value (we'd see opt-in adoption rate immediately).
+- [ ] **Layer 4: `telemetry/submit.py` + `na0s.report_attack()` API** — explicit customer submission. Ships second (zero ambiguity, no transport infrastructure beyond the API itself).
+- [ ] **Layer 3: `telemetry/canary_capture.py`** — canary-token-gated full-prompt capture. Reuses `src/na0s/canary/` (alert.py, manager.py, verifier.py). Ships third because it depends on per-customer canary issuance + the transport layer.
+- [ ] **Layer 2: `telemetry/fingerprints.py`** — SimHash + feature-vector capture. Ships fourth because it's the trickiest privacy story (we have to *prove* one-way + non-reversible).
+
+**P2 — Server + advanced:**
+- [ ] **`na0s-telemetry-server/`** — separate open-source repo with `ingest/store/aggregate/promote/transparency/` modules. Self-host instructions in `docs/SELF_HOST.md`. The promote-to-training pipeline writes a PR back to the Na0S repo (no auto-merge).
+- [ ] **Layer 5: federated aggregation** — k-anonymity + differential-privacy noise for cross-customer pattern discovery. Defer to v1.x.
+
+### Notes / open questions (resolve when work starts)
+- Self-hosted vs Na0S-hosted default for the telemetry endpoint?
+- Which transport: HTTPS+JSON (simple), gRPC (efficient), or batched JSONL upload (works behind strict egress controls)?
+- Per-tenant isolation guarantees — separate buckets vs. row-level + encryption keys?
+- Does the canary-token approach need per-customer entropy to defeat a coordinated attacker who knows our canary scheme?
+- Pricing model — free tier with rate limits? Paid tier with higher quotas? Aligned with HF private dataset pricing model from L13.
 
 ---
 
