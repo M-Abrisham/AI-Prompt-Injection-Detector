@@ -25,7 +25,7 @@ from scripts import quarantine
 
 if _HAS_DEPS:
     from scripts import process_data
-    from scripts import mine_hard_negatives
+    from na0s.dataset import hard_negatives as mine_hard_negatives
     from scripts.optimize_threshold import _compute_oof_probabilities
 else:
     process_data = None

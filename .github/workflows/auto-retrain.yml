@@ -38,6 +38,7 @@ jobs:
         run: |
           pip install pandas scikit-learn datasets huggingface_hub \
                     requests chardet pyarrow
+          pip install -e .
 
       - name: Sync datasets from registry
         env:
@@ -72,7 +73,7 @@ jobs:
       # (security discussions, benign roleplay, override-like language) and
       # merge them into combined_data.csv to reduce false-positive rate.
       - name: Mine hard negatives into training data
-        run: python -m scripts.mine_hard_negatives
+        run: python -m na0s.dataset.hard_negatives
 
       - name: Extract TF-IDF features
         run: python -m scripts.features
