@@ -415,11 +415,19 @@ class TestIntegrateHarvestRouting(unittest.TestCase):
                 "scripts.integrate_harvest.quarantine.ingest",
                 return_value={"action": "quarantined"},
             ) as mock_ingest:
+                # Post-F2: harvest descriptions are skipped by default
+                # because arXiv abstracts / HF descriptions are metadata,
+                # not labeled prompts — treating them as benign poisons
+                # training. This test's INTENT is to verify per-source
+                # routing through quarantine when harvest records are
+                # present, so pass the opt-in flag to exercise both the
+                # harvest + scrape branches end-to-end.
                 exit_code = integrate_harvest.main(
                     [
                         "--harvest-dir", harvest_dir,
                         "--scrape-dir", scrape_dir,
                         "--staging-dir", staging_dir,
+                        "--include-harvest-descriptions",
                     ]
                 )
 
