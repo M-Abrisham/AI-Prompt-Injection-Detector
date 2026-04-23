@@ -1,4 +1,4 @@
-"""Tests for scripts/aggregate_datasets.py.
+"""Tests for na0s.dataset.aggregate.
 
 Validates dataset aggregation logic: text normalisation, hashing,
 record normalisation, deduplication, stratified sampling, dataset
@@ -10,13 +10,9 @@ import json
 import os
 import random
 import re
-import sys
 import unittest
 
-# Ensure the scripts directory is importable
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-
-from aggregate_datasets import (
+from na0s.dataset.aggregate import (
     normalize_text,
     text_hash,
     normalize_records,
@@ -36,7 +32,7 @@ class TestImport(unittest.TestCase):
 
     def test_import(self):
         """Module imports without error and exposes key symbols."""
-        import aggregate_datasets as mod
+        from na0s.dataset import aggregate as mod
         for attr in ("normalize_text", "text_hash", "normalize_records",
                       "deduplicate", "stratified_sample", "build_parser",
                       "DATASETS", "main"):
@@ -370,7 +366,7 @@ class TestOutputFormat(unittest.TestCase):
         import tempfile
         from unittest import mock
 
-        import aggregate_datasets as mod
+        from na0s.dataset import aggregate as mod
 
         # Mock fetch_dataset to return predictable records
         fake_records = [
@@ -406,7 +402,7 @@ class TestOutputFormat(unittest.TestCase):
         import tempfile
         from unittest import mock
 
-        import aggregate_datasets as mod
+        from na0s.dataset import aggregate as mod
 
         fake_records = [
             {"text": "hello", "label": 0, "source": "s1", "category": "benign"},
@@ -441,7 +437,7 @@ class TestOutputFormat(unittest.TestCase):
         import tempfile
         from unittest import mock
 
-        import aggregate_datasets as mod
+        from na0s.dataset import aggregate as mod
 
         fake_records = [
             {"text": "hello", "label": 0, "source": "s1", "category": "benign"},
