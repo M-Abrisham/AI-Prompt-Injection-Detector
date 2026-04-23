@@ -321,8 +321,8 @@ class TestShadowEvaluateIntegration:
             cand_model = FakeModel([0, 0, 1, 1])
             cand_vec = FakeVectorizer()
 
-            with mock.patch("shadow_evaluate.load_production_model", return_value=(prod_model, prod_vec)), \
-                 mock.patch("shadow_evaluate.load_candidate_model", return_value=(cand_model, cand_vec)):
+            with mock.patch("shadow_evaluate.load_production_model", return_value=(prod_model, prod_vec, None)), \
+                 mock.patch("shadow_evaluate.load_candidate_model", return_value=(cand_model, cand_vec, None)):
                 report = shadow_evaluate(
                     candidate_path="/fake/candidate",
                     holdout_path=holdout,
@@ -358,8 +358,8 @@ class TestShadowEvaluateIntegration:
             cand_model = FakeModel([0, 0, 0, 0, 1, 1, 0, 0])  # misses 2 malicious
             cand_vec = FakeVectorizer()
 
-            with mock.patch("shadow_evaluate.load_production_model", return_value=(prod_model, prod_vec)), \
-                 mock.patch("shadow_evaluate.load_candidate_model", return_value=(cand_model, cand_vec)):
+            with mock.patch("shadow_evaluate.load_production_model", return_value=(prod_model, prod_vec, None)), \
+                 mock.patch("shadow_evaluate.load_candidate_model", return_value=(cand_model, cand_vec, None)):
                 report = shadow_evaluate(
                     candidate_path="/fake/candidate",
                     holdout_path=holdout,
@@ -388,8 +388,8 @@ class TestShadowEvaluateIntegration:
             cand_model = FakeModel([1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1])
             cand_vec = FakeVectorizer()
 
-            with mock.patch("shadow_evaluate.load_production_model", return_value=(prod_model, prod_vec)), \
-                 mock.patch("shadow_evaluate.load_candidate_model", return_value=(cand_model, cand_vec)):
+            with mock.patch("shadow_evaluate.load_production_model", return_value=(prod_model, prod_vec, None)), \
+                 mock.patch("shadow_evaluate.load_candidate_model", return_value=(cand_model, cand_vec, None)):
                 report = shadow_evaluate(
                     candidate_path="/fake/candidate",
                     holdout_path=holdout,
@@ -416,8 +416,8 @@ class TestShadowEvaluateIntegration:
             cand_model = FakeModel([1, 1])  # disagrees on first
             cand_vec = FakeVectorizer()
 
-            with mock.patch("shadow_evaluate.load_production_model", return_value=(prod_model, prod_vec)), \
-                 mock.patch("shadow_evaluate.load_candidate_model", return_value=(cand_model, cand_vec)):
+            with mock.patch("shadow_evaluate.load_production_model", return_value=(prod_model, prod_vec, None)), \
+                 mock.patch("shadow_evaluate.load_candidate_model", return_value=(cand_model, cand_vec, None)):
                 report = shadow_evaluate(
                     candidate_path="/fake/candidate",
                     holdout_path=holdout,
@@ -440,8 +440,8 @@ class TestShadowEvaluateIntegration:
             model = FakeModel([0, 1])
             vec = FakeVectorizer()
 
-            with mock.patch("shadow_evaluate.load_production_model", return_value=(model, vec)), \
-                 mock.patch("shadow_evaluate.load_candidate_model", return_value=(model, vec)):
+            with mock.patch("shadow_evaluate.load_production_model", return_value=(model, vec, None)), \
+                 mock.patch("shadow_evaluate.load_candidate_model", return_value=(model, vec, None)):
                 shadow_evaluate(
                     candidate_path="/fake",
                     holdout_path=holdout,
