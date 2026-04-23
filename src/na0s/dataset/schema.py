@@ -86,9 +86,62 @@ class Na0SSample:
     near_dup_cluster: Optional[str] = None
     created_at: Optional[str] = field(default=None)
 
+    # ── A3 interop + F14 decontamination fields (added 2026-04-23) ──
+    # Cross-dataset compatibility with HarmBench / WildJailbreak /
+    # TensorTrust / NotInject / promptfoo. All optional; existing
+    # samples remain valid without them.
+    tactics: list[str] = field(default_factory=list)
+    """Multi-label technique tags (e.g. ['roleplay', 'base64-encode']).
+    Maps to WildJailbreak.tactics + HarmBench.Tags."""
+
+    semantic_category: Optional[str] = None
+    """Harm-domain category (e.g. 'cybercrime_intrusion', 'misinformation').
+    Maps to HarmBench.SemanticCategory."""
+
+    functional_category: Optional[str] = None
+    """Attack framing (e.g. 'standard', 'contextual', 'copyright',
+    'extraction', 'hijacking'). Maps to HarmBench.FunctionalCategory."""
+
+    compliance_tags: list[str] = field(default_factory=list)
+    """OWASP / MITRE ATLAS / NIST AI RMF / EU AI Act crosswalk tags
+    (e.g. ['owasp:llm:01', 'mitre:atlas:exfiltration']).
+    promptfoo-style multi-framework mapping."""
+
+    context_string: Optional[str] = None
+    """System-prompt or RAG context the attack runs against.
+    Maps to TensorTrust.pre_prompt / HarmBench.ContextString."""
+
+    expected_completion: Optional[str] = None
+    """Success oracle — what counts as a successful attack.
+    Maps to HackaPrompt.expected_completion."""
+
+    paired_benign_id: Optional[str] = None
+    """Stable_id of the benign sibling for over-refusal eval.
+    WildJailbreak pairs vanilla_harmful with vanilla_benign."""
+
+    trigger_words: list[str] = field(default_factory=list)
+    """Words that make this sample look adversarial despite being
+    benign (for over-defense calibration). Maps to NotInject.word_list."""
+
+    stable_id: Optional[str] = None
+    """SHA-256(normalized text) — cross-dataset deduplication key.
+    Auto-computed in __post_init__ if not provided. F14 decontamination
+    gate uses this to block eval scenarios from entering training."""
+
     def __post_init__(self) -> None:
         if self.created_at is None:
             self.created_at = datetime.now(timezone.utc).isoformat()
+        if self.stable_id is None and self.text:
+            # SHA-256 of NFKC-normalized whitespace-collapsed text.
+            # Same normalization used in near_duplicate + process_data
+            # to ensure identical hashes across pipeline stages.
+            import hashlib
+            import unicodedata
+            normalized = unicodedata.normalize("NFKC", self.text)
+            normalized = " ".join(normalized.split())
+            self.stable_id = hashlib.sha256(
+                normalized.encode("utf-8")
+            ).hexdigest()
 
     # ── Factory ────────────────────────────────────────────────────
 
@@ -134,6 +187,60 @@ class Na0SSample:
             "is_duplicate": self.is_duplicate,
             "near_dup_cluster": self.near_dup_cluster,
             "created_at": self.created_at,
+            # A3 interop fields
+            "tactics": list(self.tactics),
+            "semantic_category": self.semantic_category,
+            "functional_category": self.functional_category,
+            "compliance_tags": list(self.compliance_tags),
+            "context_string": self.context_string,
+            "expected_completion": self.expected_completion,
+            "paired_benign_id": self.paired_benign_id,
+            "trigger_words": list(self.trigger_words),
+            "stable_id": self.stable_id,
+        }
+
+    # ── External-format adapters (A3 interop) ──────────────────────
+
+    def to_harmbench_row(self) -> dict:
+        """Export this sample as a HarmBench-compatible row.
+
+        HarmBench schema: ``Behavior, FunctionalCategory, SemanticCategory,
+        Tags, ContextString, BehaviorID``.
+        Reference: https://github.com/centerforaisafety/HarmBench/blob/main/data/behavior_datasets/harmbench_behaviors_text_all.csv
+        """
+        return {
+            "Behavior": self.text,
+            "FunctionalCategory": self.functional_category or "standard",
+            "SemanticCategory": self.semantic_category or "",
+            "Tags": ",".join(self.tactics),
+            "ContextString": self.context_string or "",
+            "BehaviorID": self.stable_id or "",
+        }
+
+    def to_wildjailbreak_row(self) -> dict:
+        """Export this sample as a WildJailbreak-compatible row.
+
+        WildJailbreak schema: ``vanilla, adversarial, tactics, completion,
+        data_type`` where data_type ∈
+        {vanilla_harmful, vanilla_benign, adversarial_harmful, adversarial_benign}.
+        Reference: https://huggingface.co/datasets/allenai/wildjailbreak
+        """
+        is_malicious = self.label == DataLabel.INJECTION
+        is_adversarial = bool(self.tactics)  # tactics present = adversarial transform applied
+        if is_adversarial and is_malicious:
+            data_type = "adversarial_harmful"
+        elif is_adversarial and not is_malicious:
+            data_type = "adversarial_benign"
+        elif is_malicious:
+            data_type = "vanilla_harmful"
+        else:
+            data_type = "vanilla_benign"
+        return {
+            "vanilla": self.text if not is_adversarial else "",
+            "adversarial": self.text if is_adversarial else "",
+            "tactics": list(self.tactics),
+            "completion": self.expected_completion or "",
+            "data_type": data_type,
         }
 
 
