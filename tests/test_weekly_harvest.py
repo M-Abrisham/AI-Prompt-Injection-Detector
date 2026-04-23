@@ -10,10 +10,21 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 # Ensure the scripts directory is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+
+
+def _recent_iso(days_ago: int = 1) -> str:
+    """ISO-8601 Z timestamp `days_ago` before now. Used in fixtures so the
+    scan_*'s since_days cutoff doesn't drop them as wall-clock time marches on."""
+    dt = datetime.now(timezone.utc) - timedelta(days=days_ago)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+_RECENT = _recent_iso(1)
 
 
 # ===================================================================
@@ -100,7 +111,7 @@ class TestScanHuggingFace(unittest.TestCase):
         mock_get.return_value = _make_http_response(json_data=[
             {
                 "id": "user/prompt-injection-v1",
-                "lastModified": "2026-02-27T12:00:00Z",
+                "lastModified": _RECENT,
                 "description": "A prompt injection dataset",
             },
         ])
@@ -117,8 +128,8 @@ class TestScanHuggingFace(unittest.TestCase):
         from weekly_harvest import scan_huggingface
 
         mock_get.return_value = _make_http_response(json_data=[
-            {"id": "user/known-ds", "lastModified": "2026-02-27T12:00:00Z"},
-            {"id": "user/new-ds", "lastModified": "2026-02-27T12:00:00Z"},
+            {"id": "user/known-ds", "lastModified": _RECENT},
+            {"id": "user/new-ds", "lastModified": _RECENT},
         ])
 
         results = scan_huggingface(
@@ -168,7 +179,7 @@ class TestScanHuggingFace(unittest.TestCase):
             return _make_http_response(json_data=[
                 {
                     "id": f"user/ds-{call_count['n']}",
-                    "lastModified": "2026-02-27T12:00:00Z",
+                    "lastModified": _RECENT,
                 },
             ])
 
@@ -188,7 +199,7 @@ class TestScanHuggingFace(unittest.TestCase):
         mock_get.return_value = _make_http_response(json_data=[
             {
                 "id": "org/dataset-name",
-                "lastModified": "2026-02-27T12:00:00Z",
+                "lastModified": _RECENT,
                 "description": "Some description",
             },
         ])
@@ -222,7 +233,7 @@ class TestScanArxiv(unittest.TestCase):
                 "arxiv_id": "http://arxiv.org/abs/2402.12345",
                 "title": "Prompt Injection Attacks",
                 "abstract": "We study prompt injection attacks on LLMs.",
-                "published": "2026-02-25T00:00:00Z",
+                "published": _RECENT,
             },
         ])
         mock_get.return_value = _make_http_response(
@@ -244,7 +255,7 @@ class TestScanArxiv(unittest.TestCase):
                 "arxiv_id": "http://arxiv.org/abs/2402.99999",
                 "title": "Paper with GitHub link",
                 "abstract": "Our code is at https://github.com/user/repo and more text.",
-                "published": "2026-02-25T00:00:00Z",
+                "published": _RECENT,
             },
         ])
         mock_get.return_value = _make_http_response(
@@ -265,7 +276,7 @@ class TestScanArxiv(unittest.TestCase):
                 "arxiv_id": "http://arxiv.org/abs/2402.11111",
                 "title": "Paper with HF link",
                 "abstract": "Dataset at https://huggingface.co/datasets/org-ds for details.",
-                "published": "2026-02-25T00:00:00Z",
+                "published": _RECENT,
             },
         ])
         mock_get.return_value = _make_http_response(
@@ -324,8 +335,8 @@ class TestScanGitHub(unittest.TestCase):
                     "html_url": "https://github.com/user/prompt-injection-data",
                     "description": "A collection of prompt injection samples",
                     "stargazers_count": 42,
-                    "pushed_at": "2026-02-27T10:00:00Z",
-                    "updated_at": "2026-02-27T10:00:00Z",
+                    "pushed_at": _RECENT,
+                    "updated_at": _RECENT,
                     "topics": [],
                 },
             ],
@@ -393,8 +404,8 @@ class TestScanGitHub(unittest.TestCase):
                     "html_url": "https://github.com/org/repo",
                     "description": "desc",
                     "stargazers_count": 10,
-                    "pushed_at": "2026-02-27T10:00:00Z",
-                    "updated_at": "2026-02-27T10:00:00Z",
+                    "pushed_at": _RECENT,
+                    "updated_at": _RECENT,
                     "topics": ["llm", "security"],
                 },
             ],
@@ -527,7 +538,7 @@ class TestRunHarvest(unittest.TestCase):
     @mock.patch("weekly_harvest.scan_huggingface", return_value=[
         {"id": "user/ds1", "source": "huggingface",
          "url": "https://hf.co/datasets/user/ds1",
-         "description": "test", "last_modified": "2026-02-27T00:00:00Z"},
+         "description": "test", "last_modified": _RECENT},
     ])
     def test_harvest_writes_latest_scan(self, mock_hf, mock_arxiv, mock_gh):
         from weekly_harvest import run_harvest
@@ -548,10 +559,10 @@ class TestRunHarvest(unittest.TestCase):
     @mock.patch("weekly_harvest.scan_huggingface", return_value=[
         {"id": "user/ds1", "source": "huggingface",
          "url": "https://hf.co/datasets/user/ds1",
-         "description": "test1", "last_modified": "2026-02-27T00:00:00Z"},
+         "description": "test1", "last_modified": _RECENT},
         {"id": "user/ds2", "source": "huggingface",
          "url": "https://hf.co/datasets/user/ds2",
-         "description": "test2", "last_modified": "2026-02-27T00:00:00Z"},
+         "description": "test2", "last_modified": _RECENT},
     ])
     def test_harvest_writes_new_datasets(self, mock_hf, mock_arxiv, mock_gh):
         from weekly_harvest import run_harvest
@@ -571,7 +582,7 @@ class TestRunHarvest(unittest.TestCase):
     @mock.patch("weekly_harvest.scan_huggingface", return_value=[
         {"id": "user/ds1", "source": "huggingface",
          "url": "https://hf.co/datasets/user/ds1",
-         "description": "test", "last_modified": "2026-02-27T00:00:00Z"},
+         "description": "test", "last_modified": _RECENT},
     ])
     def test_harvest_dry_run(self, mock_hf, mock_arxiv, mock_gh):
         from weekly_harvest import run_harvest
@@ -633,19 +644,19 @@ class TestOutputFormat(unittest.TestCase):
         {"id": "org/repo", "source": "github",
          "url": "https://github.com/org/repo",
          "description": "desc", "stars": 5,
-         "updated_at": "2026-02-27T10:00:00Z"},
+         "updated_at": _RECENT},
     ])
     @mock.patch("weekly_harvest.scan_arxiv", return_value=[
         {"id": "http://arxiv.org/abs/2402.00001", "source": "arxiv",
          "url": "http://arxiv.org/abs/2402.00001",
          "description": "Paper Title", "summary": "text",
-         "published": "2026-02-25T00:00:00Z",
+         "published": _RECENT,
          "github_urls": [], "hf_urls": []},
     ])
     @mock.patch("weekly_harvest.scan_huggingface", return_value=[
         {"id": "user/ds", "source": "huggingface",
          "url": "https://huggingface.co/datasets/user/ds",
-         "description": "desc", "last_modified": "2026-02-27T00:00:00Z"},
+         "description": "desc", "last_modified": _RECENT},
     ])
     def test_latest_scan_json_schema(self, mock_hf, mock_arxiv, mock_gh):
         from weekly_harvest import run_harvest
@@ -670,10 +681,10 @@ class TestOutputFormat(unittest.TestCase):
     @mock.patch("weekly_harvest.scan_huggingface", return_value=[
         {"id": "user/ds1", "source": "huggingface",
          "url": "https://hf.co/datasets/user/ds1",
-         "description": "a", "last_modified": "2026-02-27T00:00:00Z"},
+         "description": "a", "last_modified": _RECENT},
         {"id": "user/ds2", "source": "huggingface",
          "url": "https://hf.co/datasets/user/ds2",
-         "description": "b", "last_modified": "2026-02-27T00:00:00Z"},
+         "description": "b", "last_modified": _RECENT},
     ])
     def test_new_datasets_jsonl_valid(self, mock_hf, mock_arxiv, mock_gh):
         from weekly_harvest import run_harvest
@@ -697,7 +708,7 @@ class TestOutputFormat(unittest.TestCase):
     @mock.patch("weekly_harvest.scan_huggingface", return_value=[
         {"id": "user/ds1", "source": "huggingface",
          "url": "https://hf.co/datasets/user/ds1",
-         "description": "a", "last_modified": "2026-02-27T00:00:00Z"},
+         "description": "a", "last_modified": _RECENT},
     ])
     def test_scan_history_updated(self, mock_hf, mock_arxiv, mock_gh):
         from weekly_harvest import run_harvest

@@ -44,7 +44,7 @@ try:
 
     _HAS_PIL = True
 except ImportError:
-    pass
+    Image = None  # type: ignore[assignment,misc]
 
 _HAS_PYMUPDF = False
 try:
