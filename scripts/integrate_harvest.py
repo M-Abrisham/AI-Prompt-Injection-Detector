@@ -60,14 +60,31 @@ def read_jsonl(path):
                 )
 
 
-def collect_harvest_records(harvest_dir, min_text_length):
+def collect_harvest_records(harvest_dir, min_text_length, include_descriptions=False):
     """Collect records from weekly harvest output.
 
-    Harvest entries are metadata, not labeled prompt samples.  We use
-    ``description`` as benign text and assign source tags under ``harvest/``
-    so they resolve to tier3 by default unless explicitly mapped.
+    Harvest entries are metadata (arXiv abstracts, HF dataset descriptions,
+    GitHub repo blurbs) — NOT labeled prompt samples. Historically this
+    function emitted them as ``label=0`` (benign) records, which silently
+    poisoned training: a paper abstract about jailbreaking would be fed to
+    the model as a benign prompt, teaching it that text discussing attacks
+    is safe.
+
+    Default behaviour: return ``[]``. Set ``include_descriptions=True``
+    (CLI: ``--include-harvest-descriptions``) to opt back into the legacy
+    behaviour, e.g. for one-off corpus-bootstrap runs where the operator
+    has reviewed the output and accepts the noise.
     """
     records = []
+
+    if not include_descriptions:
+        print(
+            "  Harvest descriptions skipped (default). "
+            "Pass --include-harvest-descriptions to ingest arXiv abstracts / "
+            "HF descriptions as benign training data (warning: noisy)."
+        )
+        return records
+
     jsonl_path = os.path.join(harvest_dir, "new_datasets.jsonl")
     if not os.path.isfile(jsonl_path):
         print(f"  No harvest JSONL found at {jsonl_path}")
@@ -344,6 +361,18 @@ def main(argv=None):
         action="store_true",
         help="Collect and report counts without ingesting or writing outputs.",
     )
+    parser.add_argument(
+        "--include-harvest-descriptions",
+        action="store_true",
+        default=False,
+        help=(
+            "Opt in to ingesting weekly harvest descriptions (arXiv abstracts, "
+            "HF dataset descriptions) as benign training data. Default OFF: "
+            "harvest entries are metadata, not labeled prompts, and treating "
+            "them as benign poisons training (e.g., paper abstracts about "
+            "jailbreaking get labeled as safe text)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     print("Na0S Harvest-to-Training Integration")
@@ -359,7 +388,11 @@ def main(argv=None):
     print()
 
     print("Collecting harvest data ...")
-    harvest_recs = collect_harvest_records(args.harvest_dir, args.min_text_length)
+    harvest_recs = collect_harvest_records(
+        args.harvest_dir,
+        args.min_text_length,
+        include_descriptions=args.include_harvest_descriptions,
+    )
 
     print("Collecting scrape data ...")
     scrape_recs = collect_scrape_records(
