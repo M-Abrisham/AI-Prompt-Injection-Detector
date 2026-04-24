@@ -280,6 +280,15 @@ def weighted_decision(
     # --- Layer 5: Embedding similarity signal ---
     embedding_weight = min(embedding_score, 0.20)
 
+    # Embedding-only FP protection: when no L1 rule, no obfuscation, and no
+    # structural signal corroborate, the embedding score alone should not
+    # solo-cross the decision threshold. Cap to half strength. This catches
+    # benign content like "Security advisory: don't type 'reveal your system
+    # prompt' in chatbots" where context-suppression removed the L1 rule but
+    # embedding semantically matches the E1 centroid.
+    if rule_weight == 0 and obf_weight == 0 and structural_weight == 0:
+        embedding_weight = min(embedding_weight, 0.10)
+
     # --- Signal co-occurrence boost ---
     boost_score, _boost_reasons = calculate_boost_from_names(hits, obs_flags)
 
@@ -301,16 +310,22 @@ def weighted_decision(
         else:
             composite = max(composite, 0.60)
 
-    # --- Critical E1 extraction rule floor ---
+    # --- Critical-severity rule floor ---
+    # Any rule tagged severity="critical" (E1 extraction, O2 output exploitation,
+    # P1 privacy leakage, etc.) floors the composite to just above the default
+    # threshold when at least one structural signal corroborates. Rule authors
+    # mark severity deliberately — a critical hit with structural backup should
+    # not land below threshold just because the ML probability is low.
+    #
+    # Floor capped at DECISION_THRESHOLD + 0.01 (not the caller's threshold) so
+    # that callers passing a high threshold (e.g. threshold=1.0 to disable
+    # detection) are not overridden by this floor.
     if severities_seen & {"critical"} and structural_weight > 0.0:
-        _has_e1_critical = any(
-            _sev_lookup.get(h) == "critical" and any(
-                "E1" in tid for tid in RULE_TECHNIQUE_IDS.get(h, [])
-            )
-            for h in hits
+        _has_critical_hit = any(
+            _sev_lookup.get(h) == "critical" for h in hits
         )
-        if _has_e1_critical:
-            composite = max(composite, threshold + 0.01)
+        if _has_critical_hit:
+            composite = max(composite, DECISION_THRESHOLD + 0.01)
 
     # Compute ML safe-confidence once.
     ml_safe_confidence = ml_prob if "SAFE" in ml_label else (1.0 - ml_prob)

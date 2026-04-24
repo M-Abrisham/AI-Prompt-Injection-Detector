@@ -158,8 +158,11 @@ def _keyword_heuristic_check(
     has_assembly = any(_has_assembly_instructions(t) for t in turn_texts)
 
     # Primary condition: combined keywords significantly exceed any single turn,
-    # AND fragment markers are present
-    if combined_kw_count > 2 * max(max_individual, 1) and has_markers:
+    # AND fragment markers are present. We use >= (not >) so boundary cases
+    # where the combined count is exactly double any single turn (e.g.
+    # combined=6, max_individual=3 across 4 turns) still fire — those are
+    # still strong attack signals when markers + assembly cues co-occur.
+    if combined_kw_count >= 2 * max(max_individual, 1) and has_markers:
         confidence = min(1.0, 0.5 + 0.1 * combined_kw_count)
 
         # Boost if assembly instructions present

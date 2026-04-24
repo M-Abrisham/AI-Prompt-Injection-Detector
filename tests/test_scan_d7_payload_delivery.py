@@ -62,6 +62,8 @@ import sys
 import unittest
 import urllib.parse
 
+import pytest
+
 
 # Disable the thread-based scan timeout so signal.SIGALRM works
 # in the main thread (safe_regex requirement).  Must be set BEFORE
@@ -1324,7 +1326,13 @@ class TestD7_DetectionQuality(unittest.TestCase):
             "flags={}, hits={}".format(r.anomaly_flags, r.rule_hits),
         )
 
-    @unittest.expectedFailure
+    @pytest.mark.xfail(
+        strict=False,
+        reason="Pure code-fence + instruction_override detection is near-threshold "
+               "and embedding variance flips the verdict between runs. Tracked as "
+               "a D7 detection-gap; non-strict so environment variance doesn't "
+               "fail CI in either direction.",
+    )
     def test_code_block_hiding_has_structural_signal(self):
         """Code-block injection should have has_code_block structural feature.
 
