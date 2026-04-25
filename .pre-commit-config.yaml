@@ -30,3 +30,16 @@ repos:
         args: ['-c', 'pyproject.toml']
         additional_dependencies: ['bandit[toml]']
         exclude: tests/
+
+  - repo: local
+    hooks:
+      - id: extract-facts
+        name: Regenerate docs/facts.yaml from source
+        entry: python3 scripts/extract_facts.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        # Hook writes docs/facts.yaml. If the regenerated file differs from
+        # what is staged, pre-commit reports "files were modified by this
+        # hook" and the commit fails — re-stage docs/facts.yaml and retry.
+        # Numbers must come from this file, never hand-typed in README/docs.

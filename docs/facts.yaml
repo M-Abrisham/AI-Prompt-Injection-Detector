@@ -1,0 +1,153 @@
+_meta:
+  generated_by: scripts/extract_facts.py
+  edit_source_not_this_file: true
+public_exports:
+- __version__
+- scan
+- preload_models
+- ensemble_scan
+- EnsembleClassifier
+- scan_output
+- scan_image
+- scan_image_file
+- scan_document_visual
+- CascadeClassifier
+- ScanResult
+- VisualInjectionResult
+- OutputScanner
+- OutputScanResult
+- StreamingOutputScanner
+- TrustBoundary
+- CanaryManager
+- CanaryToken
+rule_count:
+  literal: 101
+  extends:
+  - alias: _SUBTLE_RULES
+    source_attr: RULES
+    source_file: src/na0s/subtle_override_rules.py
+    count: 4
+  - alias: _RECON_RULES
+    source_attr: RECON_RULES
+    source_file: src/na0s/recon_detector.py
+    count: 5
+  - alias: _PRIVACY_RULES
+    source_attr: PRIVACY_RULES
+    source_file: src/na0s/privacy_probe_detector.py
+    count: 6
+  - alias: _COMPLIANCE_RULES
+    source_attr: RULES
+    source_file: src/na0s/compliance_evasion_rules.py
+    count: 4
+  total_ast: 120
+taxonomy:
+  category_count: 29
+  technique_count_total: 276
+  techniques_by_category:
+    D1: 22
+    D2: 4
+    D3: 4
+    D4: 6
+    D5: 7
+    D6: 6
+    D7: 6
+    D8: 6
+    I1: 8
+    I2: 3
+    E: 11
+    A: 5
+    O: 11
+    T: 7
+    R: 5
+    P: 6
+    P2: 4
+    P3: 4
+    M: 14
+    S: 8
+    C: 8
+    C1: 8
+    IM: 29
+    IG: 12
+    AD: 19
+    CT: 20
+    AB: 12
+    MB: 15
+    C1MT: 6
+test_count:
+  count: 8653
+  collection_errors: 8
+  pytest_exit_code: 2
+test_files: 265
+detection_signals_in_scan:
+  filter_doc: Names matching prefixes (detect_, scan_, analyze_, extract_, score_,
+    compute_, classify*, predict*, get_, sniff_) plus an exact-match allowlist for
+    non-verb-prefixed callables in classify_prompt(). The list preserves AST traversal
+    order.
+  calls:
+  - predict
+  - rule_score_detailed
+  - quick_normalize_concat
+  - detect_multilingual_intents
+  - _extract_concatenation_game
+  - _decode_literal_escapes
+  - obfuscation_scan
+  - _weighted_decision
+  - calculate_safe_content_score
+  - _transform
+  - extract_structural_features
+  - _is_legitimate_roleplay
+  - detect_ascii_art
+  - detect_whitespace_stego
+  - get_embedding_classifier
+  - classify
+  - scan_multilingual
+  - detect_fictional_frame
+  - scan_extraction
+  - detect_privacy_probe
+  - detect_fragmented_payload
+  - detect_harmful_intent
+  - detect_rag_poisoning
+  - analyze_intent
+  - _get_pg_classifier_score
+  - compute_perplexity
+  - _has_contextual_framing
+  - get_multilingual_rule_weight
+  - get_fictional_frame_weight
+  - get_extraction_rule_weight
+  - get_privacy_probe_weight
+  - get_fragment_weight
+  - get_harmful_intent_weight
+  - get_rag_poison_weight
+  - get_intent_guard_weight
+  - register_malicious
+constants:
+  DECISION_THRESHOLD: 0.55
+  MAX_INPUT_LENGTH: 50000
+  SCAN_TIMEOUT: 60.0
+  MAX_CHUNKS: 20
+  _CHUNK_WORD_THRESHOLD: 512
+L16_detectors:
+- name: ContextPoisoningDetector
+  file: src/na0s/layer16/detectors/context_poisoning.py
+  line: 263
+- name: CoTComplianceDetector
+  file: src/na0s/layer16/detectors/cot_compliance.py
+  line: 166
+- name: EmbeddingDriftDetector
+  file: src/na0s/layer16/detectors/embedding_drift.py
+  line: 115
+- name: EscalationDetector
+  file: src/na0s/layer16/detectors/escalation.py
+  line: 86
+- name: FabricatedHistoryDetector
+  file: src/na0s/layer16/detectors/fabricated_history.py
+  line: 44
+- name: PayloadSplittingDetector
+  file: src/na0s/layer16/detectors/payload_splitting.py
+  line: 220
+- name: SchemingDetector
+  file: src/na0s/layer16/detectors/scheming.py
+  line: 298
+- name: BehavioralStylometryDetector
+  file: src/na0s/layer16/detectors/stylometry.py
+  line: 397

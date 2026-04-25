@@ -239,6 +239,11 @@ _cached_vectorizer = None
 _cached_model = None
 _model_cache_lock = threading.Lock()
 
+# Process-wide flag so the sklearn version-mismatch notice is logged at most
+# once. Avoids spamming the log on every cold start across forked workers
+# that re-import this module.
+_sklearn_version_logged = False
+
 # ---------------------------------------------------------------------------
 # LAYER16: Singleton ConversationSecurityMonitor — persists session state
 # across scan() calls. Uses same double-checked locking pattern as model cache.
@@ -298,20 +303,25 @@ def _get_cached_models() -> Tuple:
                 )
         _cached_vectorizer = safe_load(VECTORIZER_PATH)
         _cached_model = safe_load(MODEL_PATH)
-        # Warn if sklearn version doesn't match what the model was trained on.
-        # A downgrade (e.g. trained 1.8.0, running 1.6.1) can silently alter
-        # predict_proba calibration and degrade detection accuracy.
-        _TRAINED_SKLEARN = "1.8.0"
-        try:
-            import sklearn
-            if sklearn.__version__ != _TRAINED_SKLEARN:
-                logger.warning(
-                    "Model trained on sklearn %s but running %s — "
-                    "retrain recommended to avoid silent accuracy drift",
-                    _TRAINED_SKLEARN, sklearn.__version__,
-                )
-        except Exception:
-            pass
+        # Note (once per process) when the runtime sklearn version differs
+        # from what the bundled model was trained on. The per-load
+        # ``InconsistentVersionWarning`` from sklearn is suppressed inside
+        # ``safe_load``; this single INFO line is the user-facing surface.
+        # See ``docs/MODEL_PROVENANCE.md`` for retrain instructions.
+        global _sklearn_version_logged
+        if not _sklearn_version_logged:
+            _TRAINED_SKLEARN = "1.8.0"
+            try:
+                import sklearn
+                if sklearn.__version__ != _TRAINED_SKLEARN:
+                    logger.info(
+                        "Bundled model trained on sklearn %s; running %s. "
+                        "See docs/MODEL_PROVENANCE.md for retrain instructions.",
+                        _TRAINED_SKLEARN, sklearn.__version__,
+                    )
+            except Exception:
+                pass
+            _sklearn_version_logged = True
     return _cached_vectorizer, _cached_model
 
 
@@ -1190,11 +1200,15 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
 
     # Auto-register to FingerprintStore when composite exceeds threshold
     # Use sanitized text so fingerprint lookups match post-normalization input
+    # Opt-out via NA0S_DISABLE_FINGERPRINT=1 (or "true") for privacy/GDPR.
+    # Read at call time (not module load) so tests/runtime toggling works.
     if "MALICIOUS" in label and hits:
-        try:
-            register_malicious(l0.sanitized_text)
-        except (sqlite3.Error, OSError) as e:
-            logger.warning("FingerprintStore registration failed: %s", e)
+        _disable_fp = os.environ.get("NA0S_DISABLE_FINGERPRINT", "").strip().lower()
+        if _disable_fp not in ("1", "true"):
+            try:
+                register_malicious(l0.sanitized_text)
+            except (sqlite3.Error, OSError) as e:
+                logger.warning("FingerprintStore registration failed: %s", e)
 
     # Pack embedding results for scan() to consume.
     embedding_info = {
@@ -1228,6 +1242,10 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
     Wraps the entire classification pipeline with a wall-clock timeout
     (``SCAN_TIMEOUT`` seconds, default 60).  If the pipeline exceeds
     this budget, returns a rejected ScanResult.
+
+    Privacy / GDPR opt-out: malicious inputs are auto-registered to a local
+    FingerprintStore SQLite DB by default. Set environment variable
+    ``NA0S_DISABLE_FINGERPRINT=1`` (or ``true``) to skip this registration.
     """
     _t0 = time.perf_counter()
 
