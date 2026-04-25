@@ -359,5 +359,18 @@ def safe_load(path):
         })
     )
 
-    with open(path, "rb") as f:
-        return pickle.load(f)
+    # Suppress sklearn's per-load InconsistentVersionWarning. The bundled
+    # models were trained on a specific sklearn version (see
+    # ``docs/MODEL_PROVENANCE.md``); when the runtime sklearn differs, the
+    # warning would fire on every cold start. We swallow only that single
+    # warning class — all other warnings still propagate normally — and
+    # surface the version mismatch once per process via ``predict.py``.
+    with warnings.catch_warnings():
+        try:
+            from sklearn.exceptions import InconsistentVersionWarning
+            warnings.simplefilter("ignore", InconsistentVersionWarning)
+        except ImportError:
+            # sklearn not installed — nothing to suppress.
+            pass
+        with open(path, "rb") as f:
+            return pickle.load(f)
