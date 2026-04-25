@@ -1422,6 +1422,23 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         if risk >= DECISION_THRESHOLD:
             is_mal = True
 
+    # --- D7.1 boost: chunked_analysis + roleplay/fictional_frame ---
+    # A buried roleplay/jailbreak payload in a long padded input is the
+    # canonical D7.1 "benign padding" attack. When chunked_analysis fires
+    # together with a roleplay or fictional_frame rule hit, boost the
+    # composite so embedding-model variance on CI runners cannot push a
+    # real attack below the decision threshold.
+    if "chunked_analysis" in hits:
+        _d7_roleplay_signal = (
+            "roleplay" in hits
+            or any(h.startswith("fictional_frame:") for h in hits)
+            or any(h.startswith("fictional_inner:") for h in hits)
+        )
+        if _d7_roleplay_signal:
+            risk = min(risk + 0.08, 1.0)
+            if risk >= DECISION_THRESHOLD:
+                is_mal = True
+
     # Map L0 anomaly flags and obfuscation flags to technique_ids
     _L0_FLAG_MAP = {
         # normalization.py flags
