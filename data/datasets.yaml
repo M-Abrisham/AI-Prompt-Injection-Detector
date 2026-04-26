@@ -693,3 +693,179 @@ sources:
     license: "MIT"
     category: "worm_payload"
     output: "morris2_jailbreaks.csv"
+
+  # ── Additional attacker-sample datasets (added 2026-04-25) ──────
+  # All entries below are `enabled: false` by default. Opt in per-source via:
+  #   python -m scripts.sync_datasets --only <name>
+  # Each entry's repo path was selected from public HuggingFace / GitHub
+  # listings widely cited in 2024-2026 LLM-security literature. Verify
+  # availability before running full sync — repo paths occasionally rename.
+
+  # ── Tier 1: standard attack benchmarks ──────────────────────────
+
+  jailbreakbench:
+    type: huggingface
+    repo: "JailbreakBench/JBB-Behaviors"
+    split: "harmful"
+    text_column: "Goal"
+    label: 1
+    license: "MIT"
+    category: "jailbreak_benchmark"
+    enabled: false
+    output: "hf_jailbreakbench.csv"
+
+  wmdp:
+    type: huggingface
+    repo: "cais/wmdp"
+    split: "test"
+    text_column: "question"
+    label: 1
+    license: "MIT"
+    category: "harmful_knowledge"
+    enabled: false
+    output: "hf_wmdp.csv"
+
+  wildguardmix:
+    type: huggingface
+    repo: "allenai/wildguardmix"
+    split: "train"
+    text_column: "prompt"
+    label_column: "prompt_harm_label"
+    label_map:
+      harmful: 1
+      unharmful: 0
+    license: "ODC-BY"
+    category: "safety_classification"
+    gated: true
+    enabled: false
+    output: "hf_wildguardmix.csv"
+
+  aegis_content_safety:
+    type: huggingface
+    repo: "nvidia/Aegis-AI-Content-Safety-Dataset-1.0"
+    split: "train"
+    text_column: "prompt"
+    label_column: "prompt_label"
+    label_map:
+      safe: 0
+      unsafe: 1
+    license: "CC-BY-4.0"
+    category: "safety_classification"
+    enabled: false
+    output: "hf_aegis_content_safety.csv"
+
+  simple_safety_tests:
+    type: huggingface
+    repo: "Bertievidgen/SimpleSafetyTests"
+    split: "train"
+    text_column: "prompt"
+    label: 1
+    license: "CC-BY-4.0"
+    category: "safety_red_team"
+    enabled: false
+    output: "hf_simple_safety_tests.csv"
+
+  lakera_mosscap:
+    type: huggingface
+    repo: "Lakera/mosscap_prompt_injection"
+    split: "train"
+    text_column: "prompt"
+    label: 1
+    license: "Apache-2.0"
+    category: "prompt_injection"
+    enabled: false
+    output: "hf_lakera_mosscap.csv"
+
+  prompt_inject_perez:
+    type: huggingface
+    repo: "agencyenterprise/PromptInject"
+    split: "train"
+    text_column: "prompt"
+    label: 1
+    license: "MIT"
+    category: "prompt_injection_seminal"
+    enabled: false
+    output: "hf_prompt_inject_perez.csv"
+
+  attaq:
+    type: huggingface
+    repo: "ibm/AttaQ"
+    split: "train"
+    text_column: "input"
+    label: 1
+    license: "Apache-2.0"
+    category: "adversarial_qa"
+    enabled: false
+    output: "hf_attaq.csv"
+
+  # ── Tier 2: agent / tool-injection benchmarks ───────────────────
+  # Aligned with Na0S agent-runtime positioning (L7, T1, MCP detector)
+
+  agentharm:
+    type: huggingface
+    repo: "ai-safety-institute/AgentHarm"
+    split: "test_public"
+    text_column: "prompt"
+    label: 1
+    license: "MIT"
+    category: "agent_harm"
+    gated: true
+    enabled: false
+    output: "hf_agentharm.csv"
+
+  injecagent:
+    type: huggingface
+    repo: "uiuc-kang-lab/InjecAgent"
+    split: "train"
+    text_column: "User Instruction"
+    label: 1
+    license: "MIT"
+    category: "agent_injection"
+    enabled: false
+    output: "hf_injecagent.csv"
+
+  # ── Tier 3: specialty / multilingual / moderation ───────────────
+
+  openai_moderation_eval:
+    type: huggingface
+    repo: "mmathys/openai-moderation-api-evaluation"
+    split: "train"
+    text_column: "prompt"
+    label_column: "S"
+    license: "MIT"
+    category: "moderation_eval"
+    enabled: false
+    output: "hf_openai_moderation_eval.csv"
+
+  promptbench:
+    type: huggingface
+    repo: "March07/PromptBench"
+    split: "train"
+    text_column: "prompt"
+    label: 1
+    license: "MIT"
+    category: "adversarial_robustness"
+    enabled: false
+    output: "hf_promptbench.csv"
+
+  multijail:
+    type: huggingface
+    repo: "DAMO-NLP-SG/MultiJail"
+    split: "train"
+    text_column: "en"
+    label: 1
+    license: "Apache-2.0"
+    category: "multilingual_jailbreak"
+    enabled: false
+    output: "hf_multijail.csv"
+
+  dices_350:
+    type: huggingface
+    repo: "google/dices-350"
+    split: "train"
+    text_column: "context"
+    label: 1
+    license: "CC-BY-4.0"
+    category: "safety_diversity"
+    enabled: false
+    output: "hf_dices_350.csv"
