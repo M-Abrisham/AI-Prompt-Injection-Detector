@@ -2,6 +2,7 @@
   type: multi_turn
   expected_verdict: blocked
   severity: high
+  difficulty: medium
   attack_category: D2
   description: Attack phrase split across adjacent turns; individually benign, combined malicious
   source: layer16_fixtures
@@ -24,6 +25,7 @@
   type: multi_turn
   expected_verdict: blocked
   severity: high
+  difficulty: easy
   attack_category: D2
   description: Explicit assembly instructions with fragment markers, adjacent split
   source: layer16_fixtures
@@ -46,6 +48,7 @@
   type: multi_turn
   expected_verdict: blocked
   severity: high
+  difficulty: hard
   attack_category: D2
   description: Benign turn first, then adjacent attack fragments that combine
   source: layer16_fixtures

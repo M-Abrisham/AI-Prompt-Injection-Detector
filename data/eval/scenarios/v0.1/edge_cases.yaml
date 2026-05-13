@@ -2,6 +2,7 @@
   type: multi_turn
   expected_verdict: allowed
   severity: medium
+  difficulty: trivial
   attack_category: D3
   description: Only one turn -- insufficient data for multi-turn detection
   source: layer16_fixtures
@@ -15,6 +16,7 @@
   type: multi_turn
   expected_verdict: allowed
   severity: medium
+  difficulty: trivial
   attack_category: D3
   description: Turns with minimal/whitespace text should be handled gracefully
   source: layer16_fixtures
@@ -34,6 +36,7 @@
   type: multi_turn
   expected_verdict: allowed
   severity: medium
+  difficulty: easy
   attack_category: D3
   description: 15-turn conversation with stable low risk -- no alert expected
   source: layer16_fixtures

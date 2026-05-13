@@ -2,7 +2,8 @@
   type: multi_turn
   expected_verdict: blocked
   severity: high
-  attack_category: M1
+  difficulty: hard
+  attack_category: M
   description: Risk steadily increases over 5 turns from benign to malicious
   source: layer16_fixtures
   tags:
@@ -27,7 +28,8 @@
   type: multi_turn
   expected_verdict: blocked
   severity: high
-  attack_category: M1
+  difficulty: medium
+  attack_category: M
   description: Last 3 turns all above 0.5 -- rapid escalation
   source: layer16_fixtures
   tags:
@@ -52,7 +54,8 @@
   type: multi_turn
   expected_verdict: blocked
   severity: high
-  attack_category: M1
+  difficulty: hard
+  attack_category: M
   description: Gradual escalation with consistent upward slope
   source: layer16_fixtures
   tags:

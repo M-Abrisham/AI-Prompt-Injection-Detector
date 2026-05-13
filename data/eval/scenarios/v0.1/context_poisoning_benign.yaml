@@ -2,6 +2,7 @@
   type: multi_turn
   expected_verdict: allowed
   severity: low
+  difficulty: medium
   attack_category: BEN
   description: Legitimate security professional asking normal questions
   source: layer16_fixtures
@@ -24,6 +25,7 @@
   type: multi_turn
   expected_verdict: allowed
   severity: low
+  difficulty: easy
   attack_category: BEN
   description: User provides role context without claiming special permissions
   source: layer16_fixtures
@@ -46,6 +48,7 @@
   type: multi_turn
   expected_verdict: allowed
   severity: low
+  difficulty: easy
   attack_category: BEN
   description: User references an actual earlier topic in the conversation
   source: layer16_fixtures

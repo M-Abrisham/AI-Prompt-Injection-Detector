@@ -2,6 +2,7 @@
   type: multi_turn
   expected_verdict: allowed
   severity: low
+  difficulty: easy
   attack_category: BEN
   description: Normal support chat about account access
   source: layer16_fixtures
@@ -27,6 +28,7 @@
   type: multi_turn
   expected_verdict: allowed
   severity: low
+  difficulty: easy
   attack_category: BEN
   description: Developer asking about API usage
   source: layer16_fixtures
@@ -52,6 +54,7 @@
   type: multi_turn
   expected_verdict: allowed
   severity: low
+  difficulty: easy
   attack_category: BEN
   description: Reviewing a pull request together
   source: layer16_fixtures

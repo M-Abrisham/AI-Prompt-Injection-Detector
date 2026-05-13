@@ -9,7 +9,7 @@ file may hold many scenarios.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 import yaml
 
@@ -20,6 +20,45 @@ from .schema import (
     ScenarioTurn,
     ScenarioType,
 )
+
+
+#: Word-form difficulty labels accepted in scenario YAML. Scenario authors
+#: use words ("medium"/"hard") for readability; the schema stores the int
+#: form for arithmetic (F14-v0.2 stratified sampler compares difficulty to
+#: bucket thresholds). Values chosen to match the 100-400 range documented
+#: on Scenario.difficulty.
+_DIFFICULTY_WORDS: dict[str, int] = {
+    "trivial": 125,
+    "easy": 175,
+    "medium": 225,
+    "hard": 300,
+    "expert": 375,
+}
+
+
+def _coerce_difficulty(value: Any) -> Optional[int]:
+    """Accept None | int (100-400) | known word label. Raise on anything else."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        # bool is a subclass of int in Python; reject explicitly because
+        # `difficulty: true` in YAML is never meaningful here.
+        raise ValueError(f"Invalid difficulty: {value!r}")
+    if isinstance(value, int):
+        if not 100 <= value <= 400:
+            raise ValueError(
+                f"Difficulty int {value} out of range [100, 400]"
+            )
+        return value
+    if isinstance(value, str):
+        key = value.strip().lower()
+        if key in _DIFFICULTY_WORDS:
+            return _DIFFICULTY_WORDS[key]
+        raise ValueError(
+            f"Unknown difficulty label {value!r}; expected one of "
+            f"{sorted(_DIFFICULTY_WORDS)} or int in [100, 400]"
+        )
+    raise ValueError(f"Invalid difficulty type: {type(value).__name__}")
 
 
 class ScenarioLoader:
@@ -135,7 +174,7 @@ class ScenarioLoader:
             evaluator=evaluator,
             source=entry.get("source", "manual"),
             tags=list(entry.get("tags", [])),
-            difficulty=entry.get("difficulty"),
+            difficulty=_coerce_difficulty(entry.get("difficulty")),
             compliance_tags=list(entry.get("compliance_tags", [])),
             stable_id=entry.get("stable_id"),  # re-computed if None
             paired_benign_id=entry.get("paired_benign_id"),
