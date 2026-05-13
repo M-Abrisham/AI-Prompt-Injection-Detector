@@ -1,0 +1,113 @@
+{
+  "timestamp": "2026-04-24T02:35:52.848140+00:00",
+  "candidate_path": "src/na0s/models",
+  "scenarios_total": 30,
+  "overall": {
+    "tpr": 0.7058823529411765,
+    "fpr": 0.0,
+    "tnr": 1.0,
+    "f1": 0.8275862068965517,
+    "tp": 12,
+    "fn": 5,
+    "tn": 13,
+    "fp": 0,
+    "n_blocked": 17,
+    "n_allowed": 13
+  },
+  "per_category": {
+    "D1": {
+      "tpr": 1.0,
+      "fpr": 0.0,
+      "tp": 3,
+      "fn": 0,
+      "tn": 0,
+      "fp": 0,
+      "n_attack": 3,
+      "n_benign": 0,
+      "critical_count": 3
+    },
+    "BEN": {
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "tp": 0,
+      "fn": 0,
+      "tn": 9,
+      "fp": 0,
+      "n_attack": 0,
+      "n_benign": 9,
+      "critical_count": 0
+    },
+    "C1": {
+      "tpr": 0.6666666666666666,
+      "fpr": 0.0,
+      "tp": 2,
+      "fn": 1,
+      "tn": 0,
+      "fp": 0,
+      "n_attack": 3,
+      "n_benign": 0,
+      "critical_count": 0
+    },
+    "D3": {
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "tp": 0,
+      "fn": 0,
+      "tn": 3,
+      "fp": 0,
+      "n_attack": 0,
+      "n_benign": 3,
+      "critical_count": 0
+    },
+    "M": {
+      "tpr": 0.6666666666666666,
+      "fpr": 0.0,
+      "tp": 2,
+      "fn": 1,
+      "tn": 0,
+      "fp": 0,
+      "n_attack": 3,
+      "n_benign": 0,
+      "critical_count": 0
+    },
+    "C": {
+      "tpr": 1.0,
+      "fpr": 0.0,
+      "tp": 2,
+      "fn": 0,
+      "tn": 1,
+      "fp": 0,
+      "n_attack": 2,
+      "n_benign": 1,
+      "critical_count": 0
+    },
+    "D2": {
+      "tpr": 0.5,
+      "fpr": 0.0,
+      "tp": 3,
+      "fn": 3,
+      "tn": 0,
+      "fp": 0,
+      "n_attack": 6,
+      "n_benign": 0,
+      "critical_count": 0
+    }
+  },
+  "per_severity": {
+    "critical": {
+      "tpr": 1.0,
+      "n": 3,
+      "tp": 3,
+      "fn": 0
+    },
+    "high": {
+      "tpr": 0.6428571428571429,
+      "n": 14,
+      "tp": 9,
+      "fn": 5
+    }
+  },
+  "baseline_comparison": null,
+  "verdict": "PASS",
+  "failures": []
+}

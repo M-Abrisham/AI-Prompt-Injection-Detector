@@ -128,8 +128,41 @@ jobs:
           fi
           exit 0
 
-      - name: Deploy model and update hashes
+      # F14 eval decontamination check: ensures no scenario in
+      # data/eval/scenarios/ appears in training data (data/processed,
+      # data/staging, data/aggregated). Hard block — any overlap aborts the
+      # deploy because gate metrics on contaminated training data are
+      # artificially inflated.
+      - name: Run F14 eval decontamination check
+        id: decontam
         if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED'
+        run: python scripts/check_eval_decontamination.py
+
+      # F14 promotion gate: runs scenarios from data/eval/scenarios/v0.1/
+      # through the candidate and compares per-category TPR to the committed
+      # baseline. Fails on three regression rules (overall TPR drop, critical
+      # category regress, critical severity any-drop).
+      - name: Run F14 promotion gate
+        id: f14
+        if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED' && steps.decontam.outcome == 'success'
+        continue-on-error: true
+        run: |
+          python scripts/f14_promotion_gate.py \
+            --candidate data/processed/ \
+            --results models/f14_gate_results.json 2>&1 | tee f14_output.txt
+          F14_EXIT=${PIPESTATUS[0]}
+          echo "exit_code=${F14_EXIT}" >> $GITHUB_OUTPUT
+          if [ "$F14_EXIT" -eq 0 ]; then
+            echo "result=PASSED" >> $GITHUB_OUTPUT
+            echo "F14 promotion gate PASSED"
+          else
+            echo "result=FAILED" >> $GITHUB_OUTPUT
+            echo "::error::F14 promotion gate FAILED -- see f14_output.txt"
+          fi
+          exit 0
+
+      - name: Deploy model and update hashes
+        if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED' && steps.decontam.outcome == 'success' && steps.f14.outputs.result == 'PASSED'
         run: python scripts/deploy_model.py
 
       - name: Check for model changes
@@ -144,7 +177,7 @@ jobs:
           fi
 
       - name: Create PR with retrained model
-        if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED' && steps.diff.outputs.changed == 'true'
+        if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED' && steps.decontam.outcome == 'success' && steps.f14.outputs.result == 'PASSED' && steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CANARY_RESULT: ${{ steps.canary.outputs.result }}
@@ -231,4 +264,12 @@ jobs:
           echo "::error::Shadow evaluation failed. Deploy and PR were skipped."
           echo "Candidate regresses vs production on one or more promotion gates"
           echo "(max 1% FPR increase, max 0.5% recall drop). See shadow_output.txt."
+          exit 1
+
+      - name: Fail workflow if F14 gate did not pass
+        if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED' && steps.f14.outputs.result == 'FAILED'
+        run: |
+          echo "::error::F14 promotion gate failed. Deploy and PR were skipped."
+          echo "Candidate regressed on per-category TPR, a critical-containing"
+          echo "category, or global critical-severity TPR. See f14_output.txt."
           exit 1
