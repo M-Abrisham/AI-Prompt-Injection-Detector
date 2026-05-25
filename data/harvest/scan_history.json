@@ -15,5 +15,22 @@
       "github": 2
     },
     "errors": {}
+  },
+  {
+    "scan_time": "2026-05-25T09:52:12Z",
+    "since_days": 7,
+    "sources_scanned": [
+      "arxiv",
+      "github",
+      "hf"
+    ],
+    "total_discovered": 15,
+    "total_new": 15,
+    "per_source_counts": {
+      "huggingface": 9,
+      "arxiv": 0,
+      "github": 6
+    },
+    "errors": {}
   }
 ]
