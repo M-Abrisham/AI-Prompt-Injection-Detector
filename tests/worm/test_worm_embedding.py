@@ -236,12 +236,33 @@ class TestDetectorEmbeddingIntegration:
         assert result["confidence"] == 0.0
 
 
+def _scorer_available() -> bool:
+    """True only when the embedding scorer is *actually* usable.
+
+    Checks not just that sentence-transformers imports (``_HAS_SENTENCE_TRANSFORMERS``)
+    but that the model weights are present so the singleton scorer reports
+    ``available``.  In CI the library can be installed while the all-MiniLM-L6-v2
+    weights are not cached, in which case the scorer degrades to returning zeros
+    (correct product behavior) and the "Live" assertions cannot hold.
+    """
+    if not _HAS_SENTENCE_TRANSFORMERS:
+        return False
+    try:
+        return bool(_EmbeddingSimilarity.get_instance().available)
+    except Exception:
+        return False
+
+
 @pytest.mark.skipif(
-    not _HAS_SENTENCE_TRANSFORMERS,
-    reason="sentence-transformers not installed",
+    not _scorer_available(),
+    reason="embedding scorer unavailable (sentence-transformers missing or model weights not cached)",
 )
 class TestEmbeddingSimilarityLive:
-    """Tests that run only when sentence-transformers is actually installed."""
+    """Tests that run only when the embedding scorer is actually available.
+
+    Requires both the sentence-transformers library AND the model weights to be
+    present; otherwise the scorer gracefully returns zeros and these tests skip.
+    """
 
     def test_worm_text_scores_high(self):
         scorer = _EmbeddingSimilarity.get_instance()
