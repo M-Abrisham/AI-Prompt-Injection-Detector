@@ -161,12 +161,155 @@ jobs:
           fi
           exit 0
 
-      - name: Deploy model and update hashes
+      - name: Write deployment approval request
+        id: approval
         if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED' && steps.decontam.outcome == 'success' && steps.f14.outputs.result == 'PASSED'
-        run: python scripts/deploy_model.py
+        run: |
+          python3 << 'EOF'
+          import json
+          from datetime import datetime
+
+          approval_queue = {
+            "type": "deploy_approval",
+            "requested_at": datetime.now().isoformat(),
+            "candidate_path": "data/processed/",
+            "gates": {
+              "canary": {"passed": True, "exit_code": 0},
+              "shadow": {"passed": True, "exit_code": 0},
+              "decontam": {"passed": True},
+              "f14": {"passed": True, "exit_code": 0}
+            },
+            "summary": "All gates passed. Ready for human review via iMessage.",
+            "status": "pending"
+          }
+
+          with open("data/approval_queue/pending_deploy.json", "w") as f:
+            json.dump(approval_queue, f, indent=2)
+
+          print("Approval request written to data/approval_queue/pending_deploy.json")
+          EOF
+
+      - name: Publish approval request to mail-drop branch
+        id: maildrop
+        if: steps.approval.outcome == 'success'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          BRANCH=agent-approvals
+          TMP=$(mktemp -d)
+
+          # Build a minimal worktree holding only the approval file so the
+          # mail-drop branch stays tiny and the Mac fetches almost nothing.
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$BRANCH"
+            git worktree add "$TMP" "origin/$BRANCH"
+            git -C "$TMP" checkout -B "$BRANCH"
+          else
+            git worktree add --detach "$TMP" HEAD
+            git -C "$TMP" checkout --orphan "$BRANCH"
+            git -C "$TMP" rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          mkdir -p "$TMP/data/approval_queue"
+          cp data/approval_queue/pending_deploy.json "$TMP/data/approval_queue/pending_deploy.json"
+
+          git -C "$TMP" add -f data/approval_queue/pending_deploy.json
+          git -C "$TMP" commit -m "approval request $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            || echo "No change in approval request; nothing to commit"
+          git -C "$TMP" push -u origin "$BRANCH"
+
+          git worktree remove --force "$TMP"
+          echo "Published approval request to branch $BRANCH"
+
+      - name: Write canary failure report
+        id: canary_report
+        if: steps.canary.outputs.result == 'FAILED'
+        run: |
+          python3 << 'EOF'
+          import json
+          from datetime import datetime
+
+          report = {
+            "timestamp": datetime.now().isoformat(),
+            "gate": "canary",
+            "verdict": "FAILED",
+            "exit_code": 1,
+            "summary": "Canary evaluation failed. Quality gates not met."
+          }
+
+          import os
+          os.makedirs("data/approval_queue/failure_reports", exist_ok=True)
+
+          timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+          report_path = f"data/approval_queue/failure_reports/canary_{timestamp}.json"
+
+          with open(report_path, "w") as f:
+            json.dump(report, f, indent=2)
+
+          print(f"Canary failure report written to {report_path}")
+          EOF
+
+      - name: Write shadow failure report
+        id: shadow_report
+        if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'FAILED'
+        run: |
+          python3 << 'EOF'
+          import json
+          from datetime import datetime
+
+          report = {
+            "timestamp": datetime.now().isoformat(),
+            "gate": "shadow",
+            "verdict": "FAILED",
+            "exit_code": 1,
+            "summary": "Shadow evaluation failed. Candidate regresses vs production."
+          }
+
+          import os
+          os.makedirs("data/approval_queue/failure_reports", exist_ok=True)
+
+          timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+          report_path = f"data/approval_queue/failure_reports/shadow_{timestamp}.json"
+
+          with open(report_path, "w") as f:
+            json.dump(report, f, indent=2)
+
+          print(f"Shadow failure report written to {report_path}")
+          EOF
+
+      - name: Write F14 failure report
+        id: f14_report
+        if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED' && steps.f14.outputs.result == 'FAILED'
+        run: |
+          python3 << 'EOF'
+          import json
+          from datetime import datetime
+
+          report = {
+            "timestamp": datetime.now().isoformat(),
+            "gate": "f14",
+            "verdict": "FAILED",
+            "exit_code": 1,
+            "summary": "F14 promotion gate failed. Per-category TPR regression or critical-severity drop."
+          }
+
+          import os
+          os.makedirs("data/approval_queue/failure_reports", exist_ok=True)
+
+          timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+          report_path = f"data/approval_queue/failure_reports/f14_{timestamp}.json"
+
+          with open(report_path, "w") as f:
+            json.dump(report, f, indent=2)
+
+          print(f"F14 failure report written to {report_path}")
+          EOF
 
       - name: Check for model changes
         id: diff
+        if: steps.approval.outcome == 'success'
         run: |
           if git diff --quiet src/na0s/models/; then
             echo "changed=false" >> $GITHUB_OUTPUT
@@ -177,7 +320,7 @@ jobs:
           fi
 
       - name: Create PR with retrained model
-        if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED' && steps.decontam.outcome == 'success' && steps.f14.outputs.result == 'PASSED' && steps.diff.outputs.changed == 'true'
+        if: steps.approval.outcome == 'success' && steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CANARY_RESULT: ${{ steps.canary.outputs.result }}
