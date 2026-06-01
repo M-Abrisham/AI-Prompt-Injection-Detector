@@ -38,6 +38,9 @@ src/data/fingerprints.db-wal
 .coverage
 htmlcov/
 
+# Local runtime logs (agent daemon, etc.)
+logs/
+
 # Environment
 .env
 .venv*/
