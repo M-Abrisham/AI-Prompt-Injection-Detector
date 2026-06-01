@@ -2774,3 +2774,32 @@ Na0S is stateless — each `scan()` call has no memory. Crescendo attacks exploi
 | `openclaw-agents-to-na0s.md` | Config, hooks, gateway | Infrastructure |
 
 ---
+
+## Taxonomy Hardening Campaign (opened 2026-05-31)
+
+Cross-cutting campaign from a 4-agent audit of the threat taxonomy vs. the actual
+detection pipeline. Source of truth confirmed = `data/taxonomy.yaml` (30 categories
+/ 278 techniques); `THREAT_TAXONOMY.md` and `docs/TAXONOMY.md` are stale and
+contradict each other on coverage. Ordered: bugs → wiring fixes (smoke-first) → edge cases.
+
+### Phase 1 — Taxonomy correctness (bugs)
+- [x] Remove invalid OWASP tag `owasp-llm:2025:llm15` (IM category; OWASP LLM Top-10 stops at LLM10). **File**: `data/taxonomy.yaml`. _SHA: pending_
+- [x] Fix miscited OWASP tags: P2 (Privacy Extraction) `llm06`→`llm02`+`llm07`; P3 (Malicious Code Gen) `llm02`→`llm05`. **File**: `data/taxonomy.yaml`. _SHA: pending_
+- [x] Resolved duplicate `C`/`C1`: kept **C1** (roadmap-canonical), retired `C`. The 9 C-only samples were all *benign FP controls* (C1.6/C1.7/C1.8 `_benign`) — folded into the C1 probe (333→342, none dropped). Removed `C:` from YAML (30→29 cats), deleted `scripts/taxonomy/compliance_evasion.py` (27 probes). Tests green (164 passed / 21 pre-existing xfail). Docs still referencing "C" flagged for doc-regen: README.md:108, THREAT_TAXONOMY.md:325, docs/STANDARDS.md:176, docs/TAXONOMY.md:30+51. _SHA: pending_
+- [ ] Fix fictional `expected_layers` values (`layer1_ml`, `layer2_rules`, `L1`, `L9`, `L11`) → real module names. Low risk (nothing consumes the values), low value.
+- [ ] Regenerate `THREAT_TAXONOMY.md` + `docs/TAXONOMY.md` + radar SVGs from YAML: fix headline counts (20/108 & 19/103+ → 30/278), add 8 missing categories, remove fabricated sample counts (SVG's 2,799; THREAT's per-category). **Coverage-status column deferred to after Phase 2.**
+- [ ] Run `tests/test_taxonomy_*.py` + `test_merge_taxonomy*.py`, confirm green.
+
+### Phase 2 — Wiring fixes (RECONCILED vs roadmap 2026-05-31)
+- [x] Smoke-test orphaned `detectors/recon.py` (E2) + `detectors/context_manipulation.py` (D8) — BOTH execute & detect correctly (E2.2/E2.3, D8.1/D8.3).
+- [ ] Wire `detect_context_manipulation()` (D8) into `predict.py` — it does first/middle/last segment scan; **directly closes the still-open "D8 context manipulation hardening — needs middle scan" TODO above, and targets its 2 xfails (strategic-middle-placement, many-shot+flooding).** Best-aligned win.
+- [ ] Wire `detect_reconnaissance()` (E2) into `predict.py` — adds multi-turn-escalation + systematic-probe detection. NOTE: basic E2 *rules* are already wired via `RECON_RULES` (`rules_registry.py:2110`); this adds the orphaned orchestration fn only → guard against double-counting.
+- [~] ~~Run output scanner inline on `scan()`~~ — **DROPPED (contradicts architecture):** L9 Output Scan is a deliberate post-LLM stage (`scan_output()`), not an input check (see pipeline diagram, L9 COMPLETE). Reduced action: confirm integration docs tell consumers to call `scan_output()` on responses; input-side O2 already covered by `markdown_image_exfil` rule.
+- [~] **Rate-limiter is NOT a wiring job:** `TokenBucketRateLimiter` IS wired (judge outbound throttle, `llm_judge.py:271`; `NA0S_JUDGE_RATE_LIMIT`). Action: drop/qualify the taxonomy "Rate limiting" coverage tag on A1.3–5 / R1.3 / R1.5 — no inbound request-flood limiter is scoped (roadmap L7 has only a P3 promote-question).
+- [ ] Full detection suite green: `python3 -m pytest tests/ -q --tb=line`.
+
+### Phase 3 — Edge cases (new detectors, sequenced by frequency)
+- [ ] Scope Group-A true gaps: T1.3 chain-of-tool, T2.1 sandbox-escape, T2.2 resource-exhaustion, T1.2 tool-param injection, R1.4 model-spinning, M1.3 audio transcription, S1.3 runtime training-data poisoning.
+- [ ] Implement highest-priority edge-case detectors + matching tests in proper subpackages.
+
+---

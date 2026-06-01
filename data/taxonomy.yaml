@@ -378,7 +378,8 @@ categories:
     type: privacy
     severity: high
     tags:
-      - "owasp-llm:2025:llm06"
+      - "owasp-llm:2025:llm02"
+      - "owasp-llm:2025:llm07"
     expected_layers: ["L1", "L9"]
     techniques:
       P2.1: { name: "Training data extraction", severity: critical }
@@ -392,7 +393,7 @@ categories:
     type: compliance
     severity: critical
     tags:
-      - "owasp-llm:2025:llm02"
+      - "owasp-llm:2025:llm05"
     expected_layers: ["L1", "L9"]
     techniques:
       P3.1: { name: "Malware generation", severity: critical }
@@ -461,31 +462,8 @@ categories:
       S1.8: { name: "Shadow-fine-tuning", severity: critical }
 
   # ════════════════════════════════════════════════════════════════
-  # Category C — Compliance / Policy Evasion
+  # Category C1 — Compliance / Policy Evasion
   # ════════════════════════════════════════════════════════════════
-
-  C:
-    name: "Compliance/Policy Evasion"
-    description: "Uses the LLM in ways that violate organizational policies without triggering safety training."
-    type: evasion
-    severity: medium
-    tags:
-      - "owasp-llm:2025:llm01"
-      - "owasp-llm:2025:llm09"
-      - "avid-effect:security:S0403"
-      - "avid-effect:ethics:E0301"
-      - "risk-cards:lmrc:manipulation"
-      - "risk-cards:lmrc:harmful_instructions"
-    expected_layers: ["layer1_ml"]
-    techniques:
-      C1.1: { name: "Gradual-escalation", severity: medium }
-      C1.2: { name: "Analogical-bypass", severity: medium }
-      C1.3: { name: "Academic-framing", severity: medium }
-      C1.4: { name: "Emotional-manipulation", severity: medium }
-      C1.5: { name: "Authority-impersonation", severity: high }
-      C1.6: { name: "Sycophancy-exploitation", severity: high }
-      C1.7: { name: "Conflicting-instruction-injection", severity: high }
-      C1.8: { name: "Negation-confusion", severity: medium }
 
   C1:
     name: "Compliance/Policy Evasion (C1)"
@@ -521,7 +499,6 @@ categories:
     severity: critical
     tags:
       - "owasp-llm:2025:llm01"
-      - "owasp-llm:2025:llm15"
     expected_layers: ["L1", "L9"]
     techniques:
       IM1.1: { name: "Recursive prompt injection", severity: critical }
