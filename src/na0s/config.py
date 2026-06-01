@@ -10,6 +10,22 @@ from dataclasses import dataclass
 # -- Input length guard (defense-in-depth, checked at scan/classify entry) --
 MAX_INPUT_LENGTH: int = int(os.getenv("NA0S_MAX_INPUT_LENGTH", 50_000))
 
+# -- OpenClaw iMessage Bridge Configuration --
+OPENCLAW_MODE: str = os.getenv("OPENCLAW_MODE", "auto")  # "auto", "mock", "real"
+OPENCLAW_PORT: int = int(os.getenv("OPENCLAW_PORT", 3000))  # Port for OpenClaw service
+OPENCLAW_REAL_PORT: int = int(os.getenv("OPENCLAW_REAL_PORT", 3000))  # Port for real OpenClaw
+OPENCLAW_MOCK_PORT: int = int(os.getenv("OPENCLAW_MOCK_PORT", 3000))  # Port for mock OpenClaw
+OPENCLAW_BASE_URL: str = os.getenv(
+    "OPENCLAW_BASE_URL", f"http://localhost:{OPENCLAW_PORT}"
+)
+OPENCLAW_TIMEOUT: int = int(os.getenv("OPENCLAW_TIMEOUT", 30))
+
+# -- Agent approval mail-drop (cloud->local git transport) --
+# GitHub Actions publishes data/approval_queue/pending_deploy.json onto this
+# branch; the local daemon fetches it read-only. See na0s.agents.approvals_sync.
+APPROVALS_BRANCH: str = os.getenv("NA0S_APPROVALS_BRANCH", "agent-approvals")
+APPROVALS_REMOTE: str = os.getenv("NA0S_APPROVALS_REMOTE", "origin")
+
 
 @dataclass(frozen=True)
 class ThresholdConfig:

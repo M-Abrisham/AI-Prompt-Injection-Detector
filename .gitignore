@@ -1,6 +1,12 @@
 venv/
 data/*
 !data/*.yaml
+# Agent approval mail-drop: CI publishes pending_deploy.json to the agent-approvals
+# branch (via git add -f) and the local daemon fetches it read-only. Keep the dir in
+# the repo via .gitkeep but ignore all runtime artifacts (requests, reports, state).
+!data/approval_queue/
+data/approval_queue/*
+!data/approval_queue/.gitkeep
 !data/*.tsv
 !data/datasets.lock
 !data/holdout/
