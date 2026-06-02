@@ -109,6 +109,23 @@ try:
 except ImportError:
     _HAS_ENSEMBLE = False
 
+# Layer 5: Centroid embedding classifier — PARITY with predict.py scan() path.
+# scan()/classify_prompt mixes a bounded semantic-similarity boost into its
+# composite via get_embedding_classifier(); the CascadeClassifier weighted path
+# historically omitted it, so the two public entry points could return
+# different verdicts for the same input.  get_embedding_classifier() degrades
+# gracefully (sentence-transformers -> TfidfCentroid -> NoOp) and the score is
+# capped (NA0S_EMBEDDING_MAX_SCORE, default 0.20), so this is safe to wire on
+# by default exactly like scan().
+try:
+    from .embedding_classifier import get_embedding_classifier as _get_centroid_classifier
+    _HAS_EMBEDDING_CENTROID = True
+except ImportError:
+    _HAS_EMBEDDING_CENTROID = False
+# Runtime kill-switch parity with predict.py: NA0S_EMBEDDING_ENABLED=0/false.
+if os.environ.get("NA0S_EMBEDDING_ENABLED", "").strip().lower() in ("0", "false"):
+    _HAS_EMBEDDING_CENTROID = False
+
 # Layer 7: LLM checker — optional import
 try:
     from .llm_checker import LLMChecker
@@ -513,6 +530,28 @@ class WeightedClassifier:
                         "PromptGuard auto-disabled after %d consecutive failures",
                         _pg_failure_state["consecutive"],
                     )
+
+        # --- Layer 5: Centroid embedding classifier — parity with scan() ---
+        # predict.py blends a bounded semantic-similarity boost into its
+        # composite (get_embedding_classifier().classify()).  Mirror it here so
+        # CascadeClassifier and scan() agree on the embedding signal.  The score
+        # is capped inside the classifier (NA0S_EMBEDDING_MAX_SCORE, default
+        # 0.20) and the classifier degrades gracefully when embedding deps are
+        # absent, so this never raises in the default (no-extra) install.
+        if _HAS_EMBEDDING_CENTROID:
+            try:
+                _emb_score, _emb_matches = _get_centroid_classifier().classify(text)
+                if _emb_score > 0.0:
+                    composite = min(composite + _emb_score, 1.0)
+                    for _tid in _emb_matches:
+                        _emb_hit = "embedding:" + str(_tid)
+                        if _emb_hit not in hit_names_seen:
+                            hit_names.append(_emb_hit)
+                            hit_names_seen.add(_emb_hit)
+                    if composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Centroid embedding (Layer 5) failed", exc_info=True)
 
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
