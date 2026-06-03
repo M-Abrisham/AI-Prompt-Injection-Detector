@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _HAS_PIL = False
+Image = None  # sentinel so the name always exists as a patch/guard target
 try:
     from PIL import Image  # type: ignore[import-untyped]
 

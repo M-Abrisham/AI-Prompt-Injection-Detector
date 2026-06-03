@@ -174,25 +174,23 @@ class TestModelLoading:
 
     def test_ensure_loaded_failure_sets_init_failed(self):
         original = pgc._HAS_TRANSFORMERS
-        # Ensure the module-level names exist for mocking
-        had_at = hasattr(pgc, "AutoTokenizer")
-        had_am = hasattr(pgc, "AutoModelForSequenceClassification")
+        # Patch the module-level names unconditionally (create=True handles the
+        # transformers-not-installed case; teardown restores the real attribute
+        # when transformers IS installed). This lets the test control
+        # from_pretrained regardless of whether transformers is present.
         try:
             pgc._HAS_TRANSFORMERS = True
-            if not had_at:
-                pgc.AutoTokenizer = mock.MagicMock()
-            if not had_am:
-                pgc.AutoModelForSequenceClassification = mock.MagicMock()
-            clf = pgc.PromptGuardClassifier(model_name="bad-model")
-            pgc.AutoTokenizer.from_pretrained.side_effect = OSError("not found")
-            assert clf._ensure_loaded() is False
-            assert clf._init_failed is True
+            with mock.patch.object(
+                pgc, "AutoTokenizer", create=True
+            ) as mock_tokenizer, mock.patch.object(
+                pgc, "AutoModelForSequenceClassification", create=True
+            ):
+                mock_tokenizer.from_pretrained.side_effect = OSError("not found")
+                clf = pgc.PromptGuardClassifier(model_name="bad-model")
+                assert clf._ensure_loaded() is False
+                assert clf._init_failed is True
         finally:
             pgc._HAS_TRANSFORMERS = original
-            if not had_at:
-                delattr(pgc, "AutoTokenizer")
-            if not had_am:
-                delattr(pgc, "AutoModelForSequenceClassification")
 
     def test_ensure_loaded_skips_after_failure(self):
         clf = pgc.PromptGuardClassifier()
@@ -207,52 +205,49 @@ class TestModelLoading:
     def test_thread_safety_of_loading(self):
         """Multiple threads calling _ensure_loaded concurrently should load once."""
         original = pgc._HAS_TRANSFORMERS
-        had_at = hasattr(pgc, "AutoTokenizer")
-        had_am = hasattr(pgc, "AutoModelForSequenceClassification")
+        # Patch the module-level names unconditionally (create=True handles the
+        # transformers-not-installed case; teardown restores the real attribute
+        # when transformers IS installed).
         try:
             pgc._HAS_TRANSFORMERS = True
-            if not had_at:
-                pgc.AutoTokenizer = mock.MagicMock()
-            if not had_am:
-                pgc.AutoModelForSequenceClassification = mock.MagicMock()
+            with mock.patch.object(
+                pgc, "AutoTokenizer", create=True
+            ) as mock_tokenizer, mock.patch.object(
+                pgc, "AutoModelForSequenceClassification", create=True
+            ) as mock_model_cls:
+                clf = pgc.PromptGuardClassifier(model_name="mock-model")
+                load_count = {"n": 0}
 
-            clf = pgc.PromptGuardClassifier(model_name="mock-model")
-            load_count = {"n": 0}
+                def counting_from_pretrained(*args, **kwargs):
+                    load_count["n"] += 1
+                    return mock.MagicMock()
 
-            def counting_from_pretrained(*args, **kwargs):
-                load_count["n"] += 1
-                return mock.MagicMock()
+                mock_model_instance = mock.MagicMock()
+                mock_model_instance.to.return_value = mock_model_instance
+                mock_model_instance.eval.return_value = None
 
-            mock_model_instance = mock.MagicMock()
-            mock_model_instance.to.return_value = mock_model_instance
-            mock_model_instance.eval.return_value = None
+                mock_tokenizer.from_pretrained = counting_from_pretrained
+                mock_model_cls.from_pretrained.return_value = mock_model_instance
 
-            pgc.AutoTokenizer.from_pretrained = counting_from_pretrained
-            pgc.AutoModelForSequenceClassification.from_pretrained.return_value = mock_model_instance
+                errors = []
 
-            errors = []
+                def worker():
+                    try:
+                        clf._ensure_loaded()
+                    except Exception as e:
+                        errors.append(e)
 
-            def worker():
-                try:
-                    clf._ensure_loaded()
-                except Exception as e:
-                    errors.append(e)
+                threads = [threading.Thread(target=worker) for _ in range(10)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
 
-            threads = [threading.Thread(target=worker) for _ in range(10)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
-
-            assert not errors
-            assert load_count["n"] == 1
-            assert clf._model is not None
+                assert not errors
+                assert load_count["n"] == 1
+                assert clf._model is not None
         finally:
             pgc._HAS_TRANSFORMERS = original
-            if not had_at:
-                delattr(pgc, "AutoTokenizer")
-            if not had_am:
-                delattr(pgc, "AutoModelForSequenceClassification")
 
 
 # -----------------------------------------------------------------------

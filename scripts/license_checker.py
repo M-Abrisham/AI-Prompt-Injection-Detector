@@ -25,6 +25,7 @@ try:
 
     HF_HUB_AVAILABLE = True
 except ImportError:
+    hf_dataset_info = None  # sentinel so the name always exists as a patch target
     HF_HUB_AVAILABLE = False
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
