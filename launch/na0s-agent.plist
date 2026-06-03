@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.na0s.agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/mehrnoosh/Na0S/.venv/bin/python</string>
+        <string>/Users/mehrnoosh/Na0S/scripts/run_agent.py</string>
+        <string>--continuous</string>
+        <string>--poll-interval</string>
+        <string>300</string>
+        <string>--data-dir</string>
+        <string>/Users/mehrnoosh/Na0S/data</string>
+        <string>--openclaw-url</string>
+        <string>http://localhost:3000</string>
+    </array>
+
+    <!-- Run continuously; restart if it crashes -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Logs go to the user's own Logs dir (a user LaunchAgent cannot
+         write to root-owned /var/log, which would silently block startup). -->
+    <key>StandardOutPath</key>
+    <string>/Users/mehrnoosh/Library/Logs/na0s-agent.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/mehrnoosh/Library/Logs/na0s-agent-error.log</string>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>/Users/mehrnoosh/Na0S</string>
+
+    <!-- Umask for file creation -->
+    <key>Umask</key>
+    <integer>022</integer>
+
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>PATH</key>
+        <string>/Users/mehrnoosh/Na0S/.venv/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- Throttle restart if it keeps crashing -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

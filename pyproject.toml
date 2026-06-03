@@ -48,6 +48,8 @@ dependencies = [
     "tiktoken>=0.5,<1",
     "chardet>=5.0,<6",
     "ftfy>=6.2,<7",
+    "requests>=2.31,<3",
+    "anthropic>=0.50.0,<2",
 ]
 
 [project.scripts]
