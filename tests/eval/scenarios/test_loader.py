@@ -199,3 +199,75 @@ class TestOptionalFields:
         ).strip())
         scenarios = ScenarioLoader(tmp_path).load_all()
         assert scenarios[0].stable_id == "abc123-explicit"
+
+
+class TestDifficultyCoercion:
+    """difficulty: field accepts int or word label; loader coerces to int."""
+
+    @pytest.mark.parametrize("word,expected_int", [
+        ("trivial", 125), ("easy", 175), ("medium", 225),
+        ("hard", 300), ("expert", 375),
+    ])
+    def test_word_labels_coerce_to_int(self, tmp_path: Path, word, expected_int):
+        (tmp_path / "x.yaml").write_text(textwrap.dedent(f"""
+            - name: diff_word
+              type: single_prompt
+              expected_verdict: blocked
+              severity: low
+              attack_category: D1
+              payload: test
+              difficulty: {word}
+        """).strip())
+        scenarios = ScenarioLoader(tmp_path).load_all()
+        assert scenarios[0].difficulty == expected_int
+
+    def test_int_passes_through(self, tmp_path: Path):
+        (tmp_path / "x.yaml").write_text(textwrap.dedent("""
+            - name: diff_int
+              type: single_prompt
+              expected_verdict: blocked
+              severity: low
+              attack_category: D1
+              payload: test
+              difficulty: 250
+        """).strip())
+        scenarios = ScenarioLoader(tmp_path).load_all()
+        assert scenarios[0].difficulty == 250
+
+    def test_missing_difficulty_is_none(self, tmp_path: Path):
+        (tmp_path / "x.yaml").write_text(textwrap.dedent("""
+            - name: diff_none
+              type: single_prompt
+              expected_verdict: blocked
+              severity: low
+              attack_category: D1
+              payload: test
+        """).strip())
+        scenarios = ScenarioLoader(tmp_path).load_all()
+        assert scenarios[0].difficulty is None
+
+    def test_unknown_word_raises(self, tmp_path: Path):
+        (tmp_path / "x.yaml").write_text(textwrap.dedent("""
+            - name: bad_word
+              type: single_prompt
+              expected_verdict: blocked
+              severity: low
+              attack_category: D1
+              payload: test
+              difficulty: extreme
+        """).strip())
+        with pytest.raises(ValueError, match="Unknown difficulty"):
+            ScenarioLoader(tmp_path).load_all()
+
+    def test_int_out_of_range_raises(self, tmp_path: Path):
+        (tmp_path / "x.yaml").write_text(textwrap.dedent("""
+            - name: bad_int
+              type: single_prompt
+              expected_verdict: blocked
+              severity: low
+              attack_category: D1
+              payload: test
+              difficulty: 50
+        """).strip())
+        with pytest.raises(ValueError, match="out of range"):
+            ScenarioLoader(tmp_path).load_all()

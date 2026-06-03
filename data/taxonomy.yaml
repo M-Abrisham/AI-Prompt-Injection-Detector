@@ -748,3 +748,22 @@ categories:
       C1MT.4: { name: "Authority escalation", severity: high }
       C1MT.5: { name: "Contradiction exploitation", severity: high }
       C1MT.6: { name: "Memory manipulation", severity: high }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category BEN — Benign Control (not an attack)
+  # ════════════════════════════════════════════════════════════════
+  # Benign control scenarios used for FPR measurement in the F14
+  # promotion gate. Not an attack class — listed here so scenario
+  # YAML files can reference a canonical attack_category value.
+
+  BEN:
+    name: "Benign Control"
+    description: "Non-adversarial scenarios used to measure false-positive rates. These must NOT be classified as malicious; over-blocking benign content is a regression."
+    type: benign
+    severity: low
+    tags:
+      - "eval:benign_control"
+    expected_layers: []
+    techniques:
+      BEN.1: { name: "Normal user conversation", severity: low }
+      BEN.2: { name: "Topic-adjacent benign query (hard negative)", severity: low }
