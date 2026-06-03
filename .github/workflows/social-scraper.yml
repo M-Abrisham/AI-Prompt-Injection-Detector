@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   scrape:
@@ -47,26 +46,51 @@ jobs:
             echo "new_count=0" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create PR if new data found
+      - name: Commit scraped data to holding branch
         if: steps.check.outputs.new_count != '0'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          BRANCH="scrape/$(date +%Y%m%d-%H%M%S)"
-          git checkout -b "$BRANCH"
+
+          # --- Preserve freshly-scraped files across the branch switch ---
+          # The scraper just wrote into data/scraped/ in the working tree (on
+          # top of the checked-out default branch). A bare `git switch` to the
+          # holding branch could refuse (dirty tree) or clash with files that
+          # already exist there. The most robust approach is to copy the fresh
+          # files out to a temp dir, clean the working tree so the switch is
+          # frictionless, switch, then copy the fresh files back. The scraper
+          # maintains the cumulative dataset itself, so the fresh copy is the
+          # source of truth for data/scraped/.
+          STAGING="$(mktemp -d)"
+          cp -a data/scraped/. "$STAGING/"
+
+          # Drop the working-tree changes (tracked + untracked) under
+          # data/scraped/ so the branch switch is clean.
+          git checkout -- data/scraped/ 2>/dev/null || true
+          git clean -fdq data/scraped/
+
+          # --- Move onto the long-lived holding branch ---
+          # Fetch it if it already exists remotely so history accumulates;
+          # otherwise create it locally from the current commit (first run).
+          git fetch origin data/scraped-raw || true
+          if git show-ref --verify --quiet refs/remotes/origin/data/scraped-raw; then
+            git switch -c data/scraped-raw origin/data/scraped-raw
+          else
+            git switch -c data/scraped-raw
+          fi
+
+          # --- Restore the freshly-scraped files onto the holding branch ---
+          # This overlays the fresh files on top of whatever the holding branch
+          # already had (accumulation), with the fresh versions winning.
+          cp -a "$STAGING/." data/scraped/
+          rm -rf "$STAGING"
+
           git add data/scraped/
-          git commit -m "Add scraped prompt injection data ($(date +%Y-%m-%d))"
-          git push -u origin "$BRANCH"
-          gh pr create \
-            --title "New scraped data: $(date +'%Y-%m-%d %H:%M')" \
-            --body "## Social Scraper Report
-
-          Automated social media scrape found **${{ steps.check.outputs.new_count }}** new prompt injection content.
-
-          Review \`data/scraped/scrape_history.json\` for details.
-
-          ---
-          *Automated by social-scraper.yml*" \
-            --base main
+          # If nothing actually changed vs the holding branch, skip the commit.
+          if git diff --cached --quiet; then
+            echo "No net change to data/scraped/ on holding branch; nothing to commit."
+            exit 0
+          fi
+          git commit -m "Add scraped prompt injection data ($(date +%Y-%m-%d)): ${{ steps.check.outputs.new_count }} new record(s)"
+          git push origin data/scraped-raw
