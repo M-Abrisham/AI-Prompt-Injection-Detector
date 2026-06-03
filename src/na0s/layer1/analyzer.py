@@ -153,6 +153,20 @@ def rule_score_detailed(text):
                     break
         if not matched:
             continue
+        # Capture span + matched substring for span-aware evidence grading.
+        # `matched` is a re.Match (truthy) when an actual pattern matched, or
+        # the sentinel True on timeout (no Match object -> no span available).
+        # When it is a Match, .start()/.end()/.group(0) are all relative to the
+        # SAME view string the search ran on, so span and matched_text are
+        # intrinsically consistent — no cross-view slicing. We deliberately do
+        # NOT map offsets back onto the original `text`: the folded/decoded view
+        # may differ in length, so a span computed here is only valid against
+        # the string it was matched on (carried via matched_text).
+        span = None
+        matched_text = None
+        if matched is not True and hasattr(matched, "start"):
+            span = (matched.start(), matched.end())
+            matched_text = matched.group(0)
         if has_context and rule.name in _CONTEXT_SUPPRESSIBLE:
             continue
         # Strong-context-only suppression: rules that need quoting/educational/
@@ -176,5 +190,7 @@ def rule_score_detailed(text):
             name=rule.name,
             technique_ids=rule.technique_ids,
             severity=rule.severity,
+            span=span,
+            matched_text=matched_text,
         ))
     return hits

@@ -47,7 +47,7 @@ from .groundedness import verify_verdict_grounded as _verify_grounded
 from .performance_slo import SLOTracker
 
 # Layer 6: Evidence grading (imported for test-patchability)
-from .evidence_grading import filter_graded_hits
+from .evidence_grading import filter_graded_hits, grade_hits_detailed
 
 # N5: PromptGuard transformer classifier — optional
 try:
@@ -420,11 +420,33 @@ class WeightedClassifier:
                     hit_names_seen.add(rh.name)
         hit_names = [h.name for h in detailed_hits]
 
-        # --- Evidence grading: remove false-positive rule hits ---
-        # filter_graded_hits uses CRAG-inspired context analysis to remove
-        # rule hits that appear inside code blocks (grade="incorrect") and
-        # keep ambiguous/correct hits.  This reduces FP from code examples.
-        hit_names = filter_graded_hits(hit_names, text)
+        # --- Evidence grading: span-aware FP reduction (Layer 6) ---
+        # grade_hits_detailed grades each RuleHit by OFFSET CONTAINMENT of its
+        # matched span inside benign contexts (code fence / inline code /
+        # quote / local academic-doc framing). It enforces the security hard
+        # rules: only LOW-severity hits can be removed; medium+ are at most
+        # down-weighted (ambiguous); matched spans that are themselves
+        # executable/injection content are NEVER discounted; it fails CLOSED
+        # (keeps the hit) on oversize/timeout/malformed-fence/exception, so it
+        # can never be the reason an attack passes.
+        #
+        # Returns surviving RuleHits + a per-name weight map (1.0 for
+        # "correct", AMBIGUOUS_WEIGHT for down-weighted "ambiguous"). The
+        # weight map is handed to the voting layer so ambiguous evidence votes
+        # at reduced strength instead of being silently dropped.
+        graded_hits, hit_weights = grade_hits_detailed(detailed_hits, text)
+        # Backward-compatible path: filter_graded_hits is patched by some
+        # tests (name-based). When unpatched it agrees with grade_hits_detailed;
+        # when patched we honour its name-level decision for hit_names so those
+        # tests still drive the surviving-name set, while weights drive scoring.
+        surviving_names = filter_graded_hits(hit_names, text)
+        hit_names = surviving_names
+        # Only keep weights for surviving names; drop weights for any name the
+        # (possibly mocked) name-level filter removed.
+        _surviving_set = set(surviving_names)
+        hit_weights = {
+            n: w for n, w in hit_weights.items() if n in _surviving_set
+        }
 
         # --- Obfuscation flags ---
         obs = obfuscation_scan(text)
@@ -482,6 +504,7 @@ class WeightedClassifier:
                 structural=structural,
                 threshold=self.threshold,
                 extra_severities=None,
+                hit_weights=hit_weights,
             )
 
         # --- N5: PromptGuard transformer classifier signal ---

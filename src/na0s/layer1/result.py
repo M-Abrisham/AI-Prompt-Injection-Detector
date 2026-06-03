@@ -30,6 +30,17 @@ class RuleHit:
     name: str
     technique_ids: list = field(default_factory=list)
     severity: str = "medium"
+    # Span-aware evidence (Phase: foundation/plumbing only).
+    # span = (start, end) codepoint offsets of the regex match, indexing
+    # into the SAME string the match ran against (which may be a folded /
+    # decoded view, NOT the original text). matched_text is .group(0) from
+    # that same match, so span and matched_text are intrinsically aligned
+    # and travel together — never re-slice the original text with this span.
+    # Both default None for backward compatibility (21 files construct
+    # RuleHit positionally / by name without these fields) and for the
+    # fail-closed timeout case where no Match object is available.
+    span: tuple | None = None
+    matched_text: str | None = None
 
 
 # Severity-to-weight mapping for rule hits in weighted voting.

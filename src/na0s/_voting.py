@@ -232,6 +232,7 @@ def weighted_decision(
     embedding_score=0.0,
     threshold=DECISION_THRESHOLD,
     extra_severities=None,
+    hit_weights=None,
 ):
     """Combine ML confidence, rule severity, obfuscation, structural
     features, and embedding similarity into a composite score.
@@ -253,6 +254,12 @@ def weighted_decision(
         Default 0.0 (no embedding signal / model not available).
     threshold : float
         Decision threshold (default 0.55).
+    hit_weights : dict[str, float] or None
+        Optional per-rule-name multiplier in (0, 1] from span-aware evidence
+        grading. An "ambiguous" hit (e.g. matched inside a code/quote/doc
+        context but too high-severity to remove) is down-weighted by its
+        multiplier instead of contributing full severity weight. None
+        (default) means full strength for every hit — backward compatible.
 
     Returns
     -------
@@ -294,7 +301,23 @@ def weighted_decision(
     for hit_name in dict.fromkeys(hits):
         sev = _sev_lookup.get(hit_name, "medium")
         severities_seen.add(sev)
-        rule_weight += SEVERITY_WEIGHTS.get(sev, 0.1)
+        base_w = SEVERITY_WEIGHTS.get(sev, 0.1)
+        # Span-aware evidence grading: an "ambiguous" hit (matched inside a
+        # benign code/quote/doc context but too high-severity to fully remove)
+        # contributes a fraction of its severity weight. Missing/None entries
+        # default to 1.0 (full strength), so this is a no-op when hit_weights
+        # is not supplied. HR-4: the multiplier is floored (>0), so context
+        # never zeroes a hit's vote.
+        if hit_weights:
+            mult = hit_weights.get(hit_name, 1.0)
+            try:
+                mult = float(mult)
+            except (TypeError, ValueError):
+                mult = 1.0
+            # Clamp to (0, 1]: weights only ever DOWN-weight, never amplify.
+            mult = min(max(mult, 0.0), 1.0)
+            base_w *= mult
+        rule_weight += base_w
 
     # --- Obfuscation signal ---
     obf_weight = min(OBFUSCATION_WEIGHT_PER_FLAG * len(obs_flags),
