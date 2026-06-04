@@ -217,6 +217,21 @@ try:
 except ImportError:
     _HAS_PERPLEXITY = False
 
+# Worm self-replication detector (IM — Inter-Model Propagation) — optional import.
+# Only the single-input regex/semantic path is exercised here: a *stateless*
+# detector (reconstruction_window=1 disables the cross-turn buffer) scores the
+# current text for self-propagation intent ("forward this prompt to all
+# downstream agents", "include these instructions in every response", ...).
+# Cross-message / output-replication features (source_text comparison, turn
+# history) are an OUTPUT-scan concern and are intentionally NOT driven from a
+# single-input scan(); they remain available via na0s.worm for the
+# OutputScanner / PropagationScanner code paths.
+try:
+    from .worm import get_worm_detector as _get_worm_detector
+    _HAS_WORM_DETECTOR = True
+except ImportError:
+    _HAS_WORM_DETECTOR = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 CHAR_VECTORIZER_PATH = get_model_path("char_tfidf_vectorizer.pkl")
@@ -1100,6 +1115,38 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         except Exception:
             perplexity_score = 0.0
 
+    # --- Worm self-replication signal (IM — Inter-Model Propagation) ---
+    # Single-input detection of self-propagating ("worm") prompts that instruct
+    # the model to forward / replicate / inject the payload into all downstream
+    # agents, future responses, or contacts (Morris-II / ComPromptMized style).
+    #
+    # Stateless detector (no cross-turn buffer, no source_text): only the
+    # regex + lightweight-semantic single-input signals are used.  The contract
+    # is conservative-by-construction — the worm regex requires propagation
+    # structure ("this prompt/these instructions ... to all/every/each ...
+    # downstream/response/contact"), which benign "forward the notes to the
+    # team" text does not match (empirically 0 FPs on a benign forward/copy/send
+    # battery).  We only fold the signal in at confidence >= 0.6 and add a
+    # bounded weight so it can RAISE coverage of genuine worm prompts without
+    # destabilising existing verdicts.
+    if _HAS_WORM_DETECTOR:
+        try:
+            _worm = _get_worm_detector().scan(clean)
+            _worm_conf = float(_worm.get("confidence", 0.0))
+            if _worm.get("is_worm") and _worm_conf >= 0.6:
+                hit_name = "worm:self_replication"
+                if hit_name not in hit_names_seen:
+                    hits.append(hit_name)
+                    hit_names_seen.add(hit_name)
+                    _local_severities[hit_name] = "high"
+                # Confidence-scaled, bounded weight (0.20 .. 0.30).
+                _worm_weight = 0.20 + 0.10 * min(max(_worm_conf - 0.6, 0.0) / 0.4, 1.0)
+                composite = min(composite + _worm_weight, 1.0)
+                if composite >= threshold and "SAFE" in label:
+                    label = "MALICIOUS"
+        except Exception:
+            pass  # Worm detection failure is non-fatal
+
     # --- E1 extraction floor ---
     # When a critical-severity E1 rule fires AND the embedding classifier
     # independently matches E1, this is extremely strong evidence of a
@@ -1614,6 +1661,9 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         elif hit_name.startswith("intent:"):
             if "N1" not in technique_tags:
                 technique_tags.append("N1")
+        elif hit_name.startswith("worm:"):
+            if "IM" not in technique_tags:
+                technique_tags.append("IM")
 
     # Layer 3: Append structural injection signals to rule_hits for visibility
     # and map them to technique_ids for taxonomy attribution.
