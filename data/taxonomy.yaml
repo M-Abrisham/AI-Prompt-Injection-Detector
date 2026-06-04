@@ -595,8 +595,23 @@ categories:
 
   AD:
     name: "Altered Delivery"
-    description: "Attacks delivered through compromised infrastructure, supply chain, or deployment mechanisms rather than direct prompt input."
+    description: >-
+      Attacks delivered through compromised infrastructure, supply chain, or
+      deployment mechanisms rather than direct prompt input.  NOT input-text
+      detectable: every AD technique is an action against the deployment /
+      infrastructure (extension hijack, gateway/proxy tampering, MCP/tool
+      poisoning, framework CVE / deserialization, signing/attestation bypass),
+      not an adversarial prompt string.  These are out of scope for the
+      single-input text classifier (na0s.scan); they are handled by the L11
+      supply-chain integrity controls in na0s.integrity (dep_scanner, sbom,
+      prompt_signer, model_provenance/rollback, safe_pickle, validation_allowlist).
+      Text-encoding "delivery" tricks (zero-width / homoglyph / base64 / hex /
+      rot13 / markdown smuggling) belong to category D (Obfuscation/Encoding,
+      covered by L0/L2) — NOT here.
     type: supply
+    # AD is an infrastructure/supply-chain category, not a prompt-text category.
+    # scan() correctly catches 0 of these by design — do not claim text coverage.
+    input_detectable: false
     severity: high
     tags:
       - "owasp-llm:2025:llm05"
