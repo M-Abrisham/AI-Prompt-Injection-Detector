@@ -55,3 +55,6 @@ htmlcov/
 # Claude Code config
 .claude/
 data/raw/**/
+
+# Runtime application logs
+logs/
