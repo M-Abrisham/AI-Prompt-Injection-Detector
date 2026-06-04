@@ -144,6 +144,33 @@ class ConversationSecurityMonitor:
         return detectors
 
     # ------------------------------------------------------------------
+    # Co-occurrence gate
+    # ------------------------------------------------------------------
+
+    # Alert types that are low-precision on their own and must only surface as
+    # corroboration. ``embedding_drift`` (D1.23) alerts on pure consecutive-turn
+    # cosine distance with no malice anchor, so it fires on every sharp topic
+    # pivot — benign or malicious alike — making it a false-positive generator
+    # when standalone. It adds value only as confirming evidence alongside a
+    # higher-precision detector firing the same turn.
+    _CORROBORATION_ONLY_ALERTS = ("embedding_drift",)
+
+    @classmethod
+    def _apply_cooccurrence_gate(cls, alerts: List[Alert]) -> List[Alert]:
+        """Drop corroboration-only alerts unless a primary alert co-occurs.
+
+        Keeps every alert when at least one non-corroboration ("primary")
+        alert fired in the same turn; otherwise strips the corroboration-only
+        alerts so drift never raises an alert on its own.
+        """
+        primary = [
+            a for a in alerts if a.alert_type not in cls._CORROBORATION_ONLY_ALERTS
+        ]
+        if primary:
+            return alerts
+        return primary
+
+    # ------------------------------------------------------------------
     # Alert deduplication
     # ------------------------------------------------------------------
 
@@ -296,6 +323,11 @@ class ConversationSecurityMonitor:
                         exc_info=True,
                     )
 
+            # 3b. Co-occurrence gate — drop corroboration-only alerts
+            #     (embedding_drift) unless a primary detector also fired this
+            #     turn, so semantic drift never alerts standalone.
+            all_alerts = self._apply_cooccurrence_gate(all_alerts)
+
             # 4. Update cumulative state (always stores full alert set)
             state.active_alerts = all_alerts
 
@@ -421,6 +453,9 @@ class ConversationSecurityMonitor:
                     session_id,
                     exc_info=True,
                 )
+
+        # Co-occurrence gate — keep turn-level and session-end behavior in sync.
+        all_alerts = self._apply_cooccurrence_gate(all_alerts)
 
         risk_trend = get_risk_trend(state)
         escalation_detected = any(
