@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from na0s.layer15.base import (
+from na0s.threat_intel.base import (
     ApplyResult,
     SourceSnapshot,
     SourceUnavailableError,
@@ -31,14 +31,14 @@ from na0s.layer15.base import (
     TechniqueEntry,
     ThreatIntelSource,
 )
-from na0s.layer15.config import (
+from na0s.threat_intel.config import (
     GARAK_API_URL,
     GARAK_GITHUB_OWNER,
     GARAK_GITHUB_REPO,
     GARAK_PROBES_PATH,
 )
-from na0s.layer15.diff_engine import TaxonomyDiffEngine
-from na0s.layer15.http_utils import fetch_json, fetch_text, github_headers
+from na0s.threat_intel.diff_engine import TaxonomyDiffEngine
+from na0s.threat_intel.http_utils import fetch_json, fetch_text, github_headers
 
 logger = logging.getLogger(__name__)
 

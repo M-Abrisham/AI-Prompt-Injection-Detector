@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from ..layer0.safe_regex import safe_compile
+from ..input.safe_regex import safe_compile
 
 
 # ---------------------------------------------------------------------------
@@ -328,71 +328,110 @@ def detect_reconnaissance(
 from ..layer1.result import Rule as _Rule
 
 RECON_RULES = [
+    # E2.1 -- Source / retrieval-context probing.  Internals-focused: asks what
+    # data/files/sources were loaded into the model's context.  (Broad benign
+    # capability questions like "can you browse the web?" were intentionally
+    # dropped -- they are not reconnaissance and caused false positives.)
     _Rule(
         name="capability_probing",
         pattern=(
-            r"\b(?:can|could)\s+you\s+(?:access|browse|execute|read|write|run|fetch|download)\b"
-            r"|\bdo\s+you\s+have\s+(?:internet|file|database|tool|web|code|network)\s+access\b"
-            r"|\bwhat\s+are\s+your\s+(?:capabilities|limitations|restrictions)\b"
-            r"|\b(?:show|list|display|reveal)\s+(?:me\s+)?(?:the\s+)?(?:contents?|documents?|files?)\s+(?:(?:of\s+)?(?:the\s+)?(?:documents?\s+)?)?(?:you\s+have\s+access\s+to|in\s+your)\b"
+            r"\bwhat\s+(?:sources?\s+of\s+information|files?|documents?|data|context|inputs?|materials?)\s+(?:were|was|are|have\s+been|did\s+(?:you|they))\s+(?:provided|uploaded|given|loaded|shared|injected|added|attached)\b"
+            r"|\bwhat(?:'s| is| are)\s+in\s+your\s+(?:context\s+window|context|retrieval\s+(?:context|set)|knowledge\s+base|rag\s+(?:context|sources?)|loaded\s+(?:files|documents))\b"
+            r"|\bwhat\s+(?:retrieval|rag|knowledge|data|grounding)\s+sources?\s+(?:do\s+you|are\s+you|were\s+you)\b"
+            r"|\bshow\s+(?:me\s+)?(?:the\s+)?(?:contents?|documents?|files?|sources?)\s+(?:you\s+have\s+access\s+to|in\s+your\s+(?:context|retrieval|knowledge))\b"
+            r"|\bdo\s+you\s+have\s+access\s+to\s+(?:the\s+)?(?:internet|external\s+tools?|web|other\s+(?:tools|systems))\b"
         ),
         technique_ids=["E2.1"],
-        severity="medium",
+        severity="high",
         paranoia_level=2,
-        description="Probes AI system capabilities, access, or limitations.",
+        description="Probes which sources/files/data were loaded into the model context.",
     ),
+    # E2.2 -- Tool / function / knowledge-base enumeration.  Enumeration intent
+    # (list/enumerate/dump/full-list) over internal assets.
     _Rule(
         name="recon_tool_enumeration",
         pattern=(
-            r"\b(?:list|enumerate|show|display|describe|reveal)\s+(?:me\s+)?(?:all\s+)?(?:your\s+)?(?:tools|functions|plugins|capabilities|actions|endpoints)\b"
+            r"\b(?:list|enumerate|show|display|reveal|dump|give\s+me)\s+(?:me\s+)?(?:all\s+|every\s+|a\s+(?:full|complete)\s+list\s+of\s+|the\s+(?:full|complete|entire)\s+list\s+of\s+)?(?:your\s+)?(?:tools|functions|plugins|integrations|connectors|capabilities|actions|api\s+endpoints|endpoints|mcp\s+servers?)\b"
+            r"|\b(?:full|complete|entire)\s+list\s+of\s+(?:your\s+)?(?:capabilities|tools|functions|plugins|integrations)\b"
+            r"|\bwhat\s+apis?\s+(?:are|do)\s+you\s+(?:connected\s+to|have\s+access\s+to|use|integrate\s+with)\b"
+            r"|\blist\s+(?:every|each|all)\s+(?:function|tool|capability|action|plugin|integration)\b"
+            r"|\b(?:function\s+calling|openapi|swagger)\s+(?:schema|spec|specification|definition)\b"
+            r"|\b(?:list|enumerate|dump|show|reveal)\s+(?:all\s+)?(?:documents?|files?|sources?|entries|records?)\s+in\s+your\s+(?:knowledge\s+base|retrieval|vector\s+(?:database|store|db)|index|rag|memory)\b"
             r"|\bwhat\s+(?:actions|operations|tasks)\s+can\s+you\s+perform\b"
-            r"|\bfunction\s+calling\s+schema\b"
-            r"|\blist\s+(?:every|each|all)\s+(?:function|tool|capability|action)\b"
             r"|\b(?:sub[\s-]?agents|other\s+(?:AI\s+)?agents|other\s+assistants)\b"
         ),
         technique_ids=["E2.2"],
-        severity="medium",
+        severity="high",
         paranoia_level=2,
-        description="Enumerates available tools, functions, or sub-agents.",
+        description="Enumerates available tools, functions, integrations, or knowledge sources.",
     ),
+    # E2.3 -- Model / config fingerprinting.  HIGH + floor-eligible: probing the
+    # model's identity, architecture, parameters, sampling config, hardware, or
+    # context window is reconnaissance against an embedded SDK.  The benign
+    # holdout contains no such self-fingerprinting questions, so measured FPR is
+    # unaffected.  (Trade-off: bare "what model are you?" is now flagged -- a
+    # deliberate strict-threat-model choice for a defensive SDK.)
     _Rule(
         name="model_fingerprinting",
         pattern=(
-            r"\bwhat\s+model\s+are\s+you\b"
+            r"\bwhat\s+(?:ai\s+)?model\s+(?:are\s+you|is\s+this)\b"
+            r"|\bwhat\s+(?:ai\s+)?model\s+are\s+you\s+(?:based|built|running)\b"
             r"|\bwhat\s+(?:version|release)\s+(?:are\s+you|is\s+this)\b"
-            r"|\bare\s+you\s+(?:GPT|Claude|Llama|Gemini|Mistral|LLaMA|ChatGPT)\b"
-            r"|\b(?:temperature\s+setting|sampling\s+parameters)\b"
-            r"|\b(?:maximum\s+output\s+length|max\s+(?:output|response)\s+(?:length|tokens))\b"
+            r"|\bare\s+you\s+(?:gpt|claude|llama|gemini|mistral|chatgpt|bard)(?:-?[\d.]+)?\b"
+            r"|\bhow\s+many\s+parameters\b"
+            r"|\bwhat\s+(?:is\s+the\s+)?(?:exact\s+)?(?:model\s+)?architecture\b"
+            r"|\bwhat\s+embedding\s+dimensions?\b"
+            r"|\bwhat\s+is\s+your\s+context\s+window(?:\s+size)?\b"
+            r"|\bcontext\s+window\s+size\s+in\s+tokens\b"
+            r"|\bwhat\s+is\s+your\s+(?:maximum|max)\s+(?:response|output)\s+(?:length|tokens?)\b"
+            r"|\b(?:training\s+(?:data\s+)?cutoff|knowledge\s+cutoff)\b"
+            r"|\bwhat(?:'s| is)?\s+your\s+(?:temperature|top[\s_-]?p|sampling\s+parameters?)\b"
+            r"|\b(?:temperature|top[\s_-]?p|sampling\s+parameters?)\s+(?:are\s+you|you'?re|currently|(?:are\s+)?set)\b"
+            r"|\b(?:running\s+inference|inference)\s+on\s+(?:gpu|cpu)\b"
+            r"|\bwhat\s+hardware\b"
         ),
         technique_ids=["E2.3"],
-        severity="medium",
+        severity="high",
         paranoia_level=2,
-        description="Attempts to fingerprint the AI model identity or parameters.",
+        description="Fingerprints model identity, architecture, parameters, or config.",
     ),
+    # E2.4 -- Safety/defense reconnaissance: mapping filters, restrictions,
+    # refusal thresholds, safety training, and bypass surfaces.
     _Rule(
         name="boundary_testing",
         pattern=(
-            r"\bwhat\s+happens\s+if\s+I\s+(?:say|ask|type|write|send)\b"
-            r"|\bwhere\s+are\s+your\s+(?:limits|boundaries|guardrails)\b"
-            r"|\bwhat\s+(?:won'?t|will\s+not)\s+you\s+do\b"
-            r"|\b(?:safety\s+filters|content\s+policy|content\s+filters|moderation\s+rules)\b"
+            r"\bwhat\s+(?:specific\s+)?(?:words?|inputs?|phrases?|prompts?|keywords?)\s+(?:trigger|bypass|evade|trip|defeat)\s+(?:your\s+)?(?:content\s+|safety\s+)?(?:filter|moderation|safety|guardrails?)"
+            r"|\bdescribe\s+(?:your\s+)?(?:safety|security|moderation)\s+(?:training|architecture|system|mechanisms?|configuration)\b"
+            r"|\bhow\s+(?:can\s+i|do\s+i|to)\s+(?:identify|detect|bypass|circumvent|evade|disable)\s+(?:your\s+)?(?:filters?|guardrails?|safety|moderation|content\s+(?:policy|filters?))"
+            r"|\bwhat\s+(?:are\s+your\s+)?(?:detection\s+thresholds?|safety\s+filters?|content\s+(?:filters?|restrictions?)|moderation\s+rules?|prohibited\s+topics?)\b"
+            r"|\blist\s+(?:every|all)\s+(?:prohibited|forbidden|restricted|banned)\s+(?:topic|thing|subject)"
+            r"|\blist\s+all\s+(?:the\s+)?things\s+you\s+(?:are\s+not|aren'?t|can'?t|cannot)\s+(?:allowed\s+to\s+do|do)"
+            r"|\bwhat\s+(?:is\s+the\s+)?threshold\s+for\s+refusing"
+            r"|\bdo\s+you\s+use\s+(?:rlhf|constitutional\s+ai)"
+            r"|\b(?:are\s+there|what\s+are\s+the)\s+(?:magic\s+words?|special\s+(?:words?|phrases?))"
+            r"|\bwould\s+you\s+enter\s+(?:a\s+)?(?:special|secret|developer|admin|debug)\s+mode"
         ),
         technique_ids=["E2.4"],
-        severity="medium",
+        severity="high",
         paranoia_level=2,
-        description="Tests AI system boundaries, safety filters, or limits.",
+        description="Reconnaissance of safety filters, restrictions, and refusal behavior.",
     ),
+    # E2.5 -- Configuration / context extraction and permission probing.
     _Rule(
         name="config_extraction",
         pattern=(
-            r"\bdescribe\s+(?:all\s+)?(?:the\s+)?context\s+you\b"
-            r"|\bsystem\s+messages\b"
-            r"|\b(?:conversation|current)\s+context\b"
+            r"\bcan\s+you\s+(?:modify|change|edit|access|view|read|see|reveal)\s+(?:your\s+)?(?:own\s+)?(?:system\s+prompt|configuration|config|settings|instructions)\b"
+            r"|\bwhat\s+(?:permissions?|privileges?|access\s+(?:rights?|levels?))\s+do\s+you\s+have\b"
+            r"|\b(?:were|was)\s+(?:any\s+)?(?:user\s+profiles?|account\s+details?|credentials?|api\s+keys?|secrets?)\b.{0,40}?\b(?:shared|provided|given|passed)\s+(?:with|to)\s+you\b"
+            r"|\bdescribe\s+(?:all\s+)?(?:the\s+)?context\s+you\b"
+            r"|\bwhat(?:'s| is)\s+in\s+your\s+(?:current\s+)?(?:conversation\s+)?context\b"
+            r"|\bwhat(?:'s| is)\s+your\s+(?:system\s+(?:message|prompt)|configuration)\b"
+            r"|\bwhat\s+(?:are\s+the\s+)?(?:specific\s+)?rules\s+in\s+your\s+system\s+prompt\b"
             r"|\blist\s+(?:everything|all)\s+(?:in\s+)?(?:your\s+)?(?:current\s+)?(?:conversation\s+)?context\b"
         ),
         technique_ids=["E2.5"],
-        severity="medium",
+        severity="high",
         paranoia_level=2,
-        description="Attempts to extract configuration or context information.",
+        description="Attempts to extract configuration, permissions, or context.",
     ),
 ]

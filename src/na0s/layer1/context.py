@@ -317,12 +317,9 @@ _CONTEXT_SUPPRESSIBLE = frozenset({
     "temporal_override",
     "clean_slate",
     "subtle_authority",
-    # E2 Reconnaissance rules:
-    "capability_probing",
-    "recon_tool_enumeration",
-    "model_fingerprinting",
-    "boundary_testing",
-    "config_extraction",
+    # E2 Reconnaissance rules are NOT here -- they moved to
+    # _STRONG_CONTEXT_ONLY_SUPPRESSIBLE (recon is question-phrased, so the
+    # question frame must not gut it; see note there).
     # P1 Privacy Leakage rules:
     "conversation_extraction",
     "training_data_completion",
@@ -336,4 +333,15 @@ _STRONG_CONTEXT_ONLY_SUPPRESSIBLE = frozenset({
     "direct_prompt_request",
     "named_jailbreak_persona",
     "constraint_negation",
+    # E2 Reconnaissance rules: recon probes are overwhelmingly phrased as
+    # questions ("what tools can you call?", "what APIs are you connected
+    # to?"), so suppressing them on the question frame alone gutted E2
+    # detection (measured 0% recall).  Like direct_prompt_request, they require
+    # STRONG framing (quoting / explicit educational context, handled by
+    # recon.py's _EDUCATIONAL_FRAME) to suppress -- not a bare question.
+    "capability_probing",
+    "recon_tool_enumeration",
+    "model_fingerprinting",
+    "boundary_testing",
+    "config_extraction",
 })

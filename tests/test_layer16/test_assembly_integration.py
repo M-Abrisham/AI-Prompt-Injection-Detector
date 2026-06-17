@@ -12,7 +12,7 @@ from na0s.layer16.detectors.payload_splitting import (
     _try_detect_multiturn,
 )
 from na0s.layer16.models import ConversationState, ConversationTurn
-from na0s.payload_assembly_detector import FragmentResult
+from na0s.detectors.payload_assembly import FragmentResult
 
 
 def _make_state(texts, risk_scores=None):
@@ -167,7 +167,7 @@ class TestAssemblyFailureGraceful:
             "na0s.layer16.detectors.payload_splitting._try_detect_fragmented",
             return_value=None,
         ), patch(
-            "na0s.payload_assembly_detector.detect_multiturn_assembly",
+            "na0s.detectors.payload_assembly.detect_multiturn_assembly",
             side_effect=RuntimeError("boom"),
         ):
             # Should not raise
@@ -212,7 +212,7 @@ class TestTryDetectMultiturnHelper:
     def test_returns_dict_on_positive(self):
         result = _fake_assembly_result()
         with patch(
-            "na0s.payload_assembly_detector.detect_multiturn_assembly",
+            "na0s.detectors.payload_assembly.detect_multiturn_assembly",
             return_value=result,
         ):
             out = _try_detect_multiturn(["turn1", "turn2"])
@@ -223,14 +223,14 @@ class TestTryDetectMultiturnHelper:
 
     def test_returns_none_on_negative(self):
         with patch(
-            "na0s.payload_assembly_detector.detect_multiturn_assembly",
+            "na0s.detectors.payload_assembly.detect_multiturn_assembly",
             return_value=None,
         ):
             assert _try_detect_multiturn(["a", "b"]) is None
 
     def test_returns_none_on_exception(self):
         with patch(
-            "na0s.payload_assembly_detector.detect_multiturn_assembly",
+            "na0s.detectors.payload_assembly.detect_multiturn_assembly",
             side_effect=ValueError("test error"),
         ):
             assert _try_detect_multiturn(["a", "b"]) is None

@@ -22,13 +22,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from na0s.layer15.base import (
+from na0s.threat_intel.base import (
     SourceUnavailableError,
     SyncReport,
     ThreatIntelSource,
 )
-from na0s.layer15.config import REPO_ROOT, SNAPSHOTS_DIR
-from na0s.layer15.diff_engine import TaxonomyDiffEngine
+from na0s.threat_intel.config import REPO_ROOT, SNAPSHOTS_DIR
+from na0s.threat_intel.diff_engine import TaxonomyDiffEngine
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +60,12 @@ class Orchestrator:
     @staticmethod
     def _default_sources() -> List[ThreatIntelSource]:
         """Instantiate the default set of sources (P0 + P1)."""
-        from na0s.layer15.aiid_sync import AiidSync
-        from na0s.layer15.atlas_sync import AtlasSync
-        from na0s.layer15.garak_sync import GarakSync
-        from na0s.layer15.jailbreakbench_sync import JailbreakBenchSync
-        from na0s.layer15.owasp_sync import OwaspSync
-        from na0s.layer15.safetyprompts_sync import SafetyPromptsSync
+        from na0s.threat_intel.aiid_sync import AiidSync
+        from na0s.threat_intel.atlas_sync import AtlasSync
+        from na0s.threat_intel.garak_sync import GarakSync
+        from na0s.threat_intel.jailbreakbench_sync import JailbreakBenchSync
+        from na0s.threat_intel.owasp_sync import OwaspSync
+        from na0s.threat_intel.safetyprompts_sync import SafetyPromptsSync
 
         return [
             AtlasSync(),
@@ -85,7 +85,7 @@ class Orchestrator:
         """
         reports: List[SyncReport] = []
 
-        from na0s.layer15.http_utils import check_rate_limit
+        from na0s.threat_intel.http_utils import check_rate_limit
 
         for source in self.sources:
             # Proactive rate limit check between sources
@@ -263,12 +263,12 @@ def main() -> None:
     # Build source list
     sources = None
     if args.sources:
-        from na0s.layer15.aiid_sync import AiidSync
-        from na0s.layer15.atlas_sync import AtlasSync
-        from na0s.layer15.garak_sync import GarakSync
-        from na0s.layer15.jailbreakbench_sync import JailbreakBenchSync
-        from na0s.layer15.owasp_sync import OwaspSync
-        from na0s.layer15.safetyprompts_sync import SafetyPromptsSync
+        from na0s.threat_intel.aiid_sync import AiidSync
+        from na0s.threat_intel.atlas_sync import AtlasSync
+        from na0s.threat_intel.garak_sync import GarakSync
+        from na0s.threat_intel.jailbreakbench_sync import JailbreakBenchSync
+        from na0s.threat_intel.owasp_sync import OwaspSync
+        from na0s.threat_intel.safetyprompts_sync import SafetyPromptsSync
 
         source_map = {
             "atlas": AtlasSync,

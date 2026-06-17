@@ -1,3 +1,5 @@
+# SHIM -- do not add new code here
+"""Backward-compat shim. Canonical location: na0s.dataset.schema"""
 from na0s.dataset.schema import *  # noqa: F401,F403
 import warnings
 warnings.warn(

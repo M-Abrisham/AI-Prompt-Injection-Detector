@@ -15,3 +15,9 @@ data/raw/
 node_modules/
 .hypothesis/
 .DS_Store
+logs/
+.tmp_claude/
+.tmp_task/
+.tmp_audit/
+.tmpaudit/
+.audit_tmp/

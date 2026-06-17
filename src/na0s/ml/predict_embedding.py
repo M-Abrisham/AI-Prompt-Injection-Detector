@@ -43,10 +43,10 @@ import threading
 
 import numpy as np
 
-from na0s.safe_pickle import safe_load
-from na0s.rules import rule_score
+from na0s.integrity.safe_pickle import safe_load
+from na0s.layer1 import rule_score
 from na0s.layer2 import obfuscation_scan
-from na0s.layer0 import layer0_sanitize
+from na0s.input import layer0_sanitize
 from na0s.models import get_model_path
 from .faiss_classifier import get_faiss_classifier
 from na0s.scan_result import ScanResult

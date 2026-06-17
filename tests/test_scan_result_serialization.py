@@ -47,6 +47,9 @@ class TestScanResultToDict:
             "escalation_detected",
             "multi_turn_alerts",
             "multi_turn_risk_trend",
+            "multi_turn_threat_level",
+            "multi_turn_recommendation",
+            "cumulative_risk",
         }
         assert set(d.keys()) == expected_keys
 

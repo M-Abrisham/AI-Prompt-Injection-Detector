@@ -17,11 +17,11 @@ import os
 
 from na0s.scan_result import ScanResult
 from na0s.predict import scan as tfidf_scan
-from na0s._voting import get_decision_threshold as _get_decision_threshold
+from .voting import get_decision_threshold as _get_decision_threshold
 
 # Layer 5: Embedding-based classifier -- optional import
 try:
-    from na0s.predict_embedding import (
+    from na0s.ml.predict_embedding import (
         classify_prompt_embedding,
         load_models as _load_embedding_models,
     )

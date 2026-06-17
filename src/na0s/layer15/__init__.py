@@ -1,38 +1,26 @@
-"""Layer 15 — External Threat Intelligence Sync & Monitoring.
+# SHIM -- do not add new code here
+"""Backward-compat package shim. Canonical location: na0s.threat_intel
 
-Monitors upstream threat intelligence sources (MITRE ATLAS, Garak, AIID,
-JailbreakBench, OWASP LLM Top 10, SafetyPrompts) and syncs new attack
-techniques, probes, and datasets into Na0S's local taxonomy and detection
-pipeline.
-
-This layer runs as a scheduled GitHub Actions workflow (weekly) and can
-also be invoked manually via the CLI or Python API.
-
-Components
-----------
-- **ThreatIntelSource** (base.py): Abstract interface for all sync modules
-- **TaxonomyDiffEngine** (diff_engine.py): Compares taxonomy snapshots
-- **AtlasSync** (atlas_sync.py): MITRE ATLAS YAML sync
-- **GarakSync** (garak_sync.py): Garak probe monitoring
-- **AiidSync** (aiid_sync.py): AI Incident Database polling
-- **OWASPSync** (owasp_sync.py): OWASP LLM Top 10 monitoring
-- **Orchestrator** (orchestrator.py): Runs all sources, produces reports
+Aliases the package AND each submodule into sys.modules under the old
+``na0s.layer15`` name, so ``from na0s.layer15.atlas_sync import X`` returns the
+SAME module object as ``na0s.threat_intel.atlas_sync`` (preserves identity for
+mock-patching and module-level state).
 """
+import importlib as _importlib
+import pkgutil as _pkgutil
+import sys as _sys
+import warnings as _warnings
 
-from na0s.layer15.base import (
-    ApplyResult,
-    SourceSnapshot,
-    SyncReport,
-    TaxonomyDiff,
-    ThreatIntelSource,
+_warnings.warn(
+    "na0s.layer15 is deprecated; use na0s.threat_intel instead",
+    DeprecationWarning,
+    stacklevel=2,
 )
-from na0s.layer15.diff_engine import TaxonomyDiffEngine
-
-__all__ = [
-    "ApplyResult",
-    "SourceSnapshot",
-    "SyncReport",
-    "TaxonomyDiff",
-    "TaxonomyDiffEngine",
-    "ThreatIntelSource",
-]
+_canonical = _importlib.import_module("na0s.threat_intel")
+_sys.modules[__name__] = _canonical
+for _info in _pkgutil.iter_modules(_canonical.__path__):
+    try:
+        _sub = _importlib.import_module(f"na0s.threat_intel.{_info.name}")
+    except Exception:
+        continue
+    _sys.modules[f"{__name__}.{_info.name}"] = _sub

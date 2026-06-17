@@ -1,0 +1,31 @@
+name: Security Review
+
+# Anthropic's official Claude Code Security Review action.
+# Runs an agentic security scan on PR diffs and comments findings inline.
+# Repo: https://github.com/anthropics/claude-code-security-review
+#
+# Setup: add a CLAUDE_API_KEY repo secret (Settings > Secrets and variables >
+# Actions). The key must be enabled for both Claude API and Claude Code usage.
+# Note: this action is not hardened against prompt injection — keep
+# "Require approval for all external contributors" enabled for fork PRs.
+
+permissions:
+  pull-requests: write   # leave inline review comments
+  contents: read
+
+on:
+  pull_request:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+
+      - uses: anthropics/claude-code-security-review@main
+        with:
+          comment-pr: true
+          claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
