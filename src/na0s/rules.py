@@ -1,4 +1,5 @@
-"""Backward-compatible shim — all code moved to src/na0s/layer1/ package.
+# SHIM -- do not add new code here
+"""Backward-compat shim. Canonical location: na0s.layer1
 
 This module preserves all existing import paths:
   from na0s.rules import rule_score, RULES, SEVERITY_WEIGHTS, ...

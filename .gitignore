@@ -55,3 +55,11 @@ htmlcov/
 # Claude Code config
 .claude/
 data/raw/**/
+
+# Runtime logs & ad-hoc scratch/audit dirs (never commit)
+logs/
+.tmp_claude/
+.tmp_task/
+.tmp_audit/
+.tmpaudit/
+.audit_tmp/

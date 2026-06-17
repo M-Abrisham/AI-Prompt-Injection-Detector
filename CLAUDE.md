@@ -7,6 +7,15 @@
 - Each agent must have a clear, bounded scope. Prefer 2 focused agents over 5 broad ones.
 - If an agent takes longer than expected, do NOT launch duplicate agents for the same task.
 
+## Multi-Agent Worktree Discipline (CRITICAL — agents share this checkout)
+
+Several Claude agents may operate on this repo at once (check `git worktree list`). Branch switches and broad `git add` in a shared checkout silently destroy other agents' uncommitted work — this has already caused lost work and a mislabeled commit (a branch switch in the primary checkout wiped one agent's edits; another agent's WIP was then committed under the wrong message).
+
+- **NEVER switch branches (`git checkout <branch>` / `git switch`) in the PRIMARY checkout `/Users/mehrnoosh/Na0S`.** Switching rewrites tracked files and clobbers neighbors' uncommitted edits. Treat the primary checkout as read-mostly and leave it on its current branch.
+- **Work in your OWN worktree:** `git worktree add .claude/worktrees/<task> <base-branch>` (or `/tmp/na0s_<task>`), then `cd` into it. Run tests with `PYTHONPATH=<worktree>/src python3 -m pytest …`. The two dependabot agents and the d8 agent already follow this — everyone must.
+- **Scope every commit:** stage only your task's explicit paths (`git add <paths>`), NEVER `git add -A` / `git add .`. Run `git status` and confirm every staged file is yours before committing, so a neighbor's changes aren't swept in.
+- **Hot shared files** (`predict.py`, `cascade.py`, `layer1/rules_registry.py`, `_voting.py`): only edit them inside your own worktree, then rebase — never in the shared checkout. See `docs/AGENT_TEAM.md` for per-role file ownership and the live branch/worktree map.
+
 ## Testing
 
 - After completing all code changes, **always run the full test suite** and confirm zero regressions before reporting completion: `python3 -m pytest tests/ -q --tb=line`
