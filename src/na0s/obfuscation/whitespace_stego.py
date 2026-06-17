@@ -54,6 +54,14 @@ _MIN_STATISTICAL_BYTES = 24
 # Very high trailing data volume — flag even without a decoded payload.
 _HIGH_VOLUME_BYTES = 48
 
+# Minimum trailing bytes for the simple-binary method (Method 3).
+_MIN_BINARY_BYTES = 8
+
+# Trailing-WS ratio above which Method 4 flags a (payload-less) anomaly.
+ANOMALY_RATIO_THRESHOLD = safe_float_env(
+    "WS_STEGO_ANOMALY_RATIO", 0.50, lo=0.0, hi=1.0
+)
+
 
 # ---------------------------------------------------------------------------
 # Pre-compiled patterns (module-level for performance)
@@ -449,16 +457,33 @@ def detect_whitespace_stego(text):
         and ws_entropy >= ENTROPY_THRESHOLD
         and total_trailing_bytes >= _MIN_STATISTICAL_BYTES
     ):
-        # Re-use cached decode from Method 1 if available.
+        # Re-use cached SNOW decode from Method 1 if available.
         if _snow_decoded is None:
             _snow_decoded = _decode_snow(filtered_ws)
         decoded = _snow_decoded
         pr = _printable_ratio(decoded) if decoded else 0.0
-        stats["decoded_printable_ratio"] = round(pr, 4)
 
         has_payload = (decoded
                        and pr >= MIN_PRINTABLE_RATIO
                        and len(decoded) >= _MIN_DECODED_LEN)
+
+        # Fallback: a binary-encoded payload (space=0/tab=1) fires the
+        # statistical anomaly first but fails the SNOW decode above, so the
+        # simple-binary method (Method 3) would never run. Attempt a binary
+        # decode here so the recovered payload still flows to re-classification
+        # instead of being dropped as an empty "statistical" hit.
+        if not has_payload:
+            _bin_decoded = _decode_binary_ws(filtered_ws)
+            _bin_pr = _printable_ratio(_bin_decoded) if _bin_decoded else 0.0
+            if (_bin_decoded
+                    and _bin_pr >= MIN_PRINTABLE_RATIO
+                    and len(_bin_decoded) >= _MIN_DECODED_LEN):
+                decoded = _bin_decoded
+                pr = _bin_pr
+                has_payload = True
+
+        stats["decoded_printable_ratio"] = round(pr, 4)
+
         if has_payload or total_trailing_bytes >= _HIGH_VOLUME_BYTES:
             return StegoResult(
                 detected=True,
@@ -472,7 +497,7 @@ def detect_whitespace_stego(text):
     # -------------------------------------------------------------------
     # Method 3: Simple binary encoding
     # -------------------------------------------------------------------
-    if has_mixed_ws and total_trailing_bytes >= 8:
+    if has_mixed_ws and total_trailing_bytes >= _MIN_BINARY_BYTES:
         decoded = _decode_binary_ws(filtered_ws)
         pr = _printable_ratio(decoded)
         stats["decoded_printable_ratio"] = round(pr, 4)
@@ -494,7 +519,7 @@ def detect_whitespace_stego(text):
     # -------------------------------------------------------------------
     # Require mixed WS (tabs AND spaces) — pure trailing spaces from code
     # editors are not suspicious enough to flag.
-    if effective_ratio >= 0.50 and has_mixed_ws:
+    if effective_ratio >= ANOMALY_RATIO_THRESHOLD and has_mixed_ws:
         return StegoResult(
             detected=True,
             confidence=_CONFIDENCE_ANOMALY,
