@@ -161,6 +161,13 @@ try:
 except ImportError:
     _HAS_RAG_POISON = False
 
+# Position-weighted RAG context scanner (D8.3/D8.4/IP.x) — optional import
+try:
+    from .rag.position_scanner import position_weighted_scan
+    _HAS_RAG_POSITION = True
+except ImportError:
+    _HAS_RAG_POSITION = False
+
 # MCP tool shadowing detector (T1) — optional import
 try:
     from .mcp_tool_detector import (
@@ -519,6 +526,50 @@ _CHUNK_OVERLAP = 64
 _HEAD_TOKENS = 256
 _TAIL_TOKENS = 256
 MAX_CHUNKS = 20  # Resource-exhaustion cap: prevents O(N) rule passes on huge inputs
+
+# Per-segment ML max-pool (D8.3 document-overflow / D8.4 strategic-displacement):
+# a short payload buried in a benign-dominated long input is averaged below
+# threshold by whole-document ML scoring.  Classify each chunk and keep the MAX
+# so the needle survives.  Thresholds are corroboration-style, not arbitrary:
+_SEGMENT_ML_THRESHOLD = 0.60   # a lone chunk must look clearly malicious itself
+_SEGMENT_ML_SLOPE = 0.5        # maps the max-pool gain (chunk_max - whole_doc) to risk
+_SEGMENT_ML_MAX_BOOST = 0.20   # cap; matches the existing confirmed-hits boost magnitude
+
+# Token-budget / context-window eviction monitor (D8.1) corroboration gate:
+# only amplify risk when the rest of the pipeline already found suspicion, so a
+# benign long document near the model window is not flagged on size alone.
+_TOKEN_BUDGET_CORROBORATION_RISK = 0.30
+
+# Position-weighted RAG context scan (D8.3/D8.4) — only runs when the input
+# looks like concatenated retrieved context (>= this many document boundaries),
+# so ordinary prose is never mis-split.
+_RAG_CONTEXT_MIN_BOUNDARIES = 2
+_RAG_POSITION_SCALE = 0.5     # maps positional risk_score to a composite boost
+_RAG_POSITION_MAX_BOOST = 0.20
+
+# Splits concatenated RAG context into chunks on explicit document boundaries
+# ([Document N], --- END OF CONTEXT/DOCUMENT ---, ### System:/Source:).
+_RAG_BOUNDARY_SPLIT = re.compile(
+    r"(?:-{3,10}|={3,10})\s*END\s+OF\s+(?:CONTEXT|DOCUMENT|RETRIEVED|RESULTS?)\b[^\n]*"
+    r"|(?:^|\n)\s*\[Document\s+\d+\]\s*:?"
+    r"|(?:^|\n)\s*(?:###\s*)?(?:Source|Document|Passage)\s+\d+\s*:",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _split_rag_context(text):
+    """Split concatenated retrieved context into chunks on document
+    boundaries.  Returns a list of non-empty chunk strings (>= 1)."""
+    parts = [p.strip() for p in _RAG_BOUNDARY_SPLIT.split(text) if p and p.strip()]
+    return parts
+
+# Multi-turn verdict fusion (D8.2 conversation accumulation, G02): how a
+# "flag"-level session risk feeds back into the single-turn score.  A "block"
+# recommendation flips the verdict outright; a "flag" only adds a capped boost
+# so one borderline turn in an escalating session can cross threshold without a
+# single benign turn in a noisy session being over-penalized.
+_MULTI_TURN_BOOST_SCALE = 0.30  # fraction of accumulated session risk to fold in
+_MULTI_TURN_MAX_BOOST = 0.25    # cap, matching the other single-signal boost caps
 
 
 def _chunk_text(text, max_tokens=_CHUNK_MAX_TOKENS, overlap=_CHUNK_OVERLAP):
@@ -1037,6 +1088,33 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         except Exception:
             pass  # RAG poisoning detection failure is non-fatal
 
+    # --- Position-weighted RAG context scan (D8.3/D8.4) ---
+    # When the input looks like concatenated retrieved context (multiple
+    # document boundaries), scan it with position + size-dominance weighting so
+    # a payload buried in a mid-list or oversized chunk is not sheltered by the
+    # "lost in the middle" position bias.  Self-gating: only flags chunks that
+    # carry injection signal, so benign multi-document context is unaffected.
+    if (_HAS_RAG_POSITION
+            and len(_RAG_BOUNDARY_SPLIT.findall(clean)) >= _RAG_CONTEXT_MIN_BOUNDARIES):
+        try:
+            _rag_chunks = _split_rag_context(clean)
+            if len(_rag_chunks) >= 2:
+                _pos = position_weighted_scan(_rag_chunks)
+                if _pos.suspicious_positions:
+                    composite = min(
+                        composite
+                        + min(_RAG_POSITION_MAX_BOOST,
+                              _pos.risk_score * _RAG_POSITION_SCALE),
+                        1.0,
+                    )
+                    _ph = "rag_position:suspicious"
+                    if _ph not in hit_names_seen:
+                        hits.append(_ph)
+                        hit_names_seen.add(_ph)
+                        _local_severities[_ph] = "medium"
+        except Exception:
+            logger.debug("RAG position scan failed", exc_info=True)
+
     # --- Intent-analysis detection (N1) ---
     # Detect prompts that try to make the LLM follow malicious instructions
     # through action directives, compliance manipulation, goal hijacking,
@@ -1411,6 +1489,105 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         if input_truncated_chunks:
             hits.append("input_truncated_chunks")
 
+        # --- Per-segment ML max-pool (D8.3/D8.4 buried-payload defense) ---
+        # The whole-document ML probability dilutes a short injection in a
+        # large benign body toward "safe".  Classify each chunk and keep the
+        # MAX; if a chunk looks clearly malicious on its own AND the whole-doc
+        # ML missed it, raise risk by the (capped) max-pool gain so the
+        # localized needle is not averaged away.  Covers the under-attended
+        # MIDDLE band, which _chunk_text already includes.
+        _scaler = _get_cached_scaler()
+        _char_vec = _get_cached_char_vectorizer()
+
+        def _segment_ml_prob(seg):
+            if not seg or not seg.strip():
+                return 0.0
+            try:
+                _Xs = _transform(seg, vectorizer, _scaler, char_vectorizer=_char_vec)
+                _proba = model.predict_proba(_Xs)[0]
+                return float(_proba[1]) if len(_proba) > 1 else 0.0
+            except Exception:
+                return 0.0
+
+        whole_doc_mal = prob if "MALICIOUS" in label else (1.0 - prob)
+        chunk_ml_max = max((_segment_ml_prob(c) for c in chunks), default=0.0)
+        if (chunk_ml_max >= _SEGMENT_ML_THRESHOLD
+                and chunk_ml_max > whole_doc_mal):
+            seg_boost = min(
+                _SEGMENT_ML_MAX_BOOST,
+                (chunk_ml_max - whole_doc_mal) * _SEGMENT_ML_SLOPE,
+            )
+            risk = min(risk + seg_boost, 1.0)
+            if "segment_ml_maxpool" not in hits:
+                hits.append("segment_ml_maxpool")
+            if "D8.3" not in technique_tags:
+                technique_tags.append("D8.3")
+
+        # --- Dedicated D8 distribution/positional detector ---
+        # (padding / attention-hijack / strategic-displacement / dilution /
+        # many-shot / contradiction).  ML-aware via the per-segment scorer.
+        try:
+            from .detectors.context_manipulation import detect_context_manipulation
+
+            _cm = detect_context_manipulation(
+                l0.sanitized_text, classify_fn=_segment_ml_prob,
+            )
+        except Exception:
+            logger.debug("context_manipulation detector unavailable", exc_info=True)
+            _cm = None
+        if _cm is not None:
+            risk = min(risk + _cm.boost, 1.0)
+            _cm_hit = "context_manip:" + _cm.manipulation_type.lower()
+            if _cm_hit not in hits:
+                hits.append(_cm_hit)
+            for _tid in _cm.technique_ids:
+                if _tid not in technique_tags:
+                    technique_tags.append(_tid)
+
+    # --- Token-budget / context-window eviction monitor (D8.1) ---
+    # Detects input sized to approach the model context window, pushing the
+    # system prompt / safety preamble toward truncation (the literal D8.1
+    # mechanism).  Corroboration-gated: the signal is always surfaced for
+    # telemetry, but it only RAISES risk when the rest of the pipeline already
+    # found suspicion (risk >= _TOKEN_BUDGET_CORROBORATION_RISK), so a benign
+    # long document near the window is never flagged on size alone.
+    try:
+        from .detectors.token_budget import analyze_token_budget
+
+        _tb = analyze_token_budget(text)
+    except Exception:
+        logger.debug("token_budget detector unavailable", exc_info=True)
+        _tb = None
+    if _tb is not None and _tb.detected:
+        if "token_budget:near_context_window" not in hits:
+            hits.append("token_budget:near_context_window")
+        for _tid in _tb.technique_ids:
+            if _tid not in technique_tags:
+                technique_tags.append(_tid)
+        if risk >= _TOKEN_BUDGET_CORROBORATION_RISK:
+            risk = min(risk + _tb.boost, 1.0)
+
+    # --- D8.5 state-confusion detector ---
+    # Fabricated async/session-state claims (a "concurrent request modified
+    # your system prompt", forged session tokens, context-window-rotation
+    # privilege grants, distributed-state/CAP framing used to justify ignoring
+    # instructions).  High precision via a two-family co-occurrence gate, so
+    # its boost is fused directly.
+    try:
+        from .detectors.state_confusion import detect_state_confusion
+
+        _sc = detect_state_confusion(text)
+    except Exception:
+        logger.debug("state_confusion detector unavailable", exc_info=True)
+        _sc = None
+    if _sc is not None and _sc.detected:
+        risk = min(risk + _sc.boost, 1.0)
+        if "state_confusion" not in hits:
+            hits.append("state_confusion")
+        for _tid in _sc.technique_ids:
+            if _tid not in technique_tags:
+                technique_tags.append(_tid)
+
     # --- D7 boost: json_hidden_instruction + chunked_analysis ---
     # When a JSON-structured hidden instruction fires inside a padded
     # (long, chunked) input, the combination strongly indicates a real
@@ -1744,8 +1921,41 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
             result.multi_turn_risk_trend = analysis.risk_trend
             result.escalation_detected = analysis.escalation_detected
             result.session_id = session_id
+            result.multi_turn_threat_level = analysis.threat_level
+            result.multi_turn_recommendation = analysis.recommendation
+            result.cumulative_risk = round(analysis.cumulative_risk, 4)
+
+            # --- Fold the multi-turn verdict into the final score (G02) ---
+            # Previously the rich multi-turn signal (escalation, cumulative
+            # risk, CUSUM, graduated threat level) was computed then discarded,
+            # so a slow-burn session whose individual turns each scored below
+            # threshold could never be blocked.  Now the session verdict feeds
+            # back into risk_score / is_malicious.
+            mt_risk = max(analysis.cumulative_risk, analysis.peak_accumulation_score)
+            if analysis.recommendation == "block" or analysis.threat_level == "blocked":
+                # Strong session verdict: a critical/blocking accumulation.
+                result.is_malicious = True
+                result.label = "malicious"
+                result.risk_score = round(max(result.risk_score, threshold, mt_risk), 4)
+            elif analysis.recommendation == "flag" or analysis.threat_level == "flagged":
+                # Capped boost from accumulated session risk; can cross the
+                # single-turn threshold a borderline turn alone would not.
+                boosted = min(
+                    1.0,
+                    result.risk_score
+                    + min(_MULTI_TURN_MAX_BOOST, mt_risk * _MULTI_TURN_BOOST_SCALE),
+                )
+                result.risk_score = round(boosted, 4)
+                if not result.is_malicious and result.risk_score >= threshold:
+                    result.is_malicious = True
+                    result.label = "malicious"
         except Exception:
-            pass  # Layer 16 failure is non-fatal
+            # Layer 16 failure is non-fatal to the single-turn verdict, but it
+            # must not be silent — a crash here means zero multi-turn coverage.
+            logger.warning(
+                "Layer 16 multi-turn analysis failed for session %s",
+                session_id, exc_info=True,
+            )
 
     result.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
     return result

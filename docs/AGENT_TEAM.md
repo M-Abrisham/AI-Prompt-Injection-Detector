@@ -1,4 +1,4 @@
-# Na0S Agent Team
+ # Na0S Agent Team
 
 This document defines a practical multi-agent team for operating Na0S.
 Each "agent" is a role with clear ownership, inputs, outputs, and commands.

@@ -19,7 +19,10 @@ import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
-from .predict import _get_cached_models, _get_cached_scaler, _transform, _get_model_version
+from .predict import (
+    _get_cached_models, _get_cached_scaler, _transform, _get_model_version,
+    _chunk_text, _head_tail_extract, _CHUNK_WORD_THRESHOLD, MAX_CHUNKS,
+)
 from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .config import THRESHOLDS, MAX_INPUT_LENGTH
 from .layer2 import obfuscation_scan
@@ -108,6 +111,23 @@ try:
     _HAS_ENSEMBLE = True
 except ImportError:
     _HAS_ENSEMBLE = False
+
+# Layer 5: Centroid embedding classifier — PARITY with predict.py scan() path.
+# scan()/classify_prompt mixes a bounded semantic-similarity boost into its
+# composite via get_embedding_classifier(); the CascadeClassifier weighted path
+# historically omitted it, so the two public entry points could return
+# different verdicts for the same input.  get_embedding_classifier() degrades
+# gracefully (sentence-transformers -> TfidfCentroid -> NoOp) and the score is
+# capped (NA0S_EMBEDDING_MAX_SCORE, default 0.20), so this is safe to wire on
+# by default exactly like scan().
+try:
+    from .embedding_classifier import get_embedding_classifier as _get_centroid_classifier
+    _HAS_EMBEDDING_CENTROID = True
+except ImportError:
+    _HAS_EMBEDDING_CENTROID = False
+# Runtime kill-switch parity with predict.py: NA0S_EMBEDDING_ENABLED=0/false.
+if os.environ.get("NA0S_EMBEDDING_ENABLED", "").strip().lower() in ("0", "false"):
+    _HAS_EMBEDDING_CENTROID = False
 
 # Layer 7: LLM checker — optional import
 try:
@@ -420,6 +440,23 @@ class WeightedClassifier:
                     hit_names_seen.add(rh.name)
         hit_names = [h.name for h in detailed_hits]
 
+        # --- D8 long-input parity with scan() (G11) ---
+        # predict.scan() runs a chunked + head/tail rule pass on long inputs so
+        # a payload buried in a benign-padded body is caught.  The cascade path
+        # previously scored full-text only and missed those.  Mirror it here:
+        # merge any NEW rule hits found in the head/tail extract or overlapping
+        # chunks (real rules with proper severities feed the voting below).
+        _long_input_chunked = False
+        if len(text.split()) > _CHUNK_WORD_THRESHOLD:
+            _long_input_chunked = True
+            _seg_targets = [_head_tail_extract(text)] + _chunk_text(text)
+            for _seg in _seg_targets[:MAX_CHUNKS]:
+                for _rh in rule_score_detailed(_seg):
+                    if _rh.name not in hit_names_seen:
+                        detailed_hits.append(_rh)
+                        hit_names_seen.add(_rh.name)
+            hit_names = [h.name for h in detailed_hits]
+
         # --- Evidence grading: remove false-positive rule hits ---
         # filter_graded_hits uses CRAG-inspired context analysis to remove
         # rule hits that appear inside code blocks (grade="incorrect") and
@@ -514,9 +551,33 @@ class WeightedClassifier:
                         _pg_failure_state["consecutive"],
                     )
 
+        # --- Layer 5: Centroid embedding classifier — parity with scan() ---
+        # predict.py blends a bounded semantic-similarity boost into its
+        # composite (get_embedding_classifier().classify()).  Mirror it here so
+        # CascadeClassifier and scan() agree on the embedding signal.  The score
+        # is capped inside the classifier (NA0S_EMBEDDING_MAX_SCORE, default
+        # 0.20) and the classifier degrades gracefully when embedding deps are
+        # absent, so this never raises in the default (no-extra) install.
+        if _HAS_EMBEDDING_CENTROID:
+            try:
+                _emb_score, _emb_matches = _get_centroid_classifier().classify(text)
+                if _emb_score > 0.0:
+                    composite = min(composite + _emb_score, 1.0)
+                    for _tid in _emb_matches:
+                        _emb_hit = "embedding:" + str(_tid)
+                        if _emb_hit not in hit_names_seen:
+                            hit_names.append(_emb_hit)
+                            hit_names_seen.add(_emb_hit)
+                    if composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Centroid embedding (Layer 5) failed", exc_info=True)
+
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
         hit_names.extend(obfuscation_flags)
+        if _long_input_chunked and "chunked_analysis" not in hit_names:
+            hit_names.append("chunked_analysis")  # reporting marker (parity w/ scan)
         _boost_score, boost_reasons = calculate_boost(
             detailed_hits, obfuscation_flags,
         )
