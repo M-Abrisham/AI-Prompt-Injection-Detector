@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from na0s.layer15.config import (
+from na0s.threat_intel.config import (
     AIID_GRAPHQL_URL,
     ATLAS_API_URL,
     GARAK_API_URL,

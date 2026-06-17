@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from na0s.layer15.base import (
+from na0s.threat_intel.base import (
     ApplyResult,
     RateLimitError,
     SchemaValidationError,
@@ -34,13 +34,13 @@ from na0s.layer15.base import (
     TechniqueEntry,
     ThreatIntelSource,
 )
-from na0s.layer15.config import (
+from na0s.threat_intel.config import (
     AIID_GRAPHQL_URL,
     HTTP_BACKOFF_FACTOR,
     HTTP_MAX_RETRIES,
     HTTP_TIMEOUT_SECONDS,
 )
-from na0s.layer15.diff_engine import TaxonomyDiffEngine
+from na0s.threat_intel.diff_engine import TaxonomyDiffEngine
 
 logger = logging.getLogger(__name__)
 

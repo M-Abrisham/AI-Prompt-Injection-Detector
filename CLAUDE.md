@@ -32,11 +32,11 @@
   - `rag/` — RAG pipeline security, output scanning, propagation detection
   - `worm/` — worm signature detection
   - `parsers/office/` — office document parsing (DOCX/XLSX/PPTX/ODF/OLE)
-  - `layer0/` through `layer16/` — detection layers
+  - detection layers (numbered→semantic rename in progress, v1.0.0 Step 12): `input/` (was `layer0/`), `layer1/`, `layer2/`, `threat_intel/` (was `layer15/`), `layer16/`. Old `layer0/`/`layer15/` paths remain as deprecated shims.
 - Core pipeline files (`predict.py`, `cascade.py`, `config.py`, `scan_result.py`, etc.) stay at top level. Fusion/scoring math (`voting`, `signal_boost`, `evidence_grading`, `groundedness`) lives under `fusion/` as of the v1.0.0 Step 9 promotion.
 - Backward-compat shims exist at old module paths (e.g., `na0s.canary_alert` redirects to `na0s.canary.alert`, `na0s.signal_boost` → `na0s.fusion.signal_boost`). Do NOT add code to shim files.
 - New layers register via `try/except ImportError` + `_HAS_*` feature flags in `predict.py` or `cascade.py`
-- All HTTP utilities for Layer 15+ live in `layer15/http_utils.py`
+- All HTTP utilities for Layer 15+ live in `threat_intel/http_utils.py` (was `layer15/http_utils.py`)
 
 ### Test organization
 - Tests mirror the source package structure: `tests/canary/`, `tests/judge/`, `tests/ml/`, etc.

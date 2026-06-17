@@ -69,8 +69,8 @@ from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-from .layer0 import layer0_sanitize, register_malicious, quick_normalize_concat
-from .layer0.timeout import (
+from .input import layer0_sanitize, register_malicious, quick_normalize_concat
+from .input.timeout import (
     Layer0TimeoutError,
     SCAN_TIMEOUT,
     with_timeout,

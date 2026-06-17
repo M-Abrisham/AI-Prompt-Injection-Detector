@@ -22,7 +22,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from na0s.layer15.base import TechniqueEntry
+from na0s.threat_intel.base import TechniqueEntry
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ class IncidentToSamplePipeline:
 
     Usage::
 
-        from na0s.layer15.llm_client import Layer15LLMClient
+        from na0s.threat_intel.llm_client import Layer15LLMClient
         pipeline = IncidentToSamplePipeline(llm_client=Layer15LLMClient())
         samples = pipeline.generate(incidents)
 

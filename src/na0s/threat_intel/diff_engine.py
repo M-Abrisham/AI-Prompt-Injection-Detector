@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
-from na0s.layer15.base import (
+from na0s.threat_intel.base import (
     DiffItem,
     SourceSnapshot,
     TaxonomyDiff,
