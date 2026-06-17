@@ -14,7 +14,7 @@ Several Claude agents may operate on this repo at once (check `git worktree list
 - **NEVER switch branches (`git checkout <branch>` / `git switch`) in the PRIMARY checkout `/Users/mehrnoosh/Na0S`.** Switching rewrites tracked files and clobbers neighbors' uncommitted edits. Treat the primary checkout as read-mostly and leave it on its current branch.
 - **Work in your OWN worktree:** `git worktree add .claude/worktrees/<task> <base-branch>` (or `/tmp/na0s_<task>`), then `cd` into it. Run tests with `PYTHONPATH=<worktree>/src python3 -m pytest …`. The two dependabot agents and the d8 agent already follow this — everyone must.
 - **Scope every commit:** stage only your task's explicit paths (`git add <paths>`), NEVER `git add -A` / `git add .`. Run `git status` and confirm every staged file is yours before committing, so a neighbor's changes aren't swept in.
-- **Hot shared files** (`predict.py`, `cascade.py`, `layer1/rules_registry.py`, `_voting.py`): only edit them inside your own worktree, then rebase — never in the shared checkout. See `docs/AGENT_TEAM.md` for per-role file ownership and the live branch/worktree map.
+- **Hot shared files** (`predict.py`, `cascade.py`, `rules/rules_registry.py`, `fusion/voting.py`): only edit them inside your own worktree, then rebase — never in the shared checkout. See `docs/AGENT_TEAM.md` for per-role file ownership and the live branch/worktree map.
 
 ## Testing
 
@@ -41,7 +41,7 @@ Several Claude agents may operate on this repo at once (check `git worktree list
   - `rag/` — RAG pipeline security, output scanning, propagation detection
   - `worm/` — worm signature detection
   - `parsers/office/` — office document parsing (DOCX/XLSX/PPTX/ODF/OLE)
-  - detection layers (numbered→semantic rename in progress, v1.0.0 Step 12): `input/` (was `layer0/`), `layer1/`, `layer2/`, `threat_intel/` (was `layer15/`), `layer16/`. Old `layer0/`/`layer15/` paths remain as deprecated shims.
+  - detection layers (numbered→semantic rename in progress, v1.0.0 Step 12): `input/` (was `layer0/`), `rules/` (was `layer1/`), `obfuscation/` (was `layer2/`), `threat_intel/` (was `layer15/`), `layer16/` (→`conversation/` still TODO). Old `layer0/`/`layer1/`/`layer2/`/`layer15/` paths remain as deprecated sys.modules-alias shims.
 - Core pipeline files (`predict.py`, `cascade.py`, `config.py`, `scan_result.py`, etc.) stay at top level. Fusion/scoring math (`voting`, `signal_boost`, `evidence_grading`, `groundedness`) lives under `fusion/` as of the v1.0.0 Step 9 promotion.
 - Backward-compat shims exist at old module paths (e.g., `na0s.canary_alert` redirects to `na0s.canary.alert`, `na0s.signal_boost` → `na0s.fusion.signal_boost`). Do NOT add code to shim files.
 - New layers register via `try/except ImportError` + `_HAS_*` feature flags in `predict.py` or `cascade.py`
