@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from ..layer0.safe_regex import safe_compile
+from ..input.safe_regex import safe_compile
 
 
 # ---------------------------------------------------------------------------

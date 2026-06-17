@@ -147,6 +147,10 @@ One branch per step so `main` stays green throughout:
 10. `refactor/promote-rules-modules` — sweep rules extensions into `rules/registry/`.
 11. `refactor/promote-detectors-modules` — sweep intent/multilingual/etc. into `detectors/`.
 12. `refactor/rename-layer-packages` — `layer0/` → `input/`, `layer1/` → `rules/`, `layer2/` → `obfuscation/`, `layer15/` → `threat_intel/`, `layer16/` → `conversation/`.
+    - **STATUS (2026-06-16):** `layer0/`→`input/` ✅ DONE · `layer15/`→`threat_intel/` ✅ DONE (branch `refactor/rename-input-and-threat-intel`). Old `layer0/`/`layer15/` kept as deprecated **sys.modules-alias shims** — `from na0s.layer0.X import …` / `from na0s.layer15.X import …` still resolve (same module objects, mock-patching safe).
+    - **BLOCKED:** `layer1/`→`rules/` and `layer2/`→`obfuscation/` collide with the top-level `rules.py` / `obfuscation.py` shim *files* (a dir + same-name `.py` can't coexist) — must first move `rules.py`→`rules/patterns.py` and delete `obfuscation.py`. `layer2/` also has active uncommitted D4.3 work — coordinate before renaming.
+    - **TODO:** `layer16/`→`conversation/` (large: 53 importers, nested `detectors/`/`storage/`/`testing/` subpkgs).
+    - **OTHER AGENTS:** code formerly in `src/na0s/layer0/` is now in `src/na0s/input/`; `src/na0s/layer15/` is now `src/na0s/threat_intel/`. Prefer the new paths for new work; old imports keep working via shims until Step 14.
 13. `refactor/rename-predict-to-pipeline` — the rename + internal caller updates.
 14. `refactor/delete-shims` — final purge, tagged as `v1.0.0`.
 

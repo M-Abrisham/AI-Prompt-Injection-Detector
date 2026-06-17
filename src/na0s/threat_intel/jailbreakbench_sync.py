@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from na0s.layer15.base import (
+from na0s.threat_intel.base import (
     ApplyResult,
     SourceSnapshot,
     SourceUnavailableError,
@@ -25,14 +25,14 @@ from na0s.layer15.base import (
     TechniqueEntry,
     ThreatIntelSource,
 )
-from na0s.layer15.config import (
+from na0s.threat_intel.config import (
     HARMBENCH_GITHUB_OWNER,
     HARMBENCH_GITHUB_REPO,
     JAILBREAKBENCH_GITHUB_OWNER,
     JAILBREAKBENCH_GITHUB_REPO,
 )
-from na0s.layer15.diff_engine import TaxonomyDiffEngine
-from na0s.layer15.http_utils import fetch_json, github_headers
+from na0s.threat_intel.diff_engine import TaxonomyDiffEngine
+from na0s.threat_intel.http_utils import fetch_json, github_headers
 
 logger = logging.getLogger(__name__)
 

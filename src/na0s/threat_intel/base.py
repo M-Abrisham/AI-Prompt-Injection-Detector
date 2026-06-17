@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from na0s.layer15.config import SNAPSHOTS_DIR
+from na0s.threat_intel.config import SNAPSHOTS_DIR
 
 logger = logging.getLogger(__name__)
 

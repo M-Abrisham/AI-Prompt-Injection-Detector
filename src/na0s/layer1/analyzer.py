@@ -16,7 +16,7 @@ Pre-processing pipeline:
 Single-pass evaluation with context-aware suppression and paranoia filtering.
 """
 
-from ..layer0.safe_regex import safe_search, RegexTimeoutError
+from ..input.safe_regex import safe_search, RegexTimeoutError
 from .result import RuleHit
 from .rules_registry import RULES
 from .unicode_defense import _fold_angle_homoglyphs, _strip_combining_marks

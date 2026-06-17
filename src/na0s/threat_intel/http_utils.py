@@ -15,8 +15,8 @@ from typing import Any, Dict, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from na0s.layer15.base import RateLimitError, SourceUnavailableError
-from na0s.layer15.config import (
+from na0s.threat_intel.base import RateLimitError, SourceUnavailableError
+from na0s.threat_intel.config import (
     GITHUB_RATE_LIMIT_BUFFER,
     HTTP_BACKOFF_FACTOR,
     HTTP_MAX_RETRIES,

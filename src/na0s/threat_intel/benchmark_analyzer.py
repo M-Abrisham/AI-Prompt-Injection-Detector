@@ -15,8 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from na0s.layer15.base import SourceSnapshot, TechniqueEntry
-from na0s.layer15.config import SNAPSHOTS_DIR, TAXONOMY_PATH
+from na0s.threat_intel.base import SourceSnapshot, TechniqueEntry
+from na0s.threat_intel.config import SNAPSHOTS_DIR, TAXONOMY_PATH
 
 logger = logging.getLogger(__name__)
 

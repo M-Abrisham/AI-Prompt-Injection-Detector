@@ -23,8 +23,8 @@ from .predict import _get_cached_models, _get_cached_scaler, _transform, _get_mo
 from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .config import THRESHOLDS, MAX_INPUT_LENGTH
 from .layer2 import obfuscation_scan
-from .layer0 import layer0_sanitize
-from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
+from .input import layer0_sanitize
+from .input.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult
 from .models import get_model_path
 from .signal_boost import calculate_boost

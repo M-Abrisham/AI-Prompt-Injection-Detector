@@ -12,7 +12,7 @@ import json
 import logging
 from pathlib import Path
 
-from na0s.layer15.benchmark_analyzer import BenchmarkAnalysis, BenchmarkAnalyzer
+from na0s.threat_intel.benchmark_analyzer import BenchmarkAnalysis, BenchmarkAnalyzer
 
 logger = logging.getLogger(__name__)
 

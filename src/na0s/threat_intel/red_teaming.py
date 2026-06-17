@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Optional dependency -- import the Layer15 LLM client if available
 # ---------------------------------------------------------------------------
 try:
-    from na0s.layer15.llm_client import Layer15LLMClient
+    from na0s.threat_intel.llm_client import Layer15LLMClient
 except ImportError:  # pragma: no cover
     Layer15LLMClient = None  # type: ignore[assignment,misc]
 

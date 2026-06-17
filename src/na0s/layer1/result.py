@@ -6,7 +6,7 @@ Zero internal dependencies (only stdlib + layer0.safe_regex utility).
 import re
 from dataclasses import dataclass, field
 
-from ..layer0.safe_regex import safe_compile
+from ..input.safe_regex import safe_compile
 
 
 @dataclass
