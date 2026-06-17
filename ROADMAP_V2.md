@@ -556,6 +556,15 @@ Core pipeline: Shannon entropy with 2-of-3 composite voting (KL-divergence from 
 **Documentation (identified 2026-04-16 by source-grounded audit):**
 - [ ] `obfuscation.py:136` — `shannon_entropy()` is a public function (exported from `__init__.py`) but has no docstring. Every other public function in Layer 2 is documented. **Fix**: add one-line docstring with Args/Returns.
 
+**Stego hardening (identified + fixed 2026-06-17 by source-grounded audit; branch `feat/whitespace-stego-hardening`):**
+- [x] **Recover statistical/anomaly stego payloads** — the statistical method returned an empty `decoded_payload`, so a binary-encoded injection caught statistically was never re-classified. Added a binary-decode fallback. (commit `9047705`)
+- [x] **Cascade parity** — `CascadeClassifier`/`WeightedClassifier` never called `detect_whitespace_stego`; the cascade entry path was blind to trailing-WS stego that `scan()` caught. Wired in on raw text + decoded-payload rule pass. (commit `f4694c9`)
+- [x] **ReDoS fix** — `rag/poison_detector.py` `keyword_stuffing_with_injection` pattern backtracked catastrophically on word/whitespace-heavy input (stego payloads hung the pipeline via `scan()`). Possessive-quantifier rewrite, linear time. (commit `62ded35`)
+- [x] **Zero-width binary decoder** — ZWSP=0/ZWNJ=1 payloads were stripped, not decoded. Added `_extract_zero_width_binary_stego` in `layer0/normalization.py` (FP-guarded). (commit `5885140`)
+- [x] **Taxonomy hygiene** — defined dangling `D4.9`/`D4.10`, added `D5.8` Tag-character-smuggling + `D5.9` Variation-selector-steganography (were mislabeled `D5.2`), mapped new `zero_width_stego` flag, fixed stale `D5.3` note. (commit `30218fd`)
+- [x] **Harvester + eval coverage** — added stego discovery queries to `weekly_harvest.py`; authored the first trailing-WS / zero-width stego eval samples (the set previously had zero).
+- [ ] **Remaining:** invisible-char + semantic-rewording *composite* coverage (most evasive real-world variant, arXiv 2504.11168) — no detector yet. Re-add stego rows to `docs/COVERAGE_MATRIX.md` (currently owned by concurrent in-flight work).
+
 ---
 
 ## Layer 3: Structural Feature Extraction — Tasks: 22/25 (88%)
