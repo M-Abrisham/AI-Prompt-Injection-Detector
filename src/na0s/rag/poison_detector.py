@@ -145,8 +145,12 @@ _add("authority_spoofing", "trusted_source_impersonation", "high", ["I1", "I1.3"
 # ---- Category 4: Relevance Manipulation (I1.4) ----
 # Content crafted to be retrieved via keyword stuffing with injection payload.
 
+# NOTE: possessive quantifiers (\w++, \s*+) make the {5,15} word-run atomic so
+# it cannot backtrack into exponential partitions on word/whitespace-heavy input
+# (ReDoS — e.g. a whitespace-stego payload reaching this detector via scan()).
+# Equivalent matches, linear time. Requires Python 3.11+ (repo runs 3.14).
 _add("relevance_manipulation", "keyword_stuffing_with_injection", "high", ["I1", "I1.4"],
-     r"(?:(?:\b\w+\b\s*,?\s*){5,15})\s*(?:\.\s*|\n\s*)"
+     r"(?:\b\w++\b\s*+,?\s*+){5,15}\s*+(?:\.\s*+|\n\s*+)"
      r"(?:ignore|disregard|forget|override|instead|new\s+instructions?)\b")
 
 _add("relevance_manipulation", "seo_style_keyword_block", "medium", ["I1", "I1.4"],
