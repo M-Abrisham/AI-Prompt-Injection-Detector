@@ -155,7 +155,7 @@ src/na0s/
 | `scan_result.py` | 47 | **stays** | |
 | `predict.py` | 1,784 | **rename → `_pipeline.py`** | |
 | `cascade.py` | 1,483 | **stays** | core orchestrator |
-| `rules.py` | 29 | `rules/patterns.py` | shared regex constants (L1/L6/L8 import) |
+| `rules.py` | 30 | **delete** | re-export shim; fold its public **and private** exports into `rules/__init__.py` (name collides with the `rules/` pkg) |
 | `_voting.py` | 388 | `fusion/voting.py` | L6 |
 | `signal_boost.py` | 483 | `fusion/signal_boost.py` | L6 |
 | `evidence_grading.py` | 130 | `fusion/evidence_grading.py` | L6 |
@@ -169,7 +169,7 @@ src/na0s/
 | `multilingual_intent.py` | 371 | `detectors/multilingual_intent.py` | D6 semantic |
 | `intent_guard.py` | 421 | `detectors/intent_guard.py` | N1 category |
 | `segment_grader.py` | 92 | `output/segment_grader.py` | L9 |
-| `obfuscation.py` | 46 | **delete** | already a re-export shim to `obfuscation/` |
+| `obfuscation.py` | 46 | **delete** | re-export shim; fold its public + ~35 private `_*` exports into `obfuscation/__init__.py` (tests import e.g. `_decode_base64`) |
 
 **61 top-level shim files → all delete at v1.0.0.** Each re-exports from its canonical sub-package location (e.g. `canary_alert.py` → `canary.alert`, `safe_pickle.py` → `integrity.safe_pickle`, `llm_judge.py` → `judge.llm_judge`, `embedding_classifier.py` → `ml.embeddings.classifier`). Shim headers already mark them with `# SHIM -- do not add new code here`. The v1.0.0 release ships the migration guide (`docs/MIGRATION_v1.md`) that maps every old import path to its new home, then deletes the shims in a single commit.
 
@@ -189,6 +189,10 @@ One branch per step so `main` stays green throughout:
 10. `refactor/promote-rules-modules` — sweep rules extensions into `rules/registry/`.
 11. `refactor/promote-detectors-modules` — sweep intent/multilingual/etc. into `detectors/`.
 12. `refactor/rename-layer-packages` — `layer0/` → `input/`, `layer1/` → `rules/`, `layer2/` → `obfuscation/`, `layer15/` → `threat_intel/`, `layer16/` → `conversation/`.
+    - **File-vs-dir collision (`rules.py`/`obfuscation.py`):** `git mv layer1 rules` succeeds but leaves the same-named shim file behind, which then silently shadows the package — `git rm` it in the same change and fold its public **and private** exports into the new `__init__.py` (verified: tests rely on `from na0s.rules import _has_contextual_framing` and `from na0s.obfuscation import _decode_base64`). Keep an `__init__.py` (never a namespace package); clear stale `__pycache__`.
+    - **Old `layerN` paths:** add `layer0.py`/`layer1.py`/`layer2.py`/… deprecation shims using the repo's existing Variant-A convention (`sys.modules[__name__] = importlib.import_module("na0s.<new>")` + `warnings.warn("na0s.layerN is deprecated; use na0s.<new> instead", DeprecationWarning, stacklevel=2)`), matching `judge_audit.py`/`rate_limiter.py`. Also repoint `rules/__init__.py`'s intra-package `..layer2.*` imports → `..obfuscation.*`.
+    - **Gating (concurrent work):** do NOT run the dir moves while `layer1/context.py` (d8) or `layer2/obfuscation.py` (D4.3) carry uncommitted edits — a fresh worktree drops uncommitted state and an in-place move yanks the file from under the other agent. Land both prerequisite commits first, then run step 12 in its own worktree.
+    - Precursor done: dead 541-line body in `layer1/whitespace_stego.py` collapsed to a clean shim (`refactor/layer1-stego-shim-cleanup`).
 13. `refactor/rename-predict-to-pipeline` — the rename + internal caller updates.
 14. `refactor/delete-shims` — final purge, tagged as `v1.0.0`.
 
