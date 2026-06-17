@@ -222,6 +222,39 @@ _EMBEDDED_HEX_RE = re.compile(
     r"(?![A-Za-z0-9])",               # not followed by alnum
 )
 
+# Pattern to find space/tab-separated hex byte pairs in mixed text, e.g.
+#     "The following hex spells a command: 49 67 6e 6f 72 65 ..."
+# This is the common real-world hex-injection format (Promptfoo, Praetorian)
+# that _EMBEDDED_HEX_RE misses because the separators break the contiguous
+# run into 2-char fragments.  Require >=8 pairs (16 hex chars, matching the
+# contiguous minimum) so benign short runs like "48 65 6c 6c 6f" ("Hello")
+# do not trigger decoding.
+_SPACED_HEX_RE = re.compile(
+    r"(?<![A-Za-z0-9])"                          # not preceded by alnum
+    r"((?:[0-9a-fA-F]{2}[ \t]+){7,}[0-9a-fA-F]{2})"  # >=8 space-separated pairs
+    r"(?![A-Za-z0-9])",                          # not followed by alnum
+)
+
+
+def _accept_hex_decode(candidate):
+    """Decode a run of hex digits and return text if it looks like plaintext.
+
+    Returns the decoded string, or None if the candidate has an odd length,
+    fails to decode as UTF-8, or is mostly non-printable.
+    """
+    if len(candidate) % 2 != 0:
+        return None
+    try:
+        decoded_str = bytes.fromhex(candidate).decode("utf-8", errors="strict")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    printable_count = sum(1 for c in decoded_str
+                          if c.isprintable() or c.isspace())
+    if (printable_count >= MIN_PRINTABLE_CHARS
+            and printable_count / max(len(decoded_str), 1) > MIN_PRINTABLE_RATIO):
+        return decoded_str
+    return None
+
 
 def _extract_embedded_hex(text):
     """Extract and decode hex substrings embedded in mixed text.
@@ -229,26 +262,28 @@ def _extract_embedded_hex(text):
     Unlike _hex() which requires the ENTIRE text to be hex, this
     function finds hex substrings within natural language text.  This
     catches attacks like:
-        "Decode this hex: 49676e6f726520616c6c..."
+        "Decode this hex: 49676e6f726520616c6c..."          (contiguous)
+        "Decode this hex: 49 67 6e 6f 72 65 ..."            (space-separated)
 
     Returns a list of (decoded_text, "hex") tuples for each valid
     hex substring found.
     """
     results = []
     for match in _EMBEDDED_HEX_RE.finditer(text):
-        candidate = match.group(1)
-        if len(candidate) % 2 != 0:
-            continue
-        try:
-            decoded_bytes = bytes.fromhex(candidate)
-            decoded_str = decoded_bytes.decode("utf-8", errors="strict")
-            # Only accept if decoded looks like text
-            printable_count = sum(1 for c in decoded_str
-                                  if c.isprintable() or c.isspace())
-            if printable_count >= MIN_PRINTABLE_CHARS and printable_count / max(len(decoded_str), 1) > MIN_PRINTABLE_RATIO:
-                results.append((decoded_str, "hex"))
-        except (ValueError, UnicodeDecodeError):
-            continue
+        decoded = _accept_hex_decode(match.group(1))
+        if decoded is not None:
+            results.append((decoded, "hex"))
+    for match in _SPACED_HEX_RE.finditer(text):
+        candidate = re.sub(r"[ \t]+", "", match.group(1))
+        decoded = _accept_hex_decode(candidate)
+        # Spaced-hex runs are structurally noisy (they trip token-pattern
+        # fingerprints), so only surface the decoded view when it actually
+        # reads like an instruction. This mirrors the cipher-decoder keyword
+        # gate and keeps benign hex dumps (e.g. an encoded recipe) from being
+        # flagged, while real attacks ("ignore all previous instructions")
+        # still decode and fire.
+        if decoded is not None and _has_attack_keywords(decoded, min_hits=1):
+            results.append((decoded, "hex"))
     return results
 
 
