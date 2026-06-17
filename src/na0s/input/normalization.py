@@ -859,6 +859,73 @@ def _strip_variation_selectors(text):
     )
 
 
+_ZW_BIT_ZERO = "\u200b"  # ZERO WIDTH SPACE      -> bit 0
+_ZW_BIT_ONE = "\u200c"   # ZERO WIDTH NON-JOINER -> bit 1
+
+# Minimum zero-width bits to attempt a binary decode (>= 2 bytes of signal).
+_ZW_STEGO_MIN_BITS = 16
+
+
+def _extract_zero_width_binary_stego(text):
+    """Decode a payload hidden as zero-width *binary* (ZWSP=0, ZWNJ=1).
+
+    This is distinct from per-letter zero-width *splitting* (e.g.
+    ``i<ZWSP>g<ZWSP>n...`` -> ``ignore``), which ``strip_invisible_chars``
+    already reassembles.  Here runs of zero-width characters ENCODE bits of a
+    hidden message rather than separating visible letters.
+
+    Must run BEFORE ``strip_invisible_chars()`` — ZWSP/ZWNJ are Unicode
+    category Cf and would otherwise be destroyed before the bits are read.
+
+    False-positive guards:
+      - requires at least ``_ZW_STEGO_MIN_BITS`` zero-width bits, and
+      - requires at least one ``1`` bit (a pure run of ZWSP is the per-letter
+        split case, which decodes to NUL bytes, not a payload), and
+      - requires the decode to be mostly printable ASCII.
+
+    Returns the decoded printable payload, or ``""`` when nothing decodes
+    cleanly.
+    """
+    bits = []
+    for ch in text:
+        if ch == _ZW_BIT_ZERO:
+            bits.append(0)
+        elif ch == _ZW_BIT_ONE:
+            bits.append(1)
+
+    if len(bits) < _ZW_STEGO_MIN_BITS or 1 not in bits:
+        return ""
+
+    decoded_bytes = []
+    for i in range(0, len(bits) - 7, 8):
+        byte_val = 0
+        for bit in bits[i:i + 8]:
+            byte_val = (byte_val << 1) | bit
+        if byte_val == 0:
+            break  # NUL terminator
+        decoded_bytes.append(byte_val)
+
+    if not decoded_bytes:
+        return ""
+
+    raw = bytes(decoded_bytes)
+    try:
+        decoded = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        try:
+            decoded = raw.decode("latin-1")
+        except Exception:
+            return ""
+
+    printable = [
+        c for c in decoded
+        if c in ("\n", "\r", "\t") or 0x20 <= ord(c) <= 0x7E
+    ]
+    if not printable or len(printable) / max(len(decoded), 1) < 0.6:
+        return ""
+    return "".join(printable)
+
+
 def normalize_text(text, _idempotency_pass=False):
     """Run all Layer 0 normalization steps in order.
 
@@ -939,6 +1006,17 @@ def normalize_text(text, _idempotency_pass=False):
     # If VS stego decoded a hidden message, append it for downstream scanning
     if vs_stego_text:
         text = text + "\n" + vs_stego_text
+
+    # Step 1.97: Zero-width BINARY steganography extraction (ZWSP=0/ZWNJ=1).
+    # MUST run BEFORE Step 2 (invisible char stripping) — the zero-width bits
+    # are category Cf and would be destroyed.  Distinct from the per-letter
+    # zero-width splitting that strip_invisible_chars reassembles below.  The
+    # decoded payload is appended so downstream layers (L1 rules, ML) scan the
+    # hidden message.
+    zw_stego_text = _extract_zero_width_binary_stego(text)
+    if zw_stego_text:
+        flags.append("zero_width_stego")
+        text = text + "\n" + zw_stego_text
 
     # Step 2: Invisible character stripping
     if has_invisible_chars(text):
