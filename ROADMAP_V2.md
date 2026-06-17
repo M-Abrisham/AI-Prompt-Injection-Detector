@@ -23,6 +23,48 @@ L16 Multi-Turn | L17 Doc Scanning (35%) | L18 RAG Security | L19 Agent/MCP | L20
 
 ---
 
+## Context-Window (D8) Manipulation Hardening — 2026-06-16 (branch `hardening/d8-context-window`)
+
+Gap audit (15 findings, adversarially verified) closed the orphaned-detector +
+annotate-only-multi-turn problem. The dedicated D8 detector was dead code with a
+false "called from cascade.py" docstring; multi-turn analysis was computed then
+discarded; there was no token-budget accounting; cascade had weaker D8 coverage
+than `scan()`. Status (commit SHA to be filled on push):
+
+- [x] **D8-G01/G04/G05/G08/G14/G15** — Hardened `detectors/context_manipulation.py`
+  and WIRED it into `predict.scan()` (long-input path) with its boost fused
+  (capped) into the composite score: real D8.4 strategic-displacement (middle
+  burial) branch, canonical D8.6 id for attention-hijack, newline-preserving
+  segment split, ML-aware `classify_fn`, derived `/8.0` divisor, corrected docstring.
+- [x] **D8-G02** — Multi-turn verdict now feeds `scan()`: `recommendation`/
+  `threat_level`/`cumulative_risk` fold into `risk_score`/`is_malicious`; bare
+  `except: pass` replaced with a logged warning. New `ScanResult` fields:
+  `multi_turn_threat_level`, `multi_turn_recommendation`, `cumulative_risk`.
+- [x] **D8-G03** — New `detectors/token_budget.py` (tiktoken-or-heuristic) flags
+  input approaching the model context window (D8.1 eviction), corroboration-gated
+  in the pipeline; env `NA0S_MODEL_CONTEXT_WINDOW`. 14 unit tests.
+- [x] **D8-G05/G06** — Per-segment ML max-pool over chunks (incl. the middle band)
+  in `predict.scan()`; a buried needle is no longer averaged below threshold.
+- [x] **D8-G07** — New `detectors/state_confusion.py` (D8.5 async/session-state
+  forgery) with a two-family co-occurrence FP gate; wired into `scan()`. 24 tests.
+- [x] **D8-G09** — `rag/position_scanner.py` wired into `scan()` for concatenated
+  RAG context + new size-dominance/token-share term; broadened imperative regex.
+- [x] **D8-G10** — Live-session eviction is now risk-weighted (`state._evict_to_cap`):
+  benign flooding can no longer push a suspicious earlier turn out of the window.
+- [x] **D8-G11** — Cascade parity: `WeightedClassifier.classify` runs the same
+  chunk + head/tail rule pass on long inputs (was full-text-only).
+- [x] **D8-G12/G13** — New `tests/test_scan_d8_context_window_hardening.py` (14
+  scan-level tests) covering D8.4/D8.5/D8.6, token-budget, multi-turn fusion,
+  cascade parity, RAG position + neutral-anchor FP guards.
+- [ ] **D8-G12 (follow-up)** — Persist per-D8.x recall in `technique_analysis.json`
+  and fix the mislabeled 100% D8 row in `BENCHMARK_RESULTS.md` (benchmark tooling).
+- [ ] **D8-G04 (follow-up)** — System-prompt-distance/anchor-offset metric (needs
+  defender-known system-prompt span; the hardest 6000-word weak-payload `xfail`
+  remains a known gap — corroboration gate intentionally won't force it over
+  threshold to protect precision).
+
+---
+
 ## Progress Overview
 
 | Layer  | Progress               | Done/Total | Status   |
@@ -113,7 +155,7 @@ src/na0s/
 | `scan_result.py` | 47 | **stays** | |
 | `predict.py` | 1,784 | **rename → `_pipeline.py`** | |
 | `cascade.py` | 1,483 | **stays** | core orchestrator |
-| `rules.py` | 29 | `rules/patterns.py` | shared regex constants (L1/L6/L8 import) |
+| `rules.py` | 30 | **delete** | re-export shim; fold its public **and private** exports into `rules/__init__.py` (name collides with the `rules/` pkg) |
 | `_voting.py` | 388 | `fusion/voting.py` | L6 |
 | `signal_boost.py` | 483 | `fusion/signal_boost.py` | L6 |
 | `evidence_grading.py` | 130 | `fusion/evidence_grading.py` | L6 |
@@ -127,7 +169,7 @@ src/na0s/
 | `multilingual_intent.py` | 371 | `detectors/multilingual_intent.py` | D6 semantic |
 | `intent_guard.py` | 421 | `detectors/intent_guard.py` | N1 category |
 | `segment_grader.py` | 92 | `output/segment_grader.py` | L9 |
-| `obfuscation.py` | 46 | **delete** | already a re-export shim to `obfuscation/` |
+| `obfuscation.py` | 46 | **delete** | re-export shim; fold its public + ~35 private `_*` exports into `obfuscation/__init__.py` (tests import e.g. `_decode_base64`) |
 
 **61 top-level shim files → all delete at v1.0.0.** Each re-exports from its canonical sub-package location (e.g. `canary_alert.py` → `canary.alert`, `safe_pickle.py` → `integrity.safe_pickle`, `llm_judge.py` → `judge.llm_judge`, `embedding_classifier.py` → `ml.embeddings.classifier`). Shim headers already mark them with `# SHIM -- do not add new code here`. The v1.0.0 release ships the migration guide (`docs/MIGRATION_v1.md`) that maps every old import path to its new home, then deletes the shims in a single commit.
 
@@ -136,7 +178,7 @@ src/na0s/
 One branch per step so `main` stays green throughout:
 
 1. `refactor/create-validation-package` — new `validation/` pulls in `positive_validation.py` (split into `positive.py` + `trust_boundary.py`) + `validation_allowlist.py` canonical. `multi_turn_validator` moves to `conversation/` instead (conversation-scoped).
-2. `refactor/create-output-package` — new `output/` pulls in the 4 scanners currently in `rag/` (output_scanner, propagation, streaming, dual_scanner) + `segment_grader.py`.
+2. `refactor/create-output-package` — DONE: `output/` now holds scanner, propagation, streaming, dual, attribution + segment_grader (migrated out of `rag/`).
 3. `refactor/create-features-package` — done-ish (L3 structural); also absorb any misplaced top-level feature code.
 4. `refactor/create-dataset-package` — new `dataset/` absorbs `data_schema.py` + library code from `scripts/` (trust_score, quarantine, near_duplicate, social_scraper, weekly_harvest).
 5. `refactor/create-eval-package` — new `eval/` absorbs `scripts/evaluate_*.py` + `scripts/benchmark_*.py` + regression-dashboard library code.
@@ -147,6 +189,12 @@ One branch per step so `main` stays green throughout:
 10. `refactor/promote-rules-modules` — sweep rules extensions into `rules/registry/`.
 11. `refactor/promote-detectors-modules` — sweep intent/multilingual/etc. into `detectors/`.
 12. `refactor/rename-layer-packages` — `layer0/` → `input/`, `layer1/` → `rules/`, `layer2/` → `obfuscation/`, `layer15/` → `threat_intel/`, `layer16/` → `conversation/`.
+    - **STATUS (2026-06-17):** `layer0/`→`input/` ✅ DONE · `layer15/`→`threat_intel/` ✅ DONE (branch `refactor/rename-input-and-threat-intel`) · `layer1/`→`rules/` + `layer2/`→`obfuscation/` ✅ **SOURCE DONE** (commit `f587e07`; full suite **8878 pass / 0 fail / 62 xfail**) — the file-vs-dir collision runbook below was executed (top-level `rules.py`/`obfuscation.py` `git rm`'d, public **and private** exports folded into the package `__init__`; internal `..layer2.*` imports repointed to `..obfuscation.*`). **Test-tree migration ✅ DONE** (branch `refactor/tests-rules-obfuscation-tree`): `tests/rules/` (7 files) + `tests/obfuscation/` (15 files, incl. `test_matryoshka.py` relocated from `tests/ml/`) created with empty `__init__.py` markers; the 7 self-inserting `../src` path hacks bumped to `../../src` for the deeper location; full suite green, collection count unchanged (no orphaned/duplicated tests). Core-pipeline tests (`test_cascade*`/`test_predict*`/`test_scan_*`/`test_e2e_pipeline`/`test_cross_track_integration`) deliberately stay at `tests/` root per CLAUDE.md. **Remaining test-tree dirs** (siblings, separate follow-up): `tests/input/` (layer0), `tests/threat_intel/` (layer15), and `tests/conversation/` (layer16 — pending that rename's merge). Old `layer0/`/`layer1/`/`layer2/`/`layer15/` kept as deprecated **sys.modules-alias shims** — `from na0s.layer0.X import …` / `from na0s.layer1.X import …` / `from na0s.layer2.X import …` / `from na0s.layer15.X import …` still resolve (same module objects, mock-patching safe). `layer16/`→`conversation/` still TODO (large: 53 importers, nested `detectors/`/`storage/`/`testing/` subpkgs).
+    - **File-vs-dir collision (`rules.py`/`obfuscation.py`):** `git mv layer1 rules` succeeds but leaves the same-named shim file behind, which then silently shadows the package — `git rm` it in the same change and fold its public **and private** exports into the new `__init__.py` (verified: tests rely on `from na0s.rules import _has_contextual_framing` and `from na0s.obfuscation import _decode_base64`). Keep an `__init__.py` (never a namespace package); clear stale `__pycache__`.
+    - **Old `layerN` paths:** add `layer1.py`/`layer2.py`/… deprecation shims using the repo's Variant-A convention (`sys.modules[__name__] = importlib.import_module("na0s.<new>")` + `warnings.warn(...)`); repoint `rules/__init__.py`'s intra-package `..layer2.*` imports → `..obfuscation.*`.
+    - **Gating (concurrent work):** the `layer1/context.py` (d8) + `layer2/obfuscation.py` (D4.3) blockers are now committed on `feat/e2-p1-c1-recall-gap-closure` + `feat/d4.3-spaced-hex-decoder` — run step 12 once those merge (avoids rename-vs-modify conflict), in its own worktree.
+    - Precursor done: dead 541-line body in `layer1/whitespace_stego.py` collapsed to a clean shim (`refactor/layer1-stego-shim-cleanup`).
+    - **OTHER AGENTS:** code formerly in `src/na0s/layer0/` is now in `src/na0s/input/`; `src/na0s/layer15/` is now `src/na0s/threat_intel/`. Old imports keep working via shims until Step 14.
 13. `refactor/rename-predict-to-pipeline` — the rename + internal caller updates.
 14. `refactor/delete-shims` — final purge, tagged as `v1.0.0`.
 
@@ -211,10 +259,10 @@ src/na0s/
 ├── validation/          ← L8  (NEW)
 │   └── positive, trust_boundary, allowlist
 │
-├── output/              ← L9  (NEW)
-│   ├── scanner, propagation, streaming, dual_scanner
+├── output/              ← L9  (DONE)
+│   ├── scanner, propagation, streaming, dual
 │   ├── segment_grader
-│   └── attribution, position_scanner
+│   └── attribution        (position_scanner stays in rag/)
 │
 ├── canary/              ← L10
 │   └── manager, session, rotation, honeypot, alert, persistence, verifier
@@ -383,9 +431,9 @@ All core functionality implemented: 19-step sanitization pipeline, 9 bug fixes (
 ## Layer 1: IOC / Signature Rules Engine — Tasks: 53/60 (88%)
 
 ### Description
-regex-based signature engine that detects known attack patterns. Runs 117 pre-compiled rules across 68 technique IDs with paranoia-level filtering on a PL1-PL4 scale (PL1-PL3 currently populated; env-configurable via `RULES_PARANOIA_LEVEL` at [paranoia.py:13](src/na0s/layer1/paranoia.py#L13); see [rules_registry.py](src/na0s/layer1/rules_registry.py) docstring for current distribution). Novel industry-first detectors: summarization extraction, authority escalation, constraint negation, meta-referential probing, gaslighting. Context-aware suppression (6 frames: educational, question, quoting, code, narrative, techdoc) prevents FPs on legitimate security discussions — critical-severity rules such as `data_exfiltration_pii` and `serialization_injection` are excluded from the `_CONTEXT_SUPPRESSIBLE` list and fire even inside framing. All patterns are ReDoS-safe: `Rule.__post_init__` invokes `safe_compile(..., check_safety=True)` automatically for every rule. Rules are integrated into both `predict.py` and `cascade.py` with dual-pass evaluation (raw + sanitized text, deduplicated via `hit_names_seen`). Unicode angle-bracket homoglyph folding (12 variants: 6 left + 6 right at [unicode_defense.py](src/na0s/layer1/unicode_defense.py)) protects XML/chat-template rules from bypass before rule evaluation. Historical bug fixes and sprint-by-sprint additions live in [CHANGELOG.md](CHANGELOG.md).
+regex-based signature engine that detects known attack patterns. Runs 117 pre-compiled rules across 68 technique IDs with paranoia-level filtering on a PL1-PL4 scale (PL1-PL3 currently populated; env-configurable via `RULES_PARANOIA_LEVEL` at [paranoia.py:13](src/na0s/rules/paranoia.py#L13); see [rules_registry.py](src/na0s/rules/rules_registry.py) docstring for current distribution). Novel industry-first detectors: summarization extraction, authority escalation, constraint negation, meta-referential probing, gaslighting. Context-aware suppression (6 frames: educational, question, quoting, code, narrative, techdoc) prevents FPs on legitimate security discussions — critical-severity rules such as `data_exfiltration_pii` and `serialization_injection` are excluded from the `_CONTEXT_SUPPRESSIBLE` list and fire even inside framing. All patterns are ReDoS-safe: `Rule.__post_init__` invokes `safe_compile(..., check_safety=True)` automatically for every rule. Rules are integrated into both `predict.py` and `cascade.py` with dual-pass evaluation (raw + sanitized text, deduplicated via `hit_names_seen`). Unicode angle-bracket homoglyph folding (12 variants: 6 left + 6 right at [unicode_defense.py](src/na0s/rules/unicode_defense.py)) protects XML/chat-template rules from bypass before rule evaluation. Historical bug fixes and sprint-by-sprint additions live in [CHANGELOG.md](CHANGELOG.md).
 
-**Target directory structure** (v1.0.0 refactor — `layer1/` → `rules/`; 4 shim files deleted, dead-code duplicate of `whitespace_stego.py` already deleted 2026-04-16, extension modules consolidated):
+**Target directory structure** (v1.0.0 refactor — `layer1/` → `rules/`; 4 shim files deleted, dead-code duplicate of `whitespace_stego.py` already deleted 2026-04-16, extension modules consolidated). **Source dirs renamed ✅ (`f587e07`)** — `na0s.layer1.*` resolves via the alias shim; the `tests/rules/` tree below is now POPULATED ✅ (7 tests migrated, branch `refactor/tests-rules-obfuscation-tree`):
 ```
 src/na0s/rules/                                   tests/rules/
 │                                                 │
@@ -454,9 +502,9 @@ Core API and infrastructure: `Rule` and `RuleHit` dataclasses with `Rule.__post_
 ## Layer 2: Obfuscation Detection & Decoding — Tasks: 41/42 (98%)
 
 ### Description
-Layer 2 decodes obfuscated payloads and re-classifies them. When user input arrives, Layer 2 tries to peel off each encoding layer — Base64, hex, URL-encoding, ROT13, Caesar (all 25 shifts), leetspeak, reversed text, pig latin, Morse code, binary/octal/decimal ASCII, whitespace steganography — and feeds every decoded view back through Layer 1 rules and the ML classifier. If an attacker hides `"ignore previous instructions"` inside `base64(url("..."))`, Layer 2 unwraps both layers and Layer 1 catches the inner string. Recursive Matryoshka unwrapping goes 4 levels deep with SHA-256 cycle detection and a 10× expansion limit; every decoded view carries forensic provenance (`decoded_chain`, `encoding_chains`, `max_depth_reached`). Entropy is checked via 2-of-3 composite voting (Shannon + KL-divergence from English + compression ratio), content-type aware (code/yaml/json get a higher threshold so legitimate technical text doesn't false-positive). Four detectors are industry-first: Morse code (CipherChat showed 55.3% ASR on GPT-4 via Morse), decimal-ASCII (CipherChat ~100% ASR), SNOW-style whitespace steganography, and ASCII art (ArtPrompt ACL 2024 achieved 100% ASR against every moderation tool tested). Syllable-splitting de-hyphenation undoes 25 Unicode dash variants against 83 suspicious words with a 77-entry compound whitelist — Meta Prompt Guard 2 classifies hyphenated attacks as 98.9% safe; Layer 2 doesn't. Combined signal boosting ([signal_boost.py](src/na0s/signal_boost.py), 292 LOC) adds an additive bump (0.05–0.12 per combo, MAX_BOOST=0.3) when L1 persona/override/extraction rules co-occur with L2 encoding flags. Historical bug fixes and sprint history live in [CHANGELOG.md](CHANGELOG.md).
+Layer 2 decodes obfuscated payloads and re-classifies them. When user input arrives, Layer 2 tries to peel off each encoding layer — Base64, hex, URL-encoding, ROT13, Caesar (all 25 shifts), leetspeak, reversed text, pig latin, Morse code, binary/octal/decimal ASCII, whitespace steganography — and feeds every decoded view back through Layer 1 rules and the ML classifier. If an attacker hides `"ignore previous instructions"` inside `base64(url("..."))`, Layer 2 unwraps both layers and Layer 1 catches the inner string. Recursive Matryoshka unwrapping goes 4 levels deep with SHA-256 cycle detection and a 10× expansion limit; every decoded view carries forensic provenance (`decoded_chain`, `encoding_chains`, `max_depth_reached`). Entropy is checked via 2-of-3 composite voting (Shannon + KL-divergence from English + compression ratio), content-type aware (code/yaml/json get a higher threshold so legitimate technical text doesn't false-positive). Four detectors are industry-first: Morse code (CipherChat showed 55.3% ASR on GPT-4 via Morse), decimal-ASCII (CipherChat ~100% ASR), SNOW-style whitespace steganography, and ASCII art (ArtPrompt ACL 2024 achieved 100% ASR against every moderation tool tested). Syllable-splitting de-hyphenation undoes 25 Unicode dash variants against 83 suspicious words with a 77-entry compound whitelist — Meta Prompt Guard 2 classifies hyphenated attacks as 98.9% safe; Layer 2 doesn't. Combined signal boosting ([signal_boost.py](src/na0s/fusion/signal_boost.py), 292 LOC) adds an additive bump (0.05–0.12 per combo, MAX_BOOST=0.3) when L1 persona/override/extraction rules co-occur with L2 encoding flags. Historical bug fixes and sprint history live in [CHANGELOG.md](CHANGELOG.md).
 
-**Target directory structure** (v1.0.0 refactor — `layer2/` → `obfuscation/`; 4 remaining `layer1/` shims deleted, `_env_utils` stays internal):
+**Target directory structure** (v1.0.0 refactor — `layer2/` → `obfuscation/`; 4 remaining `layer1/` shims deleted, `_env_utils` stays internal). **Source dirs renamed ✅ (`f587e07`)** — `na0s.layer2.*` resolves via the alias shim; the `tests/obfuscation/` tree below is now POPULATED ✅ (15 tests migrated incl. test_matryoshka from ml/, branch `refactor/tests-rules-obfuscation-tree`):
 ```
 src/na0s/obfuscation/                              tests/obfuscation/
 │                                                  │
@@ -480,7 +528,7 @@ v1.0.0 deletions:
   src/na0s/layer1/numeric_decode.py               (shim)
   src/na0s/layer1/ascii_art_detector.py           (shim)
   src/na0s/layer1/syllable_splitting.py           (shim)
-  Matryoshka tests at tests/ml/test_matryoshka.py → move to tests/obfuscation/test_matryoshka.py
+  ✅ MOVED tests/ml/test_matryoshka.py → tests/obfuscation/test_matryoshka.py
     (58 tests; the `ml/` location was incidental)
 
 Totals: 7 source files │ 11+ Layer-2-touching test files (official 9 + 2 uncataloged)
@@ -489,6 +537,16 @@ Totals: 7 source files │ 11+ Layer-2-touching test files (official 9 + 2 uncat
 ### Completed (41 items)
 
 Core pipeline: Shannon entropy with 2-of-3 composite voting (KL-divergence from English + compression ratio), punctuation-flood detection (≥30% ratio), casing-transition detection (≥6 transitions), Base64/hex/URL-encoding decoders, recursive `_scan_single_layer()` with `max_depth=4`, SHA-256 cycle detection, 10× expansion limit, and `DecodedView` dataclass for forensic encoding-chain provenance (`decoded_chain`, `encoding_chains`, `max_depth_reached`, `parent_index`). 3 audit fixes on 2026-02-20 (entropy threshold raised to composite voting, flat decode budget replaced with recursive unwrap, combined signal boosting added as `signal_boost.py` — 292 LOC, MAX_BOOST=0.3 cap, 45 tests). Decoder expansions: ROT13/Caesar brute-force (shifts 1–25 skip 13, 370k-word English dictionary validation, 10KB cap), Leetspeak normalizer (9 substitutions, 10% density gate), Reversed text (full-string + per-word), Morse code (ITU-R M.1677, 80% density gate, 4-layer FP defense — first-in-class), Binary/Octal/Decimal ASCII (three decoders, 70% printability gate, FP exemptions for Unix perms/IPs/versions — first-in-class), Pig Latin (consonant-cluster decoding, 50+ "-ay" exclusion set), Whitespace steganography (SNOW structural 0.95, statistical anomaly 0.70, simple binary 0.60, trailing-WS 0.50 — first-in-class), ASCII art detection (5-signal weighted vote summing to 1.0, Unicode box-drawing/braille/block — first-in-class against ArtPrompt ACL 2024), Syllable-splitting (25 Unicode dashes, 83 suspicious words, 77 compound whitelist, 50 safe prefixes — first-in-class against Meta Prompt Guard 2). Unicode Tag Character stego moved to Layer 0. Gap Closure Sprint 2026-02-28: content-type aware entropy thresholds (Track C — code/yaml/json raised 4.5→5.5, code-fence exemption, 26 tests) + encoding-chain depth/diversity scoring (Track D — depth bonus 0.05/level max 0.10, diversity bonus 0.02/type max 0.10, total boost [0.0, 0.20], 11 tests) + cross-track integration (27 tests). Package restructure: promoted from top-level/layer1 into `src/na0s/layer2/` on 2026-02-26 with backward-compat shims at old import paths. Hardcoded thresholds externalized via `_env_utils.py` (env-overridable). All 4 hardcoded values from the original TODO now live as named constants. See [CHANGELOG.md](CHANGELOG.md) v0.2.0 for the detailed per-feature history.
+
+### Recent Fixes (2026-06-16)
+
+- [x] **D4.3 spaced-hex decoder gap** — `_extract_embedded_hex()` only matched *contiguous* 16+‑char hex runs, so the common real‑world form `"...command: 49 67 6e 6f ..."` (space‑separated pairs + natural‑language prefix; Promptfoo/Praetorian) bypassed detection. Added `_SPACED_HEX_RE` (≥8 space‑separated pairs) + a shared `_accept_hex_decode()` helper, keyword‑gated on the spaced path so benign hex dumps (e.g. an encoded recipe) are not flagged. **Result**: `hex_encoding` evasion recall **0% → 69.8%** on the recall harness with **no new benign false positives** (the new `_scan` benign hard-negative tests stay green) — the keyword gate trades ~16pp of attack recall for FP-safety, the right call for an embedded SDK. _(commit pending)_
+
+### Benchmarking — Recall Harness as Single Source of Truth (2026-06-16)
+
+- [x] **`scripts/technique_analysis.py` upgraded to a two-sided harness** — was recall-only (misleading: a block-everything detector scores 100%). Now adds **Part 3 benign FPR** (`safe_holdout.jsonl`), **Wilson 95% CIs** + per-slice `n` on every rate, an opt-in **`--gate`** mode (per-category recall floor on the CI *lower* bound + pooled benign FPR ceiling on the CI *upper* bound, **fail-closed** on missing coverage), auto-regeneration of the gitignored datasets, and a richer versioned JSON artifact. Precision/F1 intentionally omitted (TP and FP come from differently-sized pools with no shared prevalence). Wired via `make recall-harness` / `make recall-gate` and a non-blocking CI step. **Baseline @ threshold 0.55**: overall recall **57.1%** (194/340, CI 51.8–62.2), benign FPR **1.2%** (6/500, CI 0.6–2.6 — measured on the 500-sample hard-negative safe holdout), evasion **47.6%** (270/567); **D6 now measured** (66.7%). Gate surfaces the real coverage gaps: **E2 recon ~0%**, C1 24%, O1 30%, P1 35%. _(commit pending)_
+- [x] **Data/generator hygiene** — fixed two pre-existing failures (`test_holdout_malicious`: stale `source="holdout"` expectation → `"generated"`, added `P1` to the valid-category set) and stopped `gen_all_datasets.py` from clobbering the canonical 9-type evasion file (the older 7-type generator silently dropped `hex_encoding`). _(commit pending)_
+- [ ] **Ratchet the gate floors** as the surfaced gaps close (E2/O1/C1/P1), then drop `continue-on-error` in `ci.yml` to make the recall gate blocking. **Priority**: P1.
 
 ### TODO List
 
@@ -631,7 +689,13 @@ Core pipeline: `scan()` public API returning `ScanResult`, `classify_prompt()` o
 
 ---
 
-## Layer 5: Embedding Classifier — Tasks: 37/37 (COMPLETE)
+## Layer 5: Embedding Classifier — Tasks: 38/47 (81%)
+
+> **Recount (2026-06-03):** prior `37/37 COMPLETE` was inaccurate — the centroid
+> embedding signal ran in `predict.scan()` but **not** in `CascadeClassifier`
+> (the "L5 split"), so the two public entry points disagreed on the same input.
+> Parity fix landed (see TODO List); the by-meaning semantic-embedding upgrade
+> is scoped but open.
 
 ### Description
 Layer 5 is a dense-embedding classifier complementing L4's sparse TF-IDF path. Sentence-transformer (`all-MiniLM-L6-v2`, 384-dim) encodes the L0-sanitized text, then hstacks with 29 L3 structural features (scaled) → 413-dim input to an isotonic-calibrated `LogisticRegression(class_weight='balanced')` (default) or optional `MLPClassifier(256, 128)` with early stopping. The pipeline runs in parallel to L4: embed → structural concat → classify → dual-pass rule matching → obfuscation scan → decoded-view reclassification (gated at 0.6 confidence) → optional late-chunking boost → optional FAISS KNN → optional PromptGuard (80/20 blend) → optional cross-encoder rerank → weighted decision. `scan_embedding()` returns a `ScanResult` with `cascade_stage="embedding"` for API parity with L4. Ensembled with L4 inside `ensemble.py` at 50/50 default (`NA0S_ENSEMBLE_TFIDF_WEIGHT`), wired into `cascade.py` at 60/40 alongside the weighted classifier. Advanced signals (late chunking, FAISS, PromptGuard, cross-encoder, adapter) are env-gated and disabled by default with graceful degradation. Model files load via `safe_dump`/`safe_load` with SHA-256 sidecars. Training supports stratified splits, three-model benchmarking (`all-MiniLM-L6-v2` / `bge-small-en-v1.5` / `gte-small`), contrastive fine-tuning, knowledge distillation, and GCG adversarial-suffix sample generation via standalone scripts.
@@ -655,6 +719,18 @@ scripts/embeddings/
 Core pipeline: `all-MiniLM-L6-v2` embedding (384-dim, ~20ms/sample), batch encoding with configurable `batch_size`, isotonic-calibrated `LogisticRegression` or optional `MLPClassifier(256, 128)` with early stopping, `scan_embedding()` returning `ScanResult` with `cascade_stage="embedding"`. L0 sanitization integrated at both training and inference. Dual-pass rule evaluation (raw + sanitized) with hit dedup. Decoded-view reclassification gated at `DECODED_VIEW_CONFIDENCE_THRESHOLD = 0.6`. Try/except on `embedding_model.encode()` at 3 sites (logs + continues). Safe pickle serialization via `safe_dump`/`safe_load` with SHA-256 sidecars. Ensembled with L4 via `ensemble.py` at configurable weights (`NA0S_ENSEMBLE_TFIDF_WEIGHT`, default 50/50) with graceful degradation to TF-IDF-only. L5 wired into `cascade.py` at 60/40 blend. 29-feature L3 structural concat (413-dim) with thread-safe `StandardScaler` caching. Late chunking (`NA0S_LATE_CHUNKING=1`): full-document embedding → overlapping chunks → max-risk aggregation. FAISS KNN (`NA0S_FAISS_ENABLED=1`): L2-normalized `IndexFlatIP`, thread-safe singleton, save/load. Cross-encoder reranking (`NA0S_CROSS_ENCODER_ENABLED=1`): 10 injection templates, sigmoid normalization. PromptGuard 80/20 blend (`NA0S_PROMPTGUARD_ENABLED=1`). Adapter layer (`embedding_adapter.py`): 2-layer MLP on frozen embeddings with validation tracking. Contrastive fine-tuning (`CosineSimilarityLoss`) and knowledge distillation (temperature-softened student) as standalone scripts. GCG adversarial suffix generator with 22 patterns across 5 categories. Three-model benchmarking (MiniLM / BGE / GTE). Stratified-split verification helper with tolerance checks. Fallback to TF-IDF when embeddings unavailable via `_HAS_EMBEDDING` flag. 11 audit bug fixes (BUG-L5-1 through L5-9, FIX-L5-10/11). See [CHANGELOG.md](CHANGELOG.md) v0.1.x, v0.2.0.
 
 ### TODO List
+
+**Done (2026-06-03, branch `fix/l5-cascade-centroid-parity`, commit pending):**
+- [x] **L5 split fixed — centroid embedding now runs in `CascadeClassifier`** — `get_embedding_classifier()` (TF-IDF centroid) was folded into `predict.scan()` but never into `cascade.WeightedClassifier.classify()`, so `scan()` and `CascadeClassifier` returned different verdicts for the same input. Mirrored the predict.py fold in cascade (bounded +0.20 boost, `_HAS_EMBEDDING_CENTROID` import guard, `NA0S_EMBEDDING_ENABLED=0` kill-switch parity) + TEETH regression test `tests/test_cascade_centroid.py` (4 tests, pass; no cascade regressions). **This is why the prior `37/37 COMPLETE` was inaccurate.**
+
+**By-meaning semantic embeddings (opt-in upgrade) — research complete (4-agent workflow 2026-06-03), build open:**
+- [ ] **Stop silent degradation** — `ensemble_scan` / `get_embedding_classifier()` silently fall back to keyword-matching when `sentence-transformers` is absent (the default install), so most users never actually run the semantic path. Emit a loud one-time warning (or opt-in hard-fail) so embedders know the semantic weight is effectively zero. **Priority**: P1. **Effort**: Low.
+- [ ] **No double-counting with the centroid** — when Path A ensemble is active it must SUPERSEDE the centroid, not stack on it (both measure semantic similarity). Feed the TF-IDF leg the model's raw calibrated proba (not `scan()`'s centroid-laden composite) and disable the in-composite centroid on the ensemble path. Directly interacts with the parity fix above. **Priority**: P1. **Effort**: Low.
+- [ ] **Decision benchmark before any default-on** — reuse `scripts/benchmark.py`; add an env wrapper for 3 configs (baseline TF-IDF / +centroid / +semantic ensemble) and a NEW balanced **paraphrase slice** (reworded attacks + paired benign near-misses, ~1–2k rows; current `test_sample.jsonl` is 10 rows). The paraphrase slice is the only thing that can justify the heavy dependency. **Priority**: P1. **Effort**: Med.
+- [ ] **Product decision (owner): define the "is it worth torch?" bar** — pre-register the minimum recall lift on paraphrases (at equal-or-lower FPR + an install-size / cold-start ceiling) that flips semantic embeddings to default-on. Product/security call, not code; set BEFORE running the benchmark so the result isn't fudged. **Priority**: P1. **Effort**: Decision only.
+- [ ] **Tiered optional extras** — split the heavy `na0s[embedding]` (sentence-transformers + torch, ~1–2 GB) into `embeddings-lite` (model2vec static, ~5–15 MB, no torch) and `embeddings-onnx` (fastembed / ONNX MiniLM, ~50–120 MB, no torch); keep the sklearn TF-IDF centroid as the always-on free fallback. **Blocker**: requires a model2vec/fastembed adapter in `ml/embedding_classifier.py` (today only ST + sklearn tiers exist) — likely its own branch. **Priority**: P2. **Effort**: 2–3d.
+- [ ] **Rebuild `model_embedding.pkl` at 384-dim** — current build scripts emit 413-dim (384 + 29 structural) but the shipped head is 384-dim, so a naive rebuild breaks it. Rebuild structural-free at 384-dim, do not bundle `embedding_structural_scaler.pkl`, update `KNOWN_HASHES['model_embedding.pkl']`. **Priority**: P2. **Effort**: Low (needs `dvc pull` data).
+- [ ] **Re-calibrate the ensemble blend + threshold** — the 0.55 decision threshold was tuned against the TF-IDF composite, not an average of composite + raw proba, and a weighted average of two calibrated probs is not itself calibrated. Fit a small logistic stacker or recalibrate, then re-tune the operating point. **Priority**: P2. **Effort**: Med (needs held-out set).
 
 **Polish (deferred):**
 - [ ] **Externalize 6 hardcoded values into `config.py`** — `ML_CONFIDENCE_OVERRIDE_THRESHOLD` (0.7, `predict_embedding.py`), default `batch_size` (64), `TFIDF_ACCURACY` / `TFIDF_FPR` placeholder constants in `model_embedding.py` (compute dynamically or remove), MLP hidden layers `(256, 128)`, embedding model name. **Priority**: P3. **Effort**: Trivial.
@@ -829,9 +905,9 @@ Core validator: 5-check pipeline (coherence, intent, scope, persona boundary, ta
 ## Layer 9: Output Scanner — Tasks: 28/28 (COMPLETE)
 
 ### Description
-Layer 9 scans LLM *output* (post-generation) to catch injections that evade the input pipeline. The core `OutputScanner` (`rag/output_scanner.py`, 848 lines) runs nine detector groups against each response: secret/credential regexes (AWS, OpenAI, GitHub, Slack, JWT, passwords, Postgres/Mongo URIs, RSA/SSH/x509 keys), role-break phrases (DAN, jailbroken, "my system prompt says"), compliance echoes ("per your instructions"), system-prompt-leak detection (keyword overlap + configurable n-gram match, default trigram), encoded-data detection (base64/hex/URL-encoded), PII (SSN, credit-card, phone, email, IPv4 — gated to medium/high sensitivity), markdown/HTML injection (image beacons, JS links, iframe, script, event handlers), data-exfiltration URLs (webhook.site, ngrok, requestbin, base64-in-query), and egress patterns (raw-IP URLs, mailto exfil, data-in-URL, DNS-label exfil). Returns `OutputScanResult(is_suspicious, risk_score, flags, redacted_text, technique_ids)` with taxonomy IDs for each triggered category. Sensitivity levels `low` / `medium` / `high` apply weight multipliers (0.5 / 1.0 / 1.5) and risk thresholds (0.55 / 0.35 / 0.20). `scan()` applies comprehensive redaction of secrets, role-break phrases, leaked fragments, and PII into `redacted_text`. Companion modules cover specialized output use-cases: `rag/propagation.py` (`PropagationScanner` — re-run the input classifier on output to catch worm-style downstream injection), `rag/dual_scanner.py` (`DualDirectionScanner` — composes output + propagation + cross-reference), `rag/streaming.py` (`StreamingOutputScanner` for chunk-by-chunk SSE), `rag/attribution.py` (`RAGAttributionChecker` — flag LLM output not grounded in retrieved context), `rag/position_scanner.py` (positional RAG-chunk scoring), and `segment_grader.py` (paragraph-level grading). Wired into `cascade.py` only (`scan_output()`, lines 1168-1206); `predict.py` does not call L9. Historical bug-fix and sprint-by-sprint detail in [CHANGELOG.md](CHANGELOG.md).
+Layer 9 scans LLM *output* (post-generation) to catch injections that evade the input pipeline. The core `OutputScanner` (`output/scanner.py`, 848 lines) runs nine detector groups against each response: secret/credential regexes (AWS, OpenAI, GitHub, Slack, JWT, passwords, Postgres/Mongo URIs, RSA/SSH/x509 keys), role-break phrases (DAN, jailbroken, "my system prompt says"), compliance echoes ("per your instructions"), system-prompt-leak detection (keyword overlap + configurable n-gram match, default trigram), encoded-data detection (base64/hex/URL-encoded), PII (SSN, credit-card, phone, email, IPv4 — gated to medium/high sensitivity), markdown/HTML injection (image beacons, JS links, iframe, script, event handlers), data-exfiltration URLs (webhook.site, ngrok, requestbin, base64-in-query), and egress patterns (raw-IP URLs, mailto exfil, data-in-URL, DNS-label exfil). Returns `OutputScanResult(is_suspicious, risk_score, flags, redacted_text, technique_ids)` with taxonomy IDs for each triggered category. Sensitivity levels `low` / `medium` / `high` apply weight multipliers (0.5 / 1.0 / 1.5) and risk thresholds (0.55 / 0.35 / 0.20). `scan()` applies comprehensive redaction of secrets, role-break phrases, leaked fragments, and PII into `redacted_text`. Companion modules cover specialized output use-cases: `output/propagation.py` (`PropagationScanner` — re-run the input classifier on output to catch worm-style downstream injection; note: zero production callers — `scan_output()` invokes `OutputScanner.scan()`, not `PropagationScanner`), `output/dual.py` (`DualDirectionScanner` — composes output + propagation + cross-reference), `output/streaming.py` (`StreamingOutputScanner` for chunk-by-chunk SSE), `output/attribution.py` (`RAGAttributionChecker` — flag LLM output not grounded in retrieved context), `rag/position_scanner.py` (positional RAG-chunk scoring — stays in `rag/` ingestion package), and `output/segment_grader.py` (paragraph-level grading). Wired into `cascade.py` only (`scan_output()`, lines 1207-1241); `predict.py` does not call L9. Historical bug-fix and sprint-by-sprint detail in [CHANGELOG.md](CHANGELOG.md).
 
-**Target directory structure** (v1.0.0 refactor — everything consolidates under `output/`; canonical code already lives in `rag/` and moves with minor renames; top-level shims all delete):
+**Target directory structure** (the `rag/` → `output/` migration is DONE: `OutputScanner` and its companions now live under `output/`; `rag/` retains only the ingestion-side `poison_detector.py` + `position_scanner.py`. Remaining v1.0.0 work: delete the top-level shims):
 ```
 src/na0s/output/                                tests/output/
 │                                               │
@@ -841,12 +917,11 @@ src/na0s/output/                                tests/output/
 │                          + OutputScanResult   ├── test_scanner_redaction.py
 │                                               │
 ├── propagation.py       ← PropagationScanner   ├── test_propagation.py
-├── dual.py              ← DualDirectionScanner ├── test_dual.py
+├── dual.py              ← DualDirectionScanner ├── test_advanced.py
 ├── streaming.py         ← StreamingOutputScan  ├── test_streaming.py
-├── segments.py          ← SegmentGrader        ├── test_segments.py
+├── segment_grader.py    ← SegmentGrader        ├── test_segment.py
 │                                               │
-├── rag_attribution.py   ← grounding check      ├── test_rag_attribution.py
-└── rag_position.py      ← position_scanner     └── test_rag_position.py
+└── attribution.py       ← grounding check      (position_scanner stays in rag/)
 
 v1.0.0 deletions (top-level 5-6 line shims):
   src/na0s/output_scanner.py
@@ -857,25 +932,25 @@ v1.0.0 deletions (top-level 5-6 line shims):
   src/na0s/rag_position_scanner.py
   src/na0s/worm_detector.py   (also L9-adjacent; real code in worm/detector.py)
 
-rag/ → output/ rename (canonical code moves):
-  src/na0s/rag/output_scanner.py  → src/na0s/output/scanner.py
-  src/na0s/rag/propagation.py     → src/na0s/output/propagation.py
-  src/na0s/rag/dual_scanner.py    → src/na0s/output/dual.py
-  src/na0s/rag/streaming.py       → src/na0s/output/streaming.py
-  src/na0s/rag/attribution.py     → src/na0s/output/rag_attribution.py
-  src/na0s/rag/position_scanner.py→ src/na0s/output/rag_position.py
-  src/na0s/segment_grader.py      → src/na0s/output/segments.py
+rag/ → output/ rename (DONE — canonical code already moved):
+  src/na0s/rag/output_scanner.py  → src/na0s/output/scanner.py          (done)
+  src/na0s/rag/propagation.py     → src/na0s/output/propagation.py      (done)
+  src/na0s/rag/dual_scanner.py    → src/na0s/output/dual.py             (done)
+  src/na0s/rag/streaming.py       → src/na0s/output/streaming.py        (done)
+  src/na0s/rag/attribution.py     → src/na0s/output/attribution.py      (done)
+  src/na0s/segment_grader.py      → src/na0s/output/segment_grader.py   (done)
+  src/na0s/rag/position_scanner.py → stays in rag/ (ingestion-side, with poison_detector.py)
 
-Tests (already organised under tests/rag/ — rename mirrors source):
-  tests/rag/test_output_scanner.py            → tests/output/test_scanner.py
-  tests/rag/test_output_scanner_redaction.py  → tests/output/test_scanner_redaction.py
-  tests/rag/test_l9_propagation.py            → tests/output/test_propagation.py
-  tests/rag/test_l9_streaming.py              → tests/output/test_streaming.py
-  tests/rag/test_l9_rag_segment.py            → tests/output/test_segments.py
-  tests/rag/test_l9_advanced.py               → tests/output/test_dual.py
-  tests/rag/test_rag_position_scanner.py      → tests/output/test_rag_position.py
+Tests (DONE — already migrated to tests/output/):
+  tests/output/test_scanner.py             ← output scanner
+  tests/output/test_scanner_redaction.py   ← redaction
+  tests/output/test_propagation.py         ← propagation
+  tests/output/test_streaming.py           ← streaming
+  tests/output/test_segment.py             ← segment grader
+  tests/output/test_advanced.py            ← dual-direction
+  tests/rag/test_rag_position_scanner.py   → stays in tests/rag/ (with test_rag_poison_detector.py)
 
-Totals: 8 source files under output/ │ 250+ tests organised under tests/output/
+Totals: 6 source files under output/ │ tests organised under tests/output/
 ```
 
 ### Completed (28 items)
@@ -895,13 +970,13 @@ Core scanner: `OutputScanResult` dataclass with `technique_ids` taxonomy, 9 dete
 - [ ] **Threshold-sensitivity regression test** — assert that `risk_score < threshold` with `len(flags) > 0` is correctly handled once the bug below is fixed. **Priority**: P2. **Effort**: Trivial.
 
 **Bugs / errors discovered during audit:**
-- [ ] **HIGH — duplicate redaction block runs twice per scan**, `src/na0s/rag/output_scanner.py:374-403`. The role-break + leak-fragment redaction loop is copy-pasted: lines 374-386 and lines 388-403 do the same work. Regexes re-run on already-redacted text, wasting cycles and producing nested `[REDACTED]` substitutions on any text containing `[REDACTED]` itself. **Repro**: scan any output with a role-break phrase; second pass re-substitutes. **Fix**: delete lines 388-403 (the "BUG-L9-2 fix: comprehensive redaction pass." duplicate block).
-- [ ] **HIGH — threshold is effectively bypassed**, `src/na0s/rag/output_scanner.py:407`. `is_suspicious = risk_score >= threshold or len(flags) > 0` — any single flag marks the output suspicious regardless of sensitivity. The `_THRESHOLD` table becomes dead configuration. **Fix**: drop the `or len(flags) > 0` disjunction, or route low-confidence flags through an informational channel instead of `is_suspicious=True`.
-- [ ] **MEDIUM — shim import in canonical code path**, `src/na0s/rag/propagation.py:18` imports `from na0s.worm_detector` (the 15-line DeprecationWarning shim) instead of `na0s.worm.detector`. Every `PropagationScanner()` instantiation emits a warning. **Fix**: `from na0s.worm.detector import WormSignatureDetector`.
-- [ ] **MEDIUM — shim import in canonical code path**, `src/na0s/segment_grader.py:16` imports `from na0s.output_scanner` instead of `na0s.rag.output_scanner`. Same DeprecationWarning pollution. **Fix**: switch to the canonical path.
-- [ ] **MEDIUM — package init triggers deprecation warnings on every `import na0s`**, `src/na0s/__init__.py:46-47` imports `na0s.output_scanner` and `na0s.streaming_scanner` shims. Any consumer of `na0s` sees two `DeprecationWarning`s at import time. **Fix**: point `__init__.py` at `na0s.rag.output_scanner` / `na0s.rag.streaming`.
-- [ ] **LOW — raw regex source leaks in flag label**, `src/na0s/rag/output_scanner.py:646-647`: `label = pat.pattern[:40]` is interpolated into the flag string `"Secret pattern detected ({label}): ..."`. Downstream logs and UIs display truncated regex syntax (e.g., `-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KE`). **Fix**: maintain a parallel human-readable label list alongside `_SECRET_PATTERNS`.
-- [ ] **LOW — `pat.findall` returns tuples for patterns with capture groups**, `src/na0s/rag/output_scanner.py:645`: `sample = matches[0] if isinstance(matches[0], str) else matches[0]` branches on a string check but both branches assign the same value. For patterns with capture groups (e.g., `r"\b(sk-[a-zA-Z0-9]{20,})\b"`), `matches[0]` is a `str` (single group) — OK for the current regex set but brittle. **Fix**: use `pat.search(text).group(0)` or a named helper.
+- [ ] **HIGH — duplicate redaction block runs twice per scan**, `src/na0s/output/scanner.py:374-403`. The role-break + leak-fragment redaction loop is copy-pasted: lines 374-386 and lines 388-403 do the same work. Regexes re-run on already-redacted text, wasting cycles and producing nested `[REDACTED]` substitutions on any text containing `[REDACTED]` itself. **Repro**: scan any output with a role-break phrase; second pass re-substitutes. **Fix**: delete lines 388-403 (the "BUG-L9-2 fix: comprehensive redaction pass." duplicate block).
+- [ ] **HIGH — threshold is effectively bypassed**, `src/na0s/output/scanner.py:407`. `is_suspicious = risk_score >= threshold or len(flags) > 0` — any single flag marks the output suspicious regardless of sensitivity. The `_THRESHOLD` table becomes dead configuration. **Fix**: drop the `or len(flags) > 0` disjunction, or route low-confidence flags through an informational channel instead of `is_suspicious=True`.
+- [ ] **MEDIUM — shim import in canonical code path**, `src/na0s/output/propagation.py:18` imports `from na0s.worm_detector` (the DeprecationWarning shim) instead of `na0s.worm.detector`. Every `PropagationScanner()` instantiation emits a warning. **Fix**: `from na0s.worm.detector import WormSignatureDetector`.
+- [x] **MEDIUM — shim import in canonical code path** (RESOLVED by the `output/` migration) — `src/na0s/output/segment_grader.py:16` now imports `from .scanner import OutputScanner` (canonical), no longer the deprecated `na0s.output_scanner` shim.
+- [x] **RESOLVED by the `output/` migration — MEDIUM, package init no longer warns on `import na0s`.** `src/na0s/__init__.py:46` now imports canonically: `from na0s.output import OutputScanner, OutputScanResult, StreamingOutputScanner` (no shim, no import-time `DeprecationWarning`). The old description (init pulling `na0s.output_scanner` / `na0s.streaming_scanner` shims) and its proposed fix (repoint at `na0s.rag.output_scanner` / `na0s.rag.streaming`) are obsolete — those `rag/` paths no longer exist.
+- [ ] **LOW — raw regex source leaks in flag label**, `src/na0s/output/scanner.py:646-647`: `label = pat.pattern[:40]` is interpolated into the flag string `"Secret pattern detected ({label}): ..."`. Downstream logs and UIs display truncated regex syntax (e.g., `-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KE`). **Fix**: maintain a parallel human-readable label list alongside `_SECRET_PATTERNS`.
+- [ ] **LOW — `pat.findall` returns tuples for patterns with capture groups**, `src/na0s/output/scanner.py:645`: `sample = matches[0] if isinstance(matches[0], str) else matches[0]` branches on a string check but both branches assign the same value. For patterns with capture groups (e.g., `r"\b(sk-[a-zA-Z0-9]{20,})\b"`), `matches[0]` is a `str` (single group) — OK for the current regex set but brittle. **Fix**: use `pat.search(text).group(0)` or a named helper.
 
 ---
 
@@ -1739,29 +1814,68 @@ Core stateful pipeline shipped: `ConversationSecurityMonitor` singleton with dou
 
 ## Coverage Matrix
 
-Maps the 17 known injection method classes (IM0001–IM0017) against our detection stack to identify systemic gaps.
+The injection-method coverage matrix has been restructured into a professional, audit-ready form and now lives in its own versioned file: **[docs/COVERAGE_MATRIX.md](docs/COVERAGE_MATRIX.md)**. Each of the 17 injection classes (`INJ-0001`–`INJ-0017`, 1:1 with the legacy `IM0001`–`IM0017` codes) is mapped to **OWASP LLM Top 10 (2025)** and **MITRE ATLAS** (v2026.05), with a graded 0–100 coverage score, verified implementing components, backing tests, severity, and the residual gap.
 
-| IM Code | Injection Method | Status | Our Coverage |
-| --- | --- | --- | --- |
-| **IM0001** | Direct Prompt Injection | **YES** | D1-D8 (103+ techniques), rules.py, layer0, cascade, probes |
-| **IM0002** | Prompt Body Injection | **YES** | D3.4 markdown delimiters, D7.3 code-block hiding, HTML extractor |
-| **IM0003** | Attached Data Injection | **PARTIAL** | M1.4 PDF hidden text, M1.5 SVG injection, magic byte detection. Gap: no OCR/audio |
-| **IM0004** | Indirect PI (User-Prompt) | **NO** | Not modeled — social engineering delivery vector |
-| **IM0005** | Unwitting User Delivery | **NO** | Not modeled — user tricked into submitting payload |
-| **IM0006** | LLM-Generated Delivery | **PARTIAL** | output_scanner.py detects compromised output. Gap: no cross-LLM propagation tracking |
-| **IM0007** | Altered Prompt Delivery | **PARTIAL** | D8 context manipulation, D7.2 multi-turn splitting. Gap: no middleware tampering. New: Category AD (Task #62) adds 19 techniques (AD1 infra, AD2 supply chain, AD3 defense) |
-| **IM0008** | Indirect PI (Context-Data) | **PARTIAL** | I1 (100+ samples), I2 HTML injection, html_extractor.py. Gap: email signature hiding (I1.7), broad-distribution documents (I1.8) |
-| **IM0009** | Internal Context-Data | **YES** | I1.2 document poisoning, I1.4 database/knowledge-base poisoning |
-| **IM0010** | External Context-Data | **YES** | I1.1 web pages, I1.3 email, RSS/API feeds |
-| **IM0011** | Attacker-Owned External | **YES** | I1.1 attacker-controlled websites, webhooks, APIs |
-| **IM0012** | Attacker-Compromised External | **YES** | I1.1 compromised GitHub, Stack Overflow, npm packages |
-| **IM0013** | Attacker-Influenced External | **YES** | I1.1 Yelp reviews, Reddit comments, wiki edits |
-| **IM0014** | Compromised Ingestion Process | **PARTIAL** | S1.3-S1.5 documented in taxonomy. Gap: no detection or samples |
-| **IM0015** | Prior-LLM-Output Injection | **PARTIAL** | D1.20 context-memory-poisoning defined. Gap: no trained samples |
-| **IM0016** | Agent Memory Injection | **PARTIAL** | I1.4 cached/embeddings DB poisoning. Gap: no explicit agent memory attacks |
-| **IM0017** | Agent-to-Agent Injection | **NO** | T1.3 tool chaining exists. Gap: no multi-agent propagation model |
+> The previous inline `IM0001`–`IM0017` table was retired (see git history): it cited a compat shim (`rules.py`) as the detection engine and used non-existent technique IDs (`M1.4/M1.5`). Three external IDs were also corrected during the rebuild (INJ-0007, INJ-0016, INJ-0017).
 
-**Summary**: 7 YES, 7 PARTIAL, 3 NO. Primary gaps: multimodal (OCR/audio), cross-LLM propagation, middleware tampering, ingestion pipeline, agent memory, multi-agent attacks, email signature hiding, and broad-distribution injection vectors.
+**At a glance** — full detail in [docs/COVERAGE_MATRIX.md](docs/COVERAGE_MATRIX.md):
+
+- **17 classes mapped** · mean coverage **63.1%** · severity-weighted **66.1%**
+- Bands: **3** Validated (85–100) · **7** Asserted (70–84) · **3** Partial (45–69) · **2** Taxonomy-only (15–44) · **2** Not modeled (0–14)
+- **Priority gaps:** `INJ-0017` multi-agent / inter-model propagation (critical, score 44 — probe samples exist but wired to no detector and no test) · `INJ-0014` supply-chain ingestion (score 52 — samples/probes but no runtime detector). The **agent-tool surface is the weakest-covered** overall.
+
+### TODO List — Coverage Matrix → Professional Format
+
+**Goal:** Replace the internally-invented `IM0001–IM0017` axis + `YES/PARTIAL/NO` grading with an externally-anchored, graded, validated, auditable matrix aligned to **OWASP LLM Top 10 (2025)** and **MITRE ATLAS** (`AML.T####`). Target home: standalone versioned `docs/COVERAGE_MATRIX.md`, linked from here and `docs/STANDARDS.md`. (Plan derived from agent research 2026-06-03; all external-standard claims fact-checked and confirmed.)
+
+**Phase 0 — Decisions & branch (P0):**
+- [ ] **Create branch** `docs/coverage-matrix-pro` off `main`.
+- [ ] **Resolve the `IM` namespace collision** — the matrix uses `IM` = *Injection Method*, but `data/taxonomy.yaml` already uses `IM` = *Inter-Model Propagation*. Decide: rename matrix key to `INJ-####` (recommended) or drop the local key and key rows on ATLAS/OWASP IDs.
+- [ ] **Pick a scoring scale** — `0–100` (ATT&CK Navigator-style; exports to heatmap) vs `0–5` ordinal (DeTT&CT-style with defined aspect levels). Recommended: 0–100 plus a documented rubric.
+- [ ] **Pick the home** — promote to standalone versioned `docs/COVERAGE_MATRIX.md` (recommended) vs keep inline; link from ROADMAP and `docs/STANDARDS.md`.
+
+**Phase 1 — Fetch authoritative catalogs (P0):**
+- [ ] **MITRE ATLAS** — pull full technique catalog from `mitre-atlas/atlas-data` (`dist/ATLAS.yaml`): tactics `AML.TA####`, techniques `AML.T####`, sub-techniques (e.g. `AML.T0051` LLM Prompt Injection → `.000` Direct / `.001` Indirect; `AML.T0054` Jailbreak; `AML.T0070` RAG Poisoning; `AML.T0056` Extract System Prompt). Snapshot the release tag.
+- [ ] **OWASP LLM Top 10 2025** — pull LLM01–LLM10 + LLM01 subtypes (Direct/Indirect/Multimodal). Snapshot the 2025 edition date.
+- [ ] **(Optional) extra anchors** — NIST AI 600-1 action IDs, OWASP AISVS pillars C01–C14, for a third cross-reference column.
+- [ ] **Vendor the catalogs** — save to `docs/refs/atlas_techniques.json` + `docs/refs/owasp_llm_2025.json` so the mapping is reproducible and CI-checkable.
+
+**Phase 2 — Map the 17 classes → external IDs (P0):**
+- [ ] **Assign primary OWASP + ATLAS IDs** to each `IM0001–IM0017`.
+- [ ] **Flag multi-mapping rows** (e.g. attached-data PI spans injection + multimodal).
+- [ ] **Flag rows with no clean ATLAS match** (e.g. `IM0004`/`IM0005` social-engineering delivery) — document as "delivery vector, no ATLAS equivalent" rather than forcing a fit.
+- [ ] **Add subtype** (Direct/Indirect/Multimodal; injection vs jailbreak vs extraction) and **Gate** (input / output / agent-tool) per row.
+- [ ] **Peer-review the mapping** — several rows are judgment calls.
+
+**Phase 3 — Professional column schema (P0):**
+- [ ] **Adopt the column set:** Row key (`INJ-####`) · OWASP LLM ID · MITRE ATLAS ID · Class + subtype · Gate · Coverage score · Confidence · Component / detection-logic ref · Validation (probe/test ID + pass-rate) · FP/recall or sample count · Severity tier · Residual gap · Owner · Last-validated date · Linked task.
+
+**Phase 4 — Populate evidence & scores (P1 — the real work):**
+- [ ] **Verify each component citation** points at the real implementing file/technique (no broad-bucket hand-waves; several cells currently reuse `I1.1`).
+- [ ] **Back every "covered" row with a fired test** — locate the probe/test, record its ID + latest pass-rate (run targeted `pytest`).
+- [ ] **Convert prose ratings → numeric scores** using a written rubric (define what 90 vs 55 vs 15 means).
+- [ ] **Pull FP/recall/sample counts** from the eval harness; mark `n/a` honestly where unavailable.
+- [ ] **Assign severity tier + owner + last-validated date** per row.
+
+**Phase 5 — Rewrite the artifact (P1):**
+- [ ] **Write the new matrix** with the full column set + a header block: version, last-reviewed date, scoring-rubric legend, source-catalog versions, review cadence.
+- [ ] **Add a rollup**: counts by score band + severity, total weighted coverage %.
+- [ ] **Add reverse mapping** (technique → class) and links to motivating threats/requirements.
+- [ ] **Replace the old `## Coverage Matrix`** here with a short summary + link to `docs/COVERAGE_MATRIX.md`.
+
+**Phase 6 — Make it living & auditable (P2 automation):**
+- [ ] **CI: validate external IDs** exist in the vendored ATLAS/OWASP catalogs; fail on unknown IDs.
+- [ ] **CI: fail on duplicate/colliding row IDs** (Sigma/Elastic practice).
+- [ ] **(Stretch) Generate Component + Validation columns** from `taxonomy.yaml` + the probe registry so coverage can't silently drift.
+- [ ] **(Stretch) Export a Navigator-style heatmap** layer JSON (ATT&CK/ATLAS Navigator format) for visualization.
+- [ ] **Set review cadence** (quarterly) + flag rows not re-validated in 90 days.
+
+**Phase 7 — Verify & ship (P0 gate):**
+- [ ] **Run full suite, zero regressions:** `python3 -m pytest tests/ -q --tb=line`.
+- [ ] **Self-review the diff** + write a change summary.
+- [ ] **Tick this TODO + cite the commit SHA** once pushed (roadmap-sync convention).
+
+**Acceptance criteria (done = professional):** every row carries OWASP + ATLAS IDs, a graded score, a validation/evidence pointer, an owner, and a last-validated date; the matrix is a standalone versioned file with a scoring rubric + review cadence; CI validates IDs and rejects collisions.
 
 ---
 
@@ -1785,8 +1899,8 @@ Cross-cutting structural guidance for Coverage Gap tasks (now folded into their 
 
 | Pattern | Source File |
 | --- | --- |
-| Scanner result dataclass | `src/output_scanner.py:26-33` |
-| Scanner `scan()` interface | `src/output_scanner.py` |
+| Scanner result dataclass | `src/na0s/output/scanner.py:65-79` |
+| Scanner `scan()` interface | `src/na0s/output/scanner.py:287` |
 | Probe base class | `scripts/taxonomy/_base.py` |
 | Template expansion | `scripts/taxonomy/_core.py:expand()` |
 | ClassifierOutput contract | `scripts/taxonomy/_base.py` |
@@ -1934,7 +2048,7 @@ Office parser suite shipped in PR #18 (2026-04-11): DOCX (19 surfaces — commen
 ## Layer 18: RAG Security / Ingestion Validation (NEW) — Tasks: 0/18 (0%)
 
 ### Description
-Layer 18 is a planned ingestion-side defense for Retrieval-Augmented Generation (RAG) pipelines — nothing in scope is implemented yet. Once built, it will scan documents before they reach the vector store, validate individual chunks, detect embedding anomalies, track cryptographic provenance from chunk back to source, monitor retrieval patterns for poison-probing behavior, and sanitize user queries before retrieval. The threat model is well-established: PoisonedRAG (USENIX Security 2025) demonstrates 90% attack success with only 5 malicious texts in a million-document corpus, OWASP LLM08:2025 flags embedding-space collision attacks that hijack nearest-neighbor retrieval, and indirect prompt injection via ingested documents is the canonical RAG escape route. The existing `src/na0s/rag/` sub-package holds output-facing modules (`output_scanner.py`, `propagation.py`, `dual_scanner.py`, `streaming.py`, `poison_detector.py`, `attribution.py`, `position_scanner.py`) that L9 has already proposed migrating into a new `output/` package — L18 claims the ingestion, chunking, embedding, and retrieval-monitoring half of the RAG surface, leaving `attribution.py` and `position_scanner.py` as the pre-existing building blocks that stay in `rag/`. Today `src/na0s/rag/__init__.py` is a one-line docstring with no exported API, so the package has no unified public interface to extend. None of the five NEW class names listed below (`IngestionValidator`, `ChunkValidator`, `EmbeddingIntegrityChecker`, `VectorDBSanitizer`, `Na0sRAGGuard`) appear anywhere in the source tree — confirmed by repo-wide grep.
+Layer 18 is a planned ingestion-side defense for Retrieval-Augmented Generation (RAG) pipelines — nothing in scope is implemented yet. Once built, it will scan documents before they reach the vector store, validate individual chunks, detect embedding anomalies, track cryptographic provenance from chunk back to source, monitor retrieval patterns for poison-probing behavior, and sanitize user queries before retrieval. The threat model is well-established: PoisonedRAG (USENIX Security 2025) demonstrates 90% attack success with only 5 malicious texts in a million-document corpus, OWASP LLM08:2025 flags embedding-space collision attacks that hijack nearest-neighbor retrieval, and indirect prompt injection via ingested documents is the canonical RAG escape route. The existing `src/na0s/rag/` sub-package now holds only the two ingestion-side modules (`poison_detector.py`, `position_scanner.py`); the L9 output-facing modules (`output_scanner.py`, `propagation.py`, `dual_scanner.py`, `streaming.py`, `attribution.py`) have already been migrated to the `output/` package. L18 claims the ingestion, chunking, embedding, and retrieval-monitoring half of the RAG surface, building on `poison_detector.py` and `position_scanner.py` as the pre-existing pieces that stay in `rag/`. Today `src/na0s/rag/__init__.py` is a one-line docstring with no exported API, so the package has no unified public interface to extend. None of the five NEW class names listed below (`IngestionValidator`, `ChunkValidator`, `EmbeddingIntegrityChecker`, `VectorDBSanitizer`, `Na0sRAGGuard`) appear anywhere in the source tree — confirmed by repo-wide grep.
 
 **Target directory structure** (v1.0.0 — ingestion-side `rag/` sub-package; output-side modules migrate out per L9):
 ```
@@ -1992,17 +2106,16 @@ src/na0s/rag/                                  tests/rag/
 ├── query_sanitizer.py    ← pre-retrieval     ├── test_query_sanitizer.py
 │                          query scan (L0→L4)
 │
-├── attribution.py        ← existing        ├── (existing tests)
-├── propagation.py        ← existing
-│                          (may move to
-│                          output/ per L9)
-└── position_scanner.py   ← existing
+├── poison_detector.py    ← existing        ├── test_rag_poison_detector.py
+└── position_scanner.py   ← existing        └── test_rag_position_scanner.py
 
-Not L18 (planned migration to new output/ package per L9):
-  rag/output_scanner.py   → output/scanner.py
-  rag/dual_scanner.py     → output/dual_scanner.py
-  rag/streaming.py        → output/streaming.py
-  rag/poison_detector.py  → output/poison_detector.py (post-retrieval side)
+Not L18 (the L9 output modules — already migrated to output/, no longer in rag/):
+  rag/output_scanner.py   → output/scanner.py       (done)
+  rag/propagation.py      → output/propagation.py    (done)
+  rag/dual_scanner.py     → output/dual.py           (done)
+  rag/streaming.py        → output/streaming.py      (done)
+  rag/attribution.py      → output/attribution.py    (done)
+  rag/poison_detector.py  → stays in rag/ (ingestion / post-retrieval side, NOT moved)
 
 Integration points (predict.py):
   _chunk_text(text)       → delegate to semantic_chunker (once built)
@@ -2139,6 +2252,8 @@ Pattern-based tool-shadowing detector at `src/na0s/detectors/mcp_tool.py` (672 L
 
 ### Description
 Layer 20 will close the loop around Na0S's threat taxonomy so it updates itself instead of drifting. The static artefact lives in `data/taxonomy.yaml` (19 categories, 103+ techniques) with MISP-style tag mappings (OWASP-LLM / AVID / LMRC) in `data/tags.misp.tsv`, and `scripts/generate_taxonomy_samples.py` materialises adversarial probes from the probe registry at `scripts/taxonomy/` (a Probe-subclass library — NOT to be confused with a sync pipeline). What's missing is the automation on top: pulling MITRE ATLAS releases, diffing them against local entries, proposing candidate additions, cross-referencing external unified taxonomies (e.g. arXiv 2511.21901), mapping every technique to Promptfoo plugin configs for CI red-teaming, and turning AIID incidents into training samples. Note that several "sync" building blocks already exist inside Layer 15 (`src/na0s/layer15/atlas_sync.py`, `diff_engine.py`, `incident_to_sample.py`, `aiid_sync.py`) — L20's role is automation ON TOP of those feeds (coverage reports, NLP proposals, Promptfoo mapping, MAESTRO fit), not re-implementing them.
+
+> **Doc-sync status (2026-06-03):** `THREAT_TAXONOMY.md` was re-synced to `data/taxonomy.yaml` — Category **M** restructured to M1/M2/M3/M4 and categories **IM / IG / AD** plus **P1.6 / P2 / P3** added (the human doc had drifted ~1 release behind the YAML; the `M1.4 → M3.1` code remap in the working tree is part of the same migration). **Open follow-ups:** (1) inline per-technique *examples* + *dataset counts* for the migrated categories (currently `—` / `L12` placeholders, because `taxonomy.yaml` stores only name+severity); (2) build a generator (`scripts/…` → `THREAT_TAXONOMY.md` from `taxonomy.yaml`) so the human doc can never drift again — the natural first L20 automation task.
 
 **Target directory structure** (v1.0.0 refactor — new `taxonomy/` sub-package; static data stays in `data/`):
 ```
@@ -2644,7 +2759,7 @@ Compiled from 9 research documents + 3 specialized agent audits (2026-03-03): da
 
 ### P0 — Quick Wins (<1 day each)
 
-- [ ] **Egress pattern detection** — Add URL/IP/email/webhook patterns to `output_scanner.py`. Catches exfiltration in LLM output. **Effort**: 0.5d. **Source**: `openclaw-plugins-to-na0s.md`
+- [ ] **Egress pattern detection** — Add URL/IP/email/webhook patterns to `output/scanner.py`. Catches exfiltration in LLM output. **Effort**: 0.5d. **Source**: `openclaw-plugins-to-na0s.md`
 - [x] **Timing-safe canary comparison** — Replace `==` with `hmac.compare_digest()` in `canary/verifier.py` to prevent timing side-channels. ✅ DONE (2026-04-12) — regex extraction + `hmac.compare_digest` for integrity check; substring searches in manager.py left as-is (timing-safe not applicable to `in` operator). 8 new tests in `tests/canary/test_timing_safe.py`. 189 canary tests pass.
 - [ ] **Config system** — Replace scattered `os.getenv()` calls with a unified YAML/JSON config with env-var override and validation. **Effort**: 1d. **Source**: `openclaw-agents-to-na0s.md`
 - [ ] **Adaptive thresholds** — Per-category confidence thresholds (e.g., higher for E1 extraction, lower for D2 roleplay) stored in config. **Effort**: 1d. **Source**: `openclaw-memory-to-na0s.md`
@@ -2779,3 +2894,4 @@ Na0S is stateless — each `scan()` call has no memory. Crescendo attacks exploi
 | `openclaw-agents-to-na0s.md` | Config, hooks, gateway | Infrastructure |
 
 ---
+ 

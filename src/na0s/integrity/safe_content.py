@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
-from na0s.layer0.safe_regex import safe_compile
+from na0s.input.safe_regex import safe_compile
 
 # ---------------------------------------------------------------------------
 # Safe-content signal patterns

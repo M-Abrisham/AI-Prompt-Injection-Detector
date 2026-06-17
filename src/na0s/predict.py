@@ -69,22 +69,22 @@ from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-from .layer0 import layer0_sanitize, register_malicious, quick_normalize_concat
-from .layer0.timeout import (
+from .input import layer0_sanitize, register_malicious, quick_normalize_concat
+from .input.timeout import (
     Layer0TimeoutError,
     SCAN_TIMEOUT,
     with_timeout,
 )
-from .layer1.context import _is_legitimate_roleplay, _has_contextual_framing
-from .layer2 import obfuscation_scan
+from .rules.context import _is_legitimate_roleplay, _has_contextual_framing
+from .obfuscation import obfuscation_scan
 from .rules import rule_score_detailed, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
 from .config import MAX_INPUT_LENGTH
-from .safe_pickle import safe_load
+from .integrity.safe_pickle import safe_load
 from .models import get_model_path, KNOWN_HASHES
-from .safe_content import calculate_safe_content_score
-from .multilingual_intent import detect_multilingual_intents, HEURISTIC_HITS
-from ._voting import (
+from .integrity.safe_content import calculate_safe_content_score
+from .detectors.multilingual_intent import detect_multilingual_intents, HEURISTIC_HITS
+from .fusion.voting import (
     weighted_decision as _voting_weighted_decision,
     get_decision_threshold as _get_decision_threshold,
     FP_EXEMPT_HITS,
@@ -107,63 +107,70 @@ except ImportError:
 
 # Multilingual injection handler (D6) — optional import
 try:
-    from .multilingual_handler import scan_multilingual, get_multilingual_rule_weight
+    from .detectors.multilingual_handler import scan_multilingual, get_multilingual_rule_weight
     _HAS_MULTILINGUAL = True
 except ImportError:
     _HAS_MULTILINGUAL = False
 
 # Fictional frame detector (C1) — optional import
 try:
-    from .fictional_frame_detector import detect_fictional_frame, get_fictional_frame_weight
+    from .detectors.fictional_frame import detect_fictional_frame, get_fictional_frame_weight
     _HAS_FICTIONAL_FRAME = True
 except ImportError:
     _HAS_FICTIONAL_FRAME = False
 
 # Indirect extraction detector (E1) — optional import
 try:
-    from .extraction_detector import scan_extraction, get_extraction_rule_weight
+    from .detectors.extraction import scan_extraction, get_extraction_rule_weight
     _HAS_EXTRACTION = True
 except ImportError:
     _HAS_EXTRACTION = False
 
 # Privacy probe detector (P1) — optional import
 try:
-    from .privacy_probe_detector import detect_privacy_probe, get_privacy_probe_weight
+    from .detectors.privacy_probe import detect_privacy_probe, get_privacy_probe_weight
     _HAS_PRIVACY_PROBE = True
 except ImportError:
     _HAS_PRIVACY_PROBE = False
 
 # Payload assembly detector (D7) — optional import
 try:
-    from .payload_assembly_detector import detect_fragmented_payload, get_fragment_weight
+    from .detectors.payload_assembly import detect_fragmented_payload, get_fragment_weight
     _HAS_PAYLOAD_ASSEMBLY = True
 except ImportError:
     _HAS_PAYLOAD_ASSEMBLY = False
 
 # Harmful intent detector (O1) — optional import
 try:
-    from .harmful_intent_detector import detect_harmful_intent, get_harmful_intent_weight
+    from .detectors.harmful_intent import detect_harmful_intent, get_harmful_intent_weight
     _HAS_HARMFUL_INTENT = True
 except ImportError:
     _HAS_HARMFUL_INTENT = False
 
 # Intent-analysis detector (N1) — optional import
 try:
-    from .intent_guard import analyze_intent, get_intent_guard_weight
+    from .detectors.intent_guard import analyze_intent, get_intent_guard_weight
     _HAS_INTENT_GUARD = True
 except ImportError:
     _HAS_INTENT_GUARD = False
 
 # RAG poisoning detector (I1.x / IM.x) — optional import
 try:
-    from .rag_poison_detector import detect_rag_poisoning, get_rag_poison_weight
+    from .rag.poison_detector import detect_rag_poisoning, get_rag_poison_weight
     _HAS_RAG_POISON = True
 except ImportError:
     _HAS_RAG_POISON = False
 
+# Position-weighted RAG context scanner (D8.3/D8.4/IP.x) — optional import
+try:
+    from .rag.position_scanner import position_weighted_scan
+    _HAS_RAG_POSITION = True
+except ImportError:
+    _HAS_RAG_POSITION = False
+
 # MCP tool shadowing detector (T1) — optional import
 try:
-    from .mcp_tool_detector import (
+    from .detectors.mcp_tool import (
         scan_tool_manifest as _scan_tool_manifest,
     )
     _HAS_MCP_TOOL_DETECTOR = True
@@ -173,7 +180,7 @@ except ImportError:
 # N5: PromptGuard classifier — transformer-based injection/jailbreak detection.
 # Opt-in via NA0S_ENABLE_PROMPTGUARD=1 (requires downloading a model).
 try:
-    from .promptguard_classifier import (
+    from .ml.promptguard_classifier import (
         get_promptguard_score as _get_pg_classifier_score,
     )
     _HAS_PROMPTGUARD_CLASSIFIER = True
@@ -184,7 +191,7 @@ except ImportError:
 # Uses semantic similarity to pre-computed attack pattern centroids.
 # Requires sentence-transformers; degrades gracefully to NoOp if absent.
 try:
-    from .embedding_classifier import get_embedding_classifier
+    from .ml.embedding_classifier import get_embedding_classifier
     _HAS_EMBEDDING_CLASSIFIER = True
 except ImportError:
     _HAS_EMBEDDING_CLASSIFIER = False
@@ -198,21 +205,21 @@ if _embedding_env in ("0", "false"):
 
 # Layer 2: ASCII art detector — optional import
 try:
-    from .layer2.ascii_art_detector import detect_ascii_art
+    from .obfuscation.ascii_art_detector import detect_ascii_art
     _HAS_ASCII_ART = True
 except ImportError:
     _HAS_ASCII_ART = False
 
 # Layer 2: Whitespace steganography detector — optional import
 try:
-    from .layer2.whitespace_stego import detect_whitespace_stego
+    from .obfuscation.whitespace_stego import detect_whitespace_stego
     _HAS_WHITESPACE_STEGO = True
 except ImportError:
     _HAS_WHITESPACE_STEGO = False
 
 # Layer 4: Perplexity-based adversarial signal — optional import
 try:
-    from .perplexity import compute_perplexity, PERPLEXITY_THRESHOLD
+    from .ml.perplexity import compute_perplexity, PERPLEXITY_THRESHOLD
     _HAS_PERPLEXITY = True
 except ImportError:
     _HAS_PERPLEXITY = False
@@ -262,7 +269,7 @@ def _get_conversation_monitor():
     if _conversation_monitor is None:
         with _conversation_monitor_lock:
             if _conversation_monitor is None:
-                from na0s.layer16.conversation_monitor import ConversationSecurityMonitor
+                from na0s.conversation.conversation_monitor import ConversationSecurityMonitor
                 _conversation_monitor = ConversationSecurityMonitor()
     return _conversation_monitor
 
@@ -519,6 +526,50 @@ _CHUNK_OVERLAP = 64
 _HEAD_TOKENS = 256
 _TAIL_TOKENS = 256
 MAX_CHUNKS = 20  # Resource-exhaustion cap: prevents O(N) rule passes on huge inputs
+
+# Per-segment ML max-pool (D8.3 document-overflow / D8.4 strategic-displacement):
+# a short payload buried in a benign-dominated long input is averaged below
+# threshold by whole-document ML scoring.  Classify each chunk and keep the MAX
+# so the needle survives.  Thresholds are corroboration-style, not arbitrary:
+_SEGMENT_ML_THRESHOLD = 0.60   # a lone chunk must look clearly malicious itself
+_SEGMENT_ML_SLOPE = 0.5        # maps the max-pool gain (chunk_max - whole_doc) to risk
+_SEGMENT_ML_MAX_BOOST = 0.20   # cap; matches the existing confirmed-hits boost magnitude
+
+# Token-budget / context-window eviction monitor (D8.1) corroboration gate:
+# only amplify risk when the rest of the pipeline already found suspicion, so a
+# benign long document near the model window is not flagged on size alone.
+_TOKEN_BUDGET_CORROBORATION_RISK = 0.30
+
+# Position-weighted RAG context scan (D8.3/D8.4) — only runs when the input
+# looks like concatenated retrieved context (>= this many document boundaries),
+# so ordinary prose is never mis-split.
+_RAG_CONTEXT_MIN_BOUNDARIES = 2
+_RAG_POSITION_SCALE = 0.5     # maps positional risk_score to a composite boost
+_RAG_POSITION_MAX_BOOST = 0.20
+
+# Splits concatenated RAG context into chunks on explicit document boundaries
+# ([Document N], --- END OF CONTEXT/DOCUMENT ---, ### System:/Source:).
+_RAG_BOUNDARY_SPLIT = re.compile(
+    r"(?:-{3,10}|={3,10})\s*END\s+OF\s+(?:CONTEXT|DOCUMENT|RETRIEVED|RESULTS?)\b[^\n]*"
+    r"|(?:^|\n)\s*\[Document\s+\d+\]\s*:?"
+    r"|(?:^|\n)\s*(?:###\s*)?(?:Source|Document|Passage)\s+\d+\s*:",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _split_rag_context(text):
+    """Split concatenated retrieved context into chunks on document
+    boundaries.  Returns a list of non-empty chunk strings (>= 1)."""
+    parts = [p.strip() for p in _RAG_BOUNDARY_SPLIT.split(text) if p and p.strip()]
+    return parts
+
+# Multi-turn verdict fusion (D8.2 conversation accumulation, G02): how a
+# "flag"-level session risk feeds back into the single-turn score.  A "block"
+# recommendation flips the verdict outright; a "flag" only adds a capped boost
+# so one borderline turn in an escalating session can cross threshold without a
+# single benign turn in a noisy session being over-penalized.
+_MULTI_TURN_BOOST_SCALE = 0.30  # fraction of accumulated session risk to fold in
+_MULTI_TURN_MAX_BOOST = 0.25    # cap, matching the other single-signal boost caps
 
 
 def _chunk_text(text, max_tokens=_CHUNK_MAX_TOKENS, overlap=_CHUNK_OVERLAP):
@@ -903,11 +954,15 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     # --- Fictional frame detection (C1) ---
     # Detect attacks wrapped in fictional/hypothetical/academic framing.
     fictional_weight = 0.0
+    fictional_has_inner = False
+    fictional_inner_type = ""
     if _HAS_FICTIONAL_FRAME:
         try:
             ff_result = detect_fictional_frame(clean)
             if ff_result.has_fictional_frame:
                 fictional_weight = get_fictional_frame_weight(ff_result)
+                fictional_has_inner = ff_result.has_inner_attack
+                fictional_inner_type = ff_result.inner_attack_type
                 hit_name = "fictional_frame:" + ff_result.frame_type
                 if hit_name not in hit_names_seen:
                     hits.append(hit_name)
@@ -921,6 +976,24 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                         _local_severities[inner_name] = "high"
         except Exception:
             pass  # Fictional frame detection failure is non-fatal
+
+    # Wire fictional frame signal into composite scoring.  (Previously the
+    # weight was computed but never added, leaving C1 detection inert.)
+    # "generic_attack" inner matches *conceptual* references (the words
+    # jailbreak / DAN / "ignore instructions") that occur in benign educational,
+    # quoting, and WAF-analysis contexts, so it is excluded -- only concrete
+    # harmful/extraction/override/disable inner requests contribute weight/floor.
+    if fictional_weight > 0.0 and fictional_inner_type != "generic_attack":
+        composite = min(composite + fictional_weight, 1.0)
+        # Floor: a frame wrapping a concrete harmful request (frame + inner
+        # attack -- a conjunctive gate) is strong C1 evidence, but the ML model,
+        # trained mostly on direct injection, scores these benign-looking
+        # framings as confidently safe.  Floor to ensure detection.  Frame-only
+        # (no inner attack) is NOT floored -- that is the false-positive guard.
+        if fictional_has_inner and composite < threshold:
+            composite = max(composite, threshold + 0.01)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
 
     # --- Indirect extraction detection (E1) ---
     # Detect completion tricks, translation tricks, encoding tricks, etc.
@@ -1037,6 +1110,33 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         except Exception:
             pass  # RAG poisoning detection failure is non-fatal
 
+    # --- Position-weighted RAG context scan (D8.3/D8.4) ---
+    # When the input looks like concatenated retrieved context (multiple
+    # document boundaries), scan it with position + size-dominance weighting so
+    # a payload buried in a mid-list or oversized chunk is not sheltered by the
+    # "lost in the middle" position bias.  Self-gating: only flags chunks that
+    # carry injection signal, so benign multi-document context is unaffected.
+    if (_HAS_RAG_POSITION
+            and len(_RAG_BOUNDARY_SPLIT.findall(clean)) >= _RAG_CONTEXT_MIN_BOUNDARIES):
+        try:
+            _rag_chunks = _split_rag_context(clean)
+            if len(_rag_chunks) >= 2:
+                _pos = position_weighted_scan(_rag_chunks)
+                if _pos.suspicious_positions:
+                    composite = min(
+                        composite
+                        + min(_RAG_POSITION_MAX_BOOST,
+                              _pos.risk_score * _RAG_POSITION_SCALE),
+                        1.0,
+                    )
+                    _ph = "rag_position:suspicious"
+                    if _ph not in hit_names_seen:
+                        hits.append(_ph)
+                        hit_names_seen.add(_ph)
+                        _local_severities[_ph] = "medium"
+        except Exception:
+            logger.debug("RAG position scan failed", exc_info=True)
+
     # --- Intent-analysis detection (N1) ---
     # Detect prompts that try to make the LLM follow malicious instructions
     # through action directives, compliance manipulation, goal hijacking,
@@ -1139,6 +1239,29 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                 composite = max(composite, threshold + 0.01)
                 label = "MALICIOUS"
 
+    # --- E2 reconnaissance floor ---
+    # A reconnaissance probe (tool/source/config enumeration, filter recon,
+    # model/config fingerprinting) that survived context suppression is strong
+    # evidence, but a single recon rule rarely crosses threshold on its own --
+    # the ML model scores these benign-looking questions as confidently safe.
+    # Floor it.  E2.3 fingerprinting is included as a deliberate strict
+    # threat-model choice for an embedded SDK (the benign holdout contains no
+    # self-fingerprinting questions, so measured FPR is unaffected); the
+    # trade-off is that bare "what model are you?" is now flagged.
+    if "SAFE" in label and composite < threshold:
+        _RECON_FLOOR_TIDS = ("E2.1", "E2.2", "E2.3", "E2.4", "E2.5")
+        _has_recon_probe = any(
+            dh.severity in ("high", "critical")
+            and any(
+                tid in _RECON_FLOOR_TIDS
+                for tid in _RULE_TECHNIQUE_IDS.get(dh.name, [])
+            )
+            for dh in detailed_hits
+        )
+        if _has_recon_probe:
+            composite = max(composite, threshold + 0.01)
+            label = "MALICIOUS"
+
     # --- D5 Unicode obfuscation signal ---
     _UNICODE_OBFUSCATION_FLAGS = frozenset({
         "combining_diacritics_stripped",
@@ -1174,7 +1297,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         label = "MALICIOUS"
 
     # --- Narrative / legitimate-role dampening ---
-    from .layer1.context import _NARRATIVE_FRAME
+    from .rules.context import _NARRATIVE_FRAME
     if threshold > 0.0 and not detailed_hits and not obs_flags:
         _is_narrative = bool(_NARRATIVE_FRAME.search(clean))
         _is_legit_role = _is_legitimate_roleplay(clean) or _is_legitimate_roleplay(text)
@@ -1410,6 +1533,105 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         hits.append("chunked_analysis")
         if input_truncated_chunks:
             hits.append("input_truncated_chunks")
+
+        # --- Per-segment ML max-pool (D8.3/D8.4 buried-payload defense) ---
+        # The whole-document ML probability dilutes a short injection in a
+        # large benign body toward "safe".  Classify each chunk and keep the
+        # MAX; if a chunk looks clearly malicious on its own AND the whole-doc
+        # ML missed it, raise risk by the (capped) max-pool gain so the
+        # localized needle is not averaged away.  Covers the under-attended
+        # MIDDLE band, which _chunk_text already includes.
+        _scaler = _get_cached_scaler()
+        _char_vec = _get_cached_char_vectorizer()
+
+        def _segment_ml_prob(seg):
+            if not seg or not seg.strip():
+                return 0.0
+            try:
+                _Xs = _transform(seg, vectorizer, _scaler, char_vectorizer=_char_vec)
+                _proba = model.predict_proba(_Xs)[0]
+                return float(_proba[1]) if len(_proba) > 1 else 0.0
+            except Exception:
+                return 0.0
+
+        whole_doc_mal = prob if "MALICIOUS" in label else (1.0 - prob)
+        chunk_ml_max = max((_segment_ml_prob(c) for c in chunks), default=0.0)
+        if (chunk_ml_max >= _SEGMENT_ML_THRESHOLD
+                and chunk_ml_max > whole_doc_mal):
+            seg_boost = min(
+                _SEGMENT_ML_MAX_BOOST,
+                (chunk_ml_max - whole_doc_mal) * _SEGMENT_ML_SLOPE,
+            )
+            risk = min(risk + seg_boost, 1.0)
+            if "segment_ml_maxpool" not in hits:
+                hits.append("segment_ml_maxpool")
+            if "D8.3" not in technique_tags:
+                technique_tags.append("D8.3")
+
+        # --- Dedicated D8 distribution/positional detector ---
+        # (padding / attention-hijack / strategic-displacement / dilution /
+        # many-shot / contradiction).  ML-aware via the per-segment scorer.
+        try:
+            from .detectors.context_manipulation import detect_context_manipulation
+
+            _cm = detect_context_manipulation(
+                l0.sanitized_text, classify_fn=_segment_ml_prob,
+            )
+        except Exception:
+            logger.debug("context_manipulation detector unavailable", exc_info=True)
+            _cm = None
+        if _cm is not None:
+            risk = min(risk + _cm.boost, 1.0)
+            _cm_hit = "context_manip:" + _cm.manipulation_type.lower()
+            if _cm_hit not in hits:
+                hits.append(_cm_hit)
+            for _tid in _cm.technique_ids:
+                if _tid not in technique_tags:
+                    technique_tags.append(_tid)
+
+    # --- Token-budget / context-window eviction monitor (D8.1) ---
+    # Detects input sized to approach the model context window, pushing the
+    # system prompt / safety preamble toward truncation (the literal D8.1
+    # mechanism).  Corroboration-gated: the signal is always surfaced for
+    # telemetry, but it only RAISES risk when the rest of the pipeline already
+    # found suspicion (risk >= _TOKEN_BUDGET_CORROBORATION_RISK), so a benign
+    # long document near the window is never flagged on size alone.
+    try:
+        from .detectors.token_budget import analyze_token_budget
+
+        _tb = analyze_token_budget(text)
+    except Exception:
+        logger.debug("token_budget detector unavailable", exc_info=True)
+        _tb = None
+    if _tb is not None and _tb.detected:
+        if "token_budget:near_context_window" not in hits:
+            hits.append("token_budget:near_context_window")
+        for _tid in _tb.technique_ids:
+            if _tid not in technique_tags:
+                technique_tags.append(_tid)
+        if risk >= _TOKEN_BUDGET_CORROBORATION_RISK:
+            risk = min(risk + _tb.boost, 1.0)
+
+    # --- D8.5 state-confusion detector ---
+    # Fabricated async/session-state claims (a "concurrent request modified
+    # your system prompt", forged session tokens, context-window-rotation
+    # privilege grants, distributed-state/CAP framing used to justify ignoring
+    # instructions).  High precision via a two-family co-occurrence gate, so
+    # its boost is fused directly.
+    try:
+        from .detectors.state_confusion import detect_state_confusion
+
+        _sc = detect_state_confusion(text)
+    except Exception:
+        logger.debug("state_confusion detector unavailable", exc_info=True)
+        _sc = None
+    if _sc is not None and _sc.detected:
+        risk = min(risk + _sc.boost, 1.0)
+        if "state_confusion" not in hits:
+            hits.append("state_confusion")
+        for _tid in _sc.technique_ids:
+            if _tid not in technique_tags:
+                technique_tags.append(_tid)
 
     # --- D7 boost: json_hidden_instruction + chunked_analysis ---
     # When a JSON-structured hidden instruction fires inside a padded
@@ -1684,12 +1906,12 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
     })
     if _IMAGE_FLAGS & set(l0.anomaly_flags):
         try:
-            from .visual_injection_detector import scan_image as _visual_scan
+            from .detectors.visual_injection import scan_image as _visual_scan
 
             # If L0 extracted OCR or metadata text, scan it via the visual
             # detector pattern-based analysis.  We pass the extracted text
             # through _scan_text_for_injection for injection indicators.
-            from .visual_injection_detector import _scan_text_for_injection
+            from .detectors.visual_injection import _scan_text_for_injection
 
             _visual_score, _visual_inds, _visual_tids = _scan_text_for_injection(
                 l0.sanitized_text
@@ -1744,8 +1966,41 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
             result.multi_turn_risk_trend = analysis.risk_trend
             result.escalation_detected = analysis.escalation_detected
             result.session_id = session_id
+            result.multi_turn_threat_level = analysis.threat_level
+            result.multi_turn_recommendation = analysis.recommendation
+            result.cumulative_risk = round(analysis.cumulative_risk, 4)
+
+            # --- Fold the multi-turn verdict into the final score (G02) ---
+            # Previously the rich multi-turn signal (escalation, cumulative
+            # risk, CUSUM, graduated threat level) was computed then discarded,
+            # so a slow-burn session whose individual turns each scored below
+            # threshold could never be blocked.  Now the session verdict feeds
+            # back into risk_score / is_malicious.
+            mt_risk = max(analysis.cumulative_risk, analysis.peak_accumulation_score)
+            if analysis.recommendation == "block" or analysis.threat_level == "blocked":
+                # Strong session verdict: a critical/blocking accumulation.
+                result.is_malicious = True
+                result.label = "malicious"
+                result.risk_score = round(max(result.risk_score, threshold, mt_risk), 4)
+            elif analysis.recommendation == "flag" or analysis.threat_level == "flagged":
+                # Capped boost from accumulated session risk; can cross the
+                # single-turn threshold a borderline turn alone would not.
+                boosted = min(
+                    1.0,
+                    result.risk_score
+                    + min(_MULTI_TURN_MAX_BOOST, mt_risk * _MULTI_TURN_BOOST_SCALE),
+                )
+                result.risk_score = round(boosted, 4)
+                if not result.is_malicious and result.risk_score >= threshold:
+                    result.is_malicious = True
+                    result.label = "malicious"
         except Exception:
-            pass  # Layer 16 failure is non-fatal
+            # Layer 16 failure is non-fatal to the single-turn verdict, but it
+            # must not be silent — a crash here means zero multi-turn coverage.
+            logger.warning(
+                "Layer 16 multi-turn analysis failed for session %s",
+                session_id, exc_info=True,
+            )
 
     result.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
     return result

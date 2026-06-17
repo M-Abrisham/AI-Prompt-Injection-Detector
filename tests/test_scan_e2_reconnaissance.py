@@ -249,7 +249,6 @@ class TestE2_2_ToolFunctionEnumeration(unittest.TestCase):
         if result.is_malicious:
             self.assertEqual(result.label, "malicious")
 
-    @unittest.expectedFailure
     def test_e2_2_list_capabilities(self):
         """Ask what actions can be performed.
 
@@ -316,7 +315,6 @@ class TestE2_2_ToolFunctionEnumeration(unittest.TestCase):
         if result.is_malicious:
             self.assertEqual(result.label, "malicious")
 
-    @unittest.expectedFailure
     def test_e2_2_agent_discovery(self):
         """Discover sub-agents in multi-agent systems.
 
@@ -354,7 +352,6 @@ class TestE2_3_ConfigurationProbing(unittest.TestCase):
     NOTE: E2.3 has 0 training samples.
     """
 
-    @unittest.expectedFailure
     def test_e2_3_model_and_temperature(self):
         """Ask for model identity and temperature setting.
 
@@ -386,7 +383,6 @@ class TestE2_3_ConfigurationProbing(unittest.TestCase):
         if result.is_malicious:
             self.assertEqual(result.label, "malicious")
 
-    @unittest.expectedFailure
     def test_e2_3_model_identification(self):
         """Direct model identification query.
 
@@ -403,7 +399,6 @@ class TestE2_3_ConfigurationProbing(unittest.TestCase):
             "risk={}, hits={}".format(result.risk_score, result.rule_hits),
         )
 
-    @unittest.expectedFailure
     def test_e2_3_output_length_sampling(self):
         """Probe for output limits and sampling parameters.
 
@@ -501,7 +496,6 @@ class TestE2_4_CapabilityMapping(unittest.TestCase):
         if result.is_malicious:
             self.assertEqual(result.label, "malicious")
 
-    @unittest.expectedFailure
     def test_e2_4_safety_filter_discovery(self):
         """Discover active safety filters.
 
@@ -568,7 +562,6 @@ class TestE2_5_ContextInventory(unittest.TestCase):
         if result.is_malicious:
             self.assertEqual(result.label, "malicious")
 
-    @unittest.expectedFailure
     def test_e2_5_describe_all_context(self):
         """Ask to describe all available context.
 
@@ -604,7 +597,6 @@ class TestE2_5_ContextInventory(unittest.TestCase):
             "risk={}, hits={}".format(result.risk_score, result.rule_hits),
         )
 
-    @unittest.expectedFailure
     def test_e2_5_system_messages_extraction(self):
         """Ask for system messages in conversation context.
 
@@ -824,7 +816,6 @@ class TestE2_KnownLimitations(unittest.TestCase):
         # This SHOULD be malicious (E2.2) but currently is not detected
         self.assertTrue(result.is_malicious)
 
-    @unittest.expectedFailure
     def test_known_gap_simple_model_identity_probe(self):
         """KNOWN GAP: Simple model identity questions are not flagged.
 

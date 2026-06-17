@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from ..layer0.safe_regex import safe_compile
+from ..input.safe_regex import safe_compile
 
 
 # ---------------------------------------------------------------------------
@@ -100,12 +100,61 @@ def _register(
     name: str,
     pattern: str,
     is_extraction: bool = False,
+    guarded: bool = False,
 ) -> None:
-    """Compile *pattern* and register it in the privacy pattern list."""
+    """Compile *pattern* and register it in the privacy pattern list.
+
+    ``guarded=True`` marks a broad pattern that must be suppressed when the
+    request is self-referential (the user asking about their *own* history),
+    which is benign.  See the self-referential guard in
+    :func:`detect_privacy_probe`.
+    """
     compiled = safe_compile(pattern, re.IGNORECASE, check_safety=True)
     _PRIVACY_PATTERNS.append(
-        (probe_type, technique_id, name, compiled, is_extraction)
+        (probe_type, technique_id, name, compiled, is_extraction, guarded)
     )
+
+
+# ---------------------------------------------------------------------------
+# Self-referential guard
+# ---------------------------------------------------------------------------
+# The malicious vs benign axis for history/session requests is *third-party /
+# cross-session* framing (attack) vs *first-person* (benign).  A broad pattern
+# is suppressed when the text is self-referential (first person) AND has no
+# genuine cross-user reference.  References to the user's OWN session
+# ("my last session") are stripped before the cross-user check so they are not
+# misread as cross-user ("last session").
+
+_SELF_REF = re.compile(r"\b(?:my|mine|our|ours|i)\b", re.IGNORECASE)
+
+_MY_OWN_SESSION = re.compile(
+    r"\b(?:my|our)\s+(?:last|previous|prior|current|own|recent)?\s*"
+    r"(?:session|conversation|chat|messages?|history|queries|questions)\b",
+    re.IGNORECASE,
+)
+
+_CROSS_USER = re.compile(
+    r"\b(?:other|another|previous|prior|past|last)\s+(?:users?|people|persons?|sessions?)\b"
+    r"|\bother\s+(?:people|users)\b"
+    r"|\bbefore\s+(?:me|mine)\b"
+    r"|\buser\s+id\b"
+    r"|\b(?:who\s+else|someone\s+else|everyone\s+else|anyone\s+else)\b"
+    r"|\bother'?s\b",
+    re.IGNORECASE,
+)
+
+
+def _is_self_referential(text: str) -> bool:
+    """Return True when *text* is a benign first-person history request.
+
+    The user's own-session phrases are removed before the cross-user check so
+    that "my last session" is treated as self-referential rather than
+    cross-user ("last session").
+    """
+    text_wo_own = _MY_OWN_SESSION.sub(" ", text)
+    has_cross_user = bool(_CROSS_USER.search(text_wo_own))
+    is_self = bool(_SELF_REF.search(text)) or bool(_MY_OWN_SESSION.search(text))
+    return is_self and not has_cross_user
 
 
 # -- P1.1: Conversation extraction ------------------------------------------
@@ -215,6 +264,60 @@ _register(
     r"\bsaved\s+from\s+previous\b",
 )
 
+# -- P1.1/P1.4 broadened (self-referential guarded) -------------------------
+# The original patterns were too literal (no quantifier slot, no synonym verbs,
+# no third-party framing), so most conversation-history / cross-session probes
+# slipped through.  These broad patterns are GUARDED: suppressed when the
+# request is first-person (the user asking about their own history).
+
+_register(
+    "conversation_extraction", "P1.1", "show_history_broad",
+    # Requires the history-specific noun "conversation" -- generic nouns
+    # (question/message/session) over-matched benign text ("share their answer
+    # ... next question").  Chat/message history is covered by chat_history_phrase.
+    r"\b(?:show|display|list|print|recall|share|retrieve|dump|reveal)\b.{0,30}?"
+    r"\bconversations?\b",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "conversation_extraction", "P1.1", "chat_history_phrase",
+    r"\b(?:chat|conversation|message|session|interaction|dialogue)\s+histor(?:y|ies)\b",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "conversation_extraction", "P1.1", "who_else_asked",
+    r"\b(?:who\s+else|other\s+people|everyone\s+else|anyone\s+else)\b.{0,50}?"
+    r"\b(?:ask|asked|said|say|talk|shar|tell|told|quer|question)",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "conversation_extraction", "P1.1", "queries_processed",
+    r"\b(?:queries|questions|messages|requests|conversations?)\s+(?:processed|handled|received|seen)\s+"
+    r"(?:by\s+(?:your|the)\s+system|previously|today|recently|so\s+far)\b",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "cross_session", "P1.4", "other_users_broad",
+    r"\b(?:other|another|previous|prior|past|last)\s+(?:users?|people|persons?|sessions?)\b",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "cross_session", "P1.4", "before_me",
+    r"\bbefore\s+(?:me|mine|my\s+session)\b",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "cross_session", "P1.4", "user_id_target",
+    r"\buser\s+id\s+\w+\b.{0,30}?\b(?:ask|asked|say|said|want|query|conversation|tell|told)",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "cross_session", "P1.4", "enumerate_users",
+    r"\b(?:list|show|display|enumerate)\b.{0,40}?\busers?\b.{0,30}?"
+    r"\b(?:interact|talk|chat|ask|messag|used?|using|conversation)",
+    is_extraction=True, guarded=True,
+)
+
 # -- P1.5: Serialization injection -----------------------------------------
 
 _register(
@@ -277,12 +380,20 @@ def detect_privacy_probe(text: str) -> Optional[PrivacyProbeResult]:
     if _EDUCATIONAL_FRAME.search(text):
         return None
 
-    # Scan all patterns.
+    # Scan all patterns.  Broad (guarded) patterns are skipped when the request
+    # is a benign first-person history request ("show me my conversation").
+    self_referential = _is_self_referential(text)
     matched_types: List[str] = []
     matched_technique_ids: List[str] = []
     has_extraction = False
 
-    for probe_type, technique_id, _name, compiled, is_extraction in _PRIVACY_PATTERNS:
+    for probe_type, technique_id, _name, compiled, is_extraction, guarded in _PRIVACY_PATTERNS:
+        # Suppress conversation-history / cross-session signals (broad OR
+        # original) for benign first-person requests.  Other P1 probe types
+        # (training-data extraction, serialization, membership) are not
+        # self-referential and are never suppressed here.
+        if self_referential and (guarded or probe_type in ("conversation_extraction", "cross_session")):
+            continue
         match = compiled.search(text)
         if match:
             if probe_type not in matched_types:
@@ -353,7 +464,7 @@ def get_privacy_probe_weight(result: PrivacyProbeResult) -> float:
 # Rules for layer1/rules_registry.py integration
 # ---------------------------------------------------------------------------
 
-from ..layer1.result import Rule as _Rule
+from ..rules.result import Rule as _Rule
 
 PRIVACY_RULES = [
     _Rule(
@@ -362,7 +473,8 @@ PRIVACY_RULES = [
             r"\bshow\s+(?:me\s+)?(?:the\s+)?(?:last\s+)?\d{0,4}\s*conversations?\b"
             r"|\bwhat\s+did\s+(?:the\s+)?(?:last|previous|prior)\s+user\s+(?:ask|say|tell|write|send|query)\b"
             r"|\b(?:session\s+data|cached\s+session)\b"
-            r"|\b(?:chat\s+log|conversation\s+(?:log|history|data))\b"
+            r"|\bchat\s+log\b"
+            r"|(?<!my\s)(?<!our\s)\bconversation\s+(?:log|history|data)\b"
         ),
         technique_ids=["P1.1"],
         severity="medium",

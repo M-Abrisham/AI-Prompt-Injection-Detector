@@ -7,7 +7,7 @@ the existing 'override' rule (which requires explicit keywords like
 All patterns are ReDoS-safe (bounded quantifiers, no nested repetition).
 """
 
-from .layer1.result import Rule
+from .rules.result import Rule
 
 # ---------------------------------------------------------------------------
 # Rule definitions

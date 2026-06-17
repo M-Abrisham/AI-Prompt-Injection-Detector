@@ -29,11 +29,11 @@ rule_count:
     count: 4
   - alias: _RECON_RULES
     source_attr: RECON_RULES
-    source_file: src/na0s/recon_detector.py
+    source_file: src/na0s/detectors/recon.py
     count: 5
   - alias: _PRIVACY_RULES
     source_attr: PRIVACY_RULES
-    source_file: src/na0s/privacy_probe_detector.py
+    source_file: src/na0s/detectors/privacy_probe.py
     count: 6
   - alias: _COMPLIANCE_RULES
     source_attr: RULES
@@ -41,8 +41,8 @@ rule_count:
     count: 4
   total_ast: 120
 taxonomy:
-  category_count: 29
-  technique_count_total: 276
+  category_count: 30
+  technique_count_total: 278
   techniques_by_category:
     D1: 22
     D2: 4
@@ -73,11 +73,12 @@ taxonomy:
     AB: 12
     MB: 15
     C1MT: 6
+    BEN: 2
 test_count:
-  count: 8653
-  collection_errors: 8
-  pytest_exit_code: 2
-test_files: 265
+  count: 9167
+  collection_errors: 0
+  pytest_exit_code: 0
+test_files: 284
 detection_signals_in_scan:
   filter_doc: Names matching prefixes (detect_, scan_, analyze_, extract_, score_,
     compute_, classify*, predict*, get_, sniff_) plus an exact-match allowlist for
@@ -128,26 +129,26 @@ constants:
   _CHUNK_WORD_THRESHOLD: 512
 L16_detectors:
 - name: ContextPoisoningDetector
-  file: src/na0s/layer16/detectors/context_poisoning.py
+  file: src/na0s/conversation/detectors/context_poisoning.py
   line: 263
 - name: CoTComplianceDetector
-  file: src/na0s/layer16/detectors/cot_compliance.py
+  file: src/na0s/conversation/detectors/cot_compliance.py
   line: 166
 - name: EmbeddingDriftDetector
-  file: src/na0s/layer16/detectors/embedding_drift.py
+  file: src/na0s/conversation/detectors/embedding_drift.py
   line: 115
 - name: EscalationDetector
-  file: src/na0s/layer16/detectors/escalation.py
+  file: src/na0s/conversation/detectors/escalation.py
   line: 86
 - name: FabricatedHistoryDetector
-  file: src/na0s/layer16/detectors/fabricated_history.py
+  file: src/na0s/conversation/detectors/fabricated_history.py
   line: 44
 - name: PayloadSplittingDetector
-  file: src/na0s/layer16/detectors/payload_splitting.py
-  line: 220
+  file: src/na0s/conversation/detectors/payload_splitting.py
+  line: 223
 - name: SchemingDetector
-  file: src/na0s/layer16/detectors/scheming.py
+  file: src/na0s/conversation/detectors/scheming.py
   line: 298
 - name: BehavioralStylometryDetector
-  file: src/na0s/layer16/detectors/stylometry.py
+  file: src/na0s/conversation/detectors/stylometry.py
   line: 397

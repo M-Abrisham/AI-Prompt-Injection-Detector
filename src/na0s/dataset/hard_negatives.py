@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from na0s.rules import rule_score
-from na0s.safe_pickle import safe_load
+from na0s.integrity.safe_pickle import safe_load
 
 # ---------------------------------------------------------------------------
 # Paths (relative to project root)

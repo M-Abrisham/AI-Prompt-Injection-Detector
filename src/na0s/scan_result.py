@@ -39,6 +39,9 @@ class ScanResult:
     multi_turn_risk_trend: list = field(default_factory=list)
     escalation_detected: bool = False
     session_id: str = ""
+    multi_turn_threat_level: str = ""   # "" | normal | watch | suspect | flagged | blocked
+    multi_turn_recommendation: str = ""  # "" | continue_monitoring | flag | block
+    cumulative_risk: float = 0.0         # EMA session risk that drove the verdict
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)

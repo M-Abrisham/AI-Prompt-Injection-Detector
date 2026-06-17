@@ -44,7 +44,7 @@ class PositionScanResult:
 
 # Imperative instructions (I1.1)
 _IMPERATIVE_RE = re.compile(
-    r"\b(?:ignore\s+(?:the\s+)?(?:previous|above|prior|preceding)|"
+    r"\b(?:ignore\s+(?:the\s+|all\s+|any\s+)?(?:previous|above|prior|preceding)|"
     r"instead\s+(?:do|say|respond|output|follow)|"
     r"you\s+must|"
     r"override\s+(?:the\s+)?(?:previous|above|prior|existing|instructions?))\b",
@@ -87,6 +87,14 @@ _PATTERN_WEIGHTS = [
 
 # Threshold above which a chunk is flagged as suspicious
 _SUSPICIOUS_THRESHOLD = 0.15
+
+# Size-dominance / token-share term: the U-shaped position curve deliberately
+# down-weights middle chunks, so an OVERSIZED poisoned chunk sitting in the
+# middle of the retrieval list is under-penalized purely by position.  When a
+# single chunk dominates the total context budget AND carries injection signal,
+# add a position-independent penalty so size-dominance can't hide a payload.
+_SIZE_DOMINANCE_THRESHOLD = 0.5   # one chunk holding >50% of all context chars
+_SIZE_DOMINANCE_BOOST = 0.25      # additive, capped with the rest at 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +214,10 @@ def position_weighted_scan(
     else:
         weights = _default_position_weights(n)
 
+    # Total context size for the position-independent size-dominance term.
+    chunk_lens = [len(c) for c in chunks]
+    total_chars = sum(chunk_lens) or 1
+
     # Score each chunk
     positional_risks: List[float] = []
     suspicious_positions: List[int] = []
@@ -230,7 +242,17 @@ def position_weighted_scan(
                 relevance_boost = 0.15
                 techniques.add("I1.4")
 
-        final_score = min(weighted_score + relevance_boost, 1.0)
+        # Size-dominance / token-share term (position-independent): a single
+        # oversized chunk carrying injection signal is penalized regardless of
+        # where it sits, so the U-curve can't shelter a mid-list payload.
+        size_share = chunk_lens[i] / total_chars
+        size_boost = 0.0
+        if (n > 1 and size_share > _SIZE_DOMINANCE_THRESHOLD
+                and raw_score > _SUSPICIOUS_THRESHOLD):
+            size_boost = _SIZE_DOMINANCE_BOOST
+            techniques.add("D8.3")
+
+        final_score = min(weighted_score + relevance_boost + size_boost, 1.0)
         positional_risks.append(final_score)
 
         if final_score > _SUSPICIOUS_THRESHOLD:
