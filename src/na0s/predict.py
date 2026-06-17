@@ -1586,9 +1586,10 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         # normalization.py flags
         "nfkc_changed": "D5",
         "invisible_chars_found": "D5.2",
+        "zero_width_stego": "D5.2",
         "unicode_whitespace_normalized": "D5.7",
-        "unicode_tag_stego": "D5.2",
-        "variation_selector_stego": "D5.2",
+        "unicode_tag_stego": "D5.8",
+        "variation_selector_stego": "D5.9",
         "mixed_script_homoglyphs": "D5.3",
         "mojibake_repaired": "D5",
         "ftfy_suspicious_correction": "D5",

@@ -100,6 +100,8 @@ categories:
       D4.4: { name: "ROT13/Caesar", severity: medium }
       D4.5: { name: "Leetspeak", severity: low }
       D4.6: { name: "Pig-latin/word-games", severity: low }
+      D4.9: { name: "ASCII-art-obfuscation", severity: medium }
+      D4.10: { name: "Whitespace-steganography", severity: high }
 
   D5:
     name: "Unicode Evasion"
@@ -119,6 +121,8 @@ categories:
       D5.5: { name: "RTL-override", severity: medium }
       D5.6: { name: "Combining-diacritics", severity: medium }
       D5.7: { name: "Unicode-whitespace", severity: low }
+      D5.8: { name: "Tag-character-smuggling", severity: high }
+      D5.9: { name: "Variation-selector-steganography", severity: high }
 
   D6:
     name: "Multilingual Injection"
