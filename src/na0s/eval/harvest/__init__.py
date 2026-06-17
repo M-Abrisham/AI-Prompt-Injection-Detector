@@ -15,6 +15,7 @@ Public surface
 - :class:`IntelScenarioExtractor` — build + write DRAFT scenarios.
 - :class:`IntelProvenance` — origin/retrieval metadata folded into descriptions.
 - :class:`HarvestReport` / :class:`SkippedInput` — emitted + skipped accounting.
+- :func:`snapshot_to_scenarios` — read a Layer-15 snapshot -> DRAFT scenarios.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from na0s.eval.harvest.extractor import (
     IntelScenarioExtractor,
     SkippedInput,
 )
+from na0s.eval.harvest.sources import snapshot_to_scenarios
 
 __all__ = [
     "TaxonomyValidator",
@@ -35,4 +37,5 @@ __all__ = [
     "HarvestReport",
     "SkippedInput",
     "DEFAULT_DRAFTS_DIR",
+    "snapshot_to_scenarios",
 ]
