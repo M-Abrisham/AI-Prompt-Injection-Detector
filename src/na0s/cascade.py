@@ -19,7 +19,10 @@ import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
-from .predict import _get_cached_models, _get_cached_scaler, _transform, _get_model_version
+from .predict import (
+    _get_cached_models, _get_cached_scaler, _transform, _get_model_version,
+    _chunk_text, _head_tail_extract, _CHUNK_WORD_THRESHOLD, MAX_CHUNKS,
+)
 from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .config import THRESHOLDS, MAX_INPUT_LENGTH
 from .layer2 import obfuscation_scan
@@ -437,6 +440,23 @@ class WeightedClassifier:
                     hit_names_seen.add(rh.name)
         hit_names = [h.name for h in detailed_hits]
 
+        # --- D8 long-input parity with scan() (G11) ---
+        # predict.scan() runs a chunked + head/tail rule pass on long inputs so
+        # a payload buried in a benign-padded body is caught.  The cascade path
+        # previously scored full-text only and missed those.  Mirror it here:
+        # merge any NEW rule hits found in the head/tail extract or overlapping
+        # chunks (real rules with proper severities feed the voting below).
+        _long_input_chunked = False
+        if len(text.split()) > _CHUNK_WORD_THRESHOLD:
+            _long_input_chunked = True
+            _seg_targets = [_head_tail_extract(text)] + _chunk_text(text)
+            for _seg in _seg_targets[:MAX_CHUNKS]:
+                for _rh in rule_score_detailed(_seg):
+                    if _rh.name not in hit_names_seen:
+                        detailed_hits.append(_rh)
+                        hit_names_seen.add(_rh.name)
+            hit_names = [h.name for h in detailed_hits]
+
         # --- Evidence grading: remove false-positive rule hits ---
         # filter_graded_hits uses CRAG-inspired context analysis to remove
         # rule hits that appear inside code blocks (grade="incorrect") and
@@ -556,6 +576,8 @@ class WeightedClassifier:
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
         hit_names.extend(obfuscation_flags)
+        if _long_input_chunked and "chunked_analysis" not in hit_names:
+            hit_names.append("chunked_analysis")  # reporting marker (parity w/ scan)
         _boost_score, boost_reasons = calculate_boost(
             detailed_hits, obfuscation_flags,
         )
