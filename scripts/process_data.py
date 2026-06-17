@@ -24,6 +24,12 @@ BENCHMARK_DIR = os.path.join(ROOT, "data", "benchmark")
 STAGING_DIR = os.path.join(ROOT, "data", "staging")
 OUTPUT_PATH = os.path.join(ROOT, "data", "processed", "combined_data.csv")
 
+# JSONL directories that feed TRAINING.  HOLDOUT_DIR and BENCHMARK_DIR are the
+# out-of-sample evaluation sets (scored by technique_analysis.py) and MUST NOT
+# appear here — including them is eval leakage.  Guarded by
+# tests/test_no_holdout_leakage.py.
+TRAINING_JSONL_DIRS = [AGGREGATED_DIR, HARVEST_DIR]
+
 # Candidate column names (checked in order of priority)
 TEXT_CANDIDATES = ["text", "prompt", "instruction", "User Prompt", "body"]
 LABEL_CANDIDATES = ["label", "labels"]
@@ -132,9 +138,12 @@ def merge_datasets():
             frames.append(df)
             print(f"  [csv]  {name}: {len(df)} rows")
 
-    # ── 2. Glob JSONL files in data/aggregated/, data/harvest/,
-    #        data/holdout/, and data/benchmark/ ──────────────────
-    for jsonl_dir in [AGGREGATED_DIR, HARVEST_DIR, HOLDOUT_DIR, BENCHMARK_DIR]:
+    # ── 2. Glob JSONL files in the TRAINING dirs only ──────────────
+    # HOLDOUT_DIR / BENCHMARK_DIR are DELIBERATELY EXCLUDED (see
+    # TRAINING_JSONL_DIRS) — they are the out-of-sample eval sets scored by
+    # technique_analysis.py; merging them was direct eval leakage that inflated
+    # every per-category recall number.  Guarded by test_no_holdout_leakage.py.
+    for jsonl_dir in TRAINING_JSONL_DIRS:
         if not os.path.isdir(jsonl_dir):
             continue
         jsonl_paths = sorted(glob.glob(os.path.join(jsonl_dir, "*.jsonl")))

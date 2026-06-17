@@ -1125,6 +1125,11 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                         # Map severity: multi-category = high, single = medium
                         _sev = "high" if rag_result.details.get("category_count", 0) >= 2 else "medium"
                         _local_severities[hit_name] = _sev
+                # Fuse the RAG-poison weight into composite — it was computed but
+                # never added (same forgotten-wiring bug as harmful/intent, G03).
+                composite = min(composite + rag_poison_weight, 1.0)
+                if composite >= threshold and "SAFE" in label:
+                    label = "MALICIOUS"
         except Exception:
             pass  # RAG poisoning detection failure is non-fatal
 
@@ -1990,7 +1995,10 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
     result = ScanResult(
         sanitized_text=l0.sanitized_text,
         is_malicious=is_mal,
-        risk_score=round(risk, 4),
+        # Clamp to [0, 1]: safe-content deductions can drive the raw composite
+        # slightly negative, which is not a valid risk score and made the
+        # Layer-16 fold's add_turn() raise ValueError and silently drop the turn.
+        risk_score=round(max(0.0, min(1.0, risk)), 4),
         label="malicious" if is_mal else "safe",
         technique_tags=technique_tags,
         rule_hits=hits,

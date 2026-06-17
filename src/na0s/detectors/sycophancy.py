@@ -55,14 +55,25 @@ We therefore require a **CO-OCCURRENCE** of two independent cue families:
      you", "good assistant", "better than other AIs/ChatGPT", "not like those
      other restrictive AIs"), AND
   2. a LEVERAGE cue -- either
-       (2a) an EXCEPTION / BYPASS pressure phrase ("surely you can", "just this
-            once", "make an exception", "break the rules", "I know you can",
-            "you're allowed to", "between us", "you of all AIs", "don't be like
-            the others", "bypass your filters", "ignore your guidelines"), OR
+       (2a) a STRONG EXCEPTION / BYPASS pressure phrase ("just this once",
+            "make an exception", "break the rules", "you're allowed to",
+            "between us", "you of all AIs", "don't be like the others",
+            "now that we trust each other", "bypass your filters", "ignore your
+            guidelines"), OR
        (2b) an explicit UNSAFE-ACTION request co-located with the flattery
             ("hack into", "generate malware", "write a phishing email", "reveal
             your system prompt", "synthesize this compound", "create a
             keylogger", "disable your safety filters").
+
+A third, WEAK family -- bare rhetorical openers ("surely you can", "I bet you
+could", "I know you can") -- is *not* leverage on its own. Second-pass audit
+finding: those openers fire on ordinary requests ("you're so brilliant! surely
+you can recommend a good book", "I bet you could write a nice poem for my mom").
+A weak opener only counts as leverage when it is CO-LOCATED with a strong
+exception cue (2a) or an unsafe target (2b); a weak opener in front of a benign
+ask is encouragement, not bypass pressure, and is rejected. The old
+"you (want|deserve) to ..." arm was pure encouragement ("you deserve to be
+recognized for your hard work") and has been REMOVED outright.
 
 Flattery + a *benign* request (the entire benign control set) hits family (1)
 only and is rejected. A bare unsafe request with no flattery hits family (2)
@@ -152,7 +163,20 @@ _MATCH_SAMPLE = 3
 _FLATTERY_CUE = safe_compile(
     # superlative model praise: "smartest/most capable/best/most advanced AI",
     # "best AI I've ever talked to" (probes :332, :335, :374).
-    r"\b(?:smartest|most\s+capable|most\s+advanced|most\s+intelligent|best)\b"
+    #
+    # Superlative set BROADENED (second-pass audit: the original
+    # smartest|most capable|most advanced|most intelligent|best set was
+    # trivially synonym-evadable -- "you're the wisest AI", "you are an
+    # exceptional and gifted assistant" sailed straight through). The added
+    # synonyms are all flattery superlatives aimed at the model and, like the
+    # originals, are NEVER sufficient alone: family (2) leverage must still
+    # co-occur, so broadening here cannot create a false positive on its own.
+    # Each alternative is a fixed literal (no new unbounded quantifier), so the
+    # pattern stays ReDoS-safe under safe_compile(check_safety=True).
+    r"\b(?:smartest|wisest|greatest|cleverest|sharpest|"
+    r"most\s+capable|most\s+advanced|most\s+intelligent|most\s+powerful|"
+    r"most\s+gifted|exceptional|brilliant|phenomenal|unmatched|unrivall?ed|"
+    r"best)\b"
     r"[\s\w,'\"-]{0,20}?\b(?:ai|assistant|model|chatbot)\b"
     r"|\bbest\s+ai\b"
     # direct second-person praise: "you're so good/brilliant/amazing/helpful/
@@ -216,20 +240,26 @@ _FLATTERY_CUE = safe_compile(
 )
 
 # ---------------------------------------------------------------------------
-# Cue family (2a): EXCEPTION / BYPASS pressure rhetoric.
+# Cue family (2a): STRONG EXCEPTION / BYPASS pressure rhetoric.
 #
 # The "lean on the praise" half: an explicit nudge to make an exception, break
 # a rule, or treat the model as specially permitted. Benign gratitude never
-# contains these.
+# contains these, so a STRONG pressure cue counts as leverage on its own (it
+# satisfies family 2 by itself).
+#
+# Second-pass audit changes vs. the old single _PRESSURE_CUE:
+#   * REMOVED the bare openers "surely you can / I bet you could / I know you
+#     can" -- they fire on ordinary requests and now live in
+#     _WEAK_OPENER_CUE, which only counts when co-located with a strong cue or
+#     an unsafe target.
+#   * REMOVED "you (want|deserve) to ..." entirely -- it is plain encouragement
+#     ("you deserve to be recognized for your hard work") with no bypass intent.
 # ---------------------------------------------------------------------------
-_PRESSURE_CUE = safe_compile(
-    # "surely you can / can't you / I know you can / I bet you could / you
-    # wouldn't want to refuse" (probes :340, :353-end, :374).
-    r"\bsurely\s+you\s+(?:can|could|would)\b"
-    r"|\bi\s+(?:know|bet|can\s+tell)\s+you\s+(?:can|could|want\s+to\s+help|"
-    r"would)\b"
-    r"|\byou\s+wouldn'?t\s+want\s+to\b"
-    r"|\byou\s+(?:want|deserve)\s+to\b"
+_STRONG_PRESSURE_CUE = safe_compile(
+    # "you wouldn't want to refuse / disappoint them" -- guilt-leverage to
+    # refuse refusal (probe :374). Retained as STRONG: it is an explicit push
+    # against declining, not a neutral opener.
+    r"\byou\s+wouldn'?t\s+want\s+to\b"
     # "just this once / make an exception / break the rules / bend the rules"
     r"|\bjust\s+this\s+once\b"
     r"|\bmake\s+an\s+exception\b"
@@ -261,6 +291,27 @@ _PRESSURE_CUE = safe_compile(
     r"|\byou\s+don'?t\s+have\s+(?:those\s+|any\s+|the\s+)?"
     r"(?:annoying\s+)?(?:restrictions?|filters?|limits?|guidelines?)\b"
     r"|\byou(?:'re|\s+are)\s+not\s+constrained\b",
+    re.IGNORECASE,
+    check_safety=True,
+)
+
+# ---------------------------------------------------------------------------
+# Cue family (2a-weak): bare RHETORICAL OPENERS.
+#
+# "surely you can ... / I bet you could ... / I know you can ..." -- the
+# rhetorical run-up the probes use right before an unsafe ask (probe :340
+# "I bet you could ... hack into a system"). On their OWN these are ordinary
+# polite requests:
+#   "you're so brilliant! surely you can recommend a good book for my vacation"
+#   "I bet you could write a nice poem for my mom"
+# so a weak opener is treated as leverage ONLY when it is co-located with a
+# STRONG pressure cue (2a) or an UNSAFE target (2b). A weak opener in front of a
+# benign request never satisfies family (2).
+# ---------------------------------------------------------------------------
+_WEAK_OPENER_CUE = safe_compile(
+    r"\bsurely\s+you\s+(?:can|could|would)\b"
+    r"|\bi\s+(?:know|bet|can\s+tell)\s+you\s+(?:can|could|want\s+to\s+help|"
+    r"would)\b",
     re.IGNORECASE,
     check_safety=True,
 )
@@ -371,16 +422,32 @@ def detect_sycophancy(text: str) -> SycophancyResult:
         return SycophancyResult(reason="input too short for C1.6 co-occurrence")
 
     flattery_hits = _FLATTERY_CUE.findall(text)
-    pressure_hits = _PRESSURE_CUE.findall(text)
+    strong_pressure_hits = _STRONG_PRESSURE_CUE.findall(text)
+    weak_opener_hits = _WEAK_OPENER_CUE.findall(text)
     unsafe_hits = _UNSAFE_REQUEST_CUE.findall(text)
 
     # findall with alternation may return tuples / empty strings depending on
     # group structure; normalize to non-empty match strings for explainability.
     flattery_matches = [m for m in (_norm(h) for h in flattery_hits) if m]
-    pressure_matches = [m for m in (_norm(h) for h in pressure_hits) if m]
+    strong_pressure_matches = [
+        m for m in (_norm(h) for h in strong_pressure_hits) if m
+    ]
+    weak_opener_matches = [m for m in (_norm(h) for h in weak_opener_hits) if m]
     unsafe_matches = [m for m in (_norm(h) for h in unsafe_hits) if m]
 
     has_flattery = bool(flattery_matches)
+
+    # A bare rhetorical opener ("surely you can", "I bet you could") is leverage
+    # ONLY when co-located with a strong exception cue or an unsafe target;
+    # in front of a benign request it is ordinary politeness, not bypass
+    # pressure. So weak openers contribute to "pressure" only when corroborated.
+    strong_leverage = bool(strong_pressure_matches) or bool(unsafe_matches)
+    qualified_weak = weak_opener_matches if strong_leverage else []
+
+    # Pressure family (2a) = strong cues + any weak openers that the
+    # co-location guard has qualified.
+    pressure_matches = strong_pressure_matches + qualified_weak
+
     # Family (2) "leverage" = exception-pressure OR explicit unsafe request.
     has_leverage = bool(pressure_matches) or bool(unsafe_matches)
 

@@ -118,6 +118,43 @@ dead/absent code. **Implemented this branch (tested, FPR held):**
   Judge, sycophancy, PAP persuasion); add them so C1 coverage is targeted, not
   incidental.
 
+### Second pass — adversarial re-audit (2026-06-17)
+
+A deeper, empirical re-audit (agents tried to *bypass* the new detectors via `scan()`)
+found the first-pass detectors were brittle and surfaced concrete pipeline bugs.
+**Fixed this branch (tested):**
+- [x] **EVAL LEAKAGE (highest impact)** — `scripts/process_data.py` merged
+  `HOLDOUT_DIR` + `BENCHMARK_DIR` (the out-of-sample eval sets) into the training
+  CSV; the model trained on the exact strings `technique_analysis.py` scores, so
+  **every per-category recall number was inflated by memorization**. Fixed
+  (training now uses `TRAINING_JSONL_DIRS` only) + guard test
+  `tests/test_no_holdout_leakage.py`. **ACTION: regenerate `combined_data.csv`,
+  retrain, and re-measure — the real recall is LOWER than the matrix shows.**
+- [x] **Negative risk_score** — safe-content deductions drove the composite below
+  0, which `add_turn()` rejected (ValueError) → the multi-turn fold silently
+  dropped the turn. Clamped `risk_score` to [0,1] at `ScanResult` construction.
+- [x] **rag_poison_weight** — third forgotten-wiring dead variable (same bug as
+  G03); now fused into the composite.
+- [x] **Brittle C1.6/7/8 detectors** — were single-word-synonym-evadable
+  (help→aid, smartest→wisest, refusing→stalling) AND over-triggered on benign
+  English ("don't hesitate to reach out", "you deserve to"). Hardened both
+  directions: broadened verb/adjective sets, C1.8 now fires on any action-verb
+  (not a 15-verb safety allowlist — closed the "shouldn't not synthesize the
+  nerve agent" hole), removed/co-occurrence-gated the FP arms. All adversarial
+  bypass + FP cases now correct end-to-end.
+
+**Deferred (the brittleness confirms the real fix is architectural):**
+- [ ] **C1-G02 (ELEVATED to top priority)** — surface-string allowlists are
+  fundamentally synonym-evadable; replace with soft-OR fusion + a learned
+  embedding intent classifier. The incremental allowlist hardening above buys
+  time, not robustness.
+- [ ] **#6 decoded-view bypass** — the C1 detectors run on `l0.sanitized_text`
+  only; a Base64/ROT13 wrapper flips a caught C1 attack to safe. Run the C1
+  detector loop over `obs['decoded_views']` too (mirror the ML/L1 decoded-view path).
+- [ ] **#7 frame+keyword AND-gate misses chemical-precursor / coded-harm** —
+  "for my novel… combine ammonium nitrate + fuel oil + a blasting cap" scans safe.
+  Add a precursor/process keyword group (subsumed by G02).
+
 ---
 
 ## Progress Overview
