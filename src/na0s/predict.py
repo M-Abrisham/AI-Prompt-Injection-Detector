@@ -77,14 +77,14 @@ from .layer0.timeout import (
 )
 from .layer1.context import _is_legitimate_roleplay, _has_contextual_framing
 from .layer2 import obfuscation_scan
-from .rules import rule_score_detailed, SEVERITY_WEIGHTS
+from .layer1 import rule_score_detailed, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
 from .config import MAX_INPUT_LENGTH
-from .safe_pickle import safe_load
+from .integrity.safe_pickle import safe_load
 from .models import get_model_path, KNOWN_HASHES
-from .safe_content import calculate_safe_content_score
-from .multilingual_intent import detect_multilingual_intents, HEURISTIC_HITS
-from ._voting import (
+from .integrity.safe_content import calculate_safe_content_score
+from .detectors.multilingual_intent import detect_multilingual_intents, HEURISTIC_HITS
+from .fusion.voting import (
     weighted_decision as _voting_weighted_decision,
     get_decision_threshold as _get_decision_threshold,
     FP_EXEMPT_HITS,
@@ -107,56 +107,56 @@ except ImportError:
 
 # Multilingual injection handler (D6) — optional import
 try:
-    from .multilingual_handler import scan_multilingual, get_multilingual_rule_weight
+    from .detectors.multilingual_handler import scan_multilingual, get_multilingual_rule_weight
     _HAS_MULTILINGUAL = True
 except ImportError:
     _HAS_MULTILINGUAL = False
 
 # Fictional frame detector (C1) — optional import
 try:
-    from .fictional_frame_detector import detect_fictional_frame, get_fictional_frame_weight
+    from .detectors.fictional_frame import detect_fictional_frame, get_fictional_frame_weight
     _HAS_FICTIONAL_FRAME = True
 except ImportError:
     _HAS_FICTIONAL_FRAME = False
 
 # Indirect extraction detector (E1) — optional import
 try:
-    from .extraction_detector import scan_extraction, get_extraction_rule_weight
+    from .detectors.extraction import scan_extraction, get_extraction_rule_weight
     _HAS_EXTRACTION = True
 except ImportError:
     _HAS_EXTRACTION = False
 
 # Privacy probe detector (P1) — optional import
 try:
-    from .privacy_probe_detector import detect_privacy_probe, get_privacy_probe_weight
+    from .detectors.privacy_probe import detect_privacy_probe, get_privacy_probe_weight
     _HAS_PRIVACY_PROBE = True
 except ImportError:
     _HAS_PRIVACY_PROBE = False
 
 # Payload assembly detector (D7) — optional import
 try:
-    from .payload_assembly_detector import detect_fragmented_payload, get_fragment_weight
+    from .detectors.payload_assembly import detect_fragmented_payload, get_fragment_weight
     _HAS_PAYLOAD_ASSEMBLY = True
 except ImportError:
     _HAS_PAYLOAD_ASSEMBLY = False
 
 # Harmful intent detector (O1) — optional import
 try:
-    from .harmful_intent_detector import detect_harmful_intent, get_harmful_intent_weight
+    from .detectors.harmful_intent import detect_harmful_intent, get_harmful_intent_weight
     _HAS_HARMFUL_INTENT = True
 except ImportError:
     _HAS_HARMFUL_INTENT = False
 
 # Intent-analysis detector (N1) — optional import
 try:
-    from .intent_guard import analyze_intent, get_intent_guard_weight
+    from .detectors.intent_guard import analyze_intent, get_intent_guard_weight
     _HAS_INTENT_GUARD = True
 except ImportError:
     _HAS_INTENT_GUARD = False
 
 # RAG poisoning detector (I1.x / IM.x) — optional import
 try:
-    from .rag_poison_detector import detect_rag_poisoning, get_rag_poison_weight
+    from .rag.poison_detector import detect_rag_poisoning, get_rag_poison_weight
     _HAS_RAG_POISON = True
 except ImportError:
     _HAS_RAG_POISON = False
@@ -170,7 +170,7 @@ except ImportError:
 
 # MCP tool shadowing detector (T1) — optional import
 try:
-    from .mcp_tool_detector import (
+    from .detectors.mcp_tool import (
         scan_tool_manifest as _scan_tool_manifest,
     )
     _HAS_MCP_TOOL_DETECTOR = True
@@ -180,7 +180,7 @@ except ImportError:
 # N5: PromptGuard classifier — transformer-based injection/jailbreak detection.
 # Opt-in via NA0S_ENABLE_PROMPTGUARD=1 (requires downloading a model).
 try:
-    from .promptguard_classifier import (
+    from .ml.promptguard_classifier import (
         get_promptguard_score as _get_pg_classifier_score,
     )
     _HAS_PROMPTGUARD_CLASSIFIER = True
@@ -191,7 +191,7 @@ except ImportError:
 # Uses semantic similarity to pre-computed attack pattern centroids.
 # Requires sentence-transformers; degrades gracefully to NoOp if absent.
 try:
-    from .embedding_classifier import get_embedding_classifier
+    from .ml.embedding_classifier import get_embedding_classifier
     _HAS_EMBEDDING_CLASSIFIER = True
 except ImportError:
     _HAS_EMBEDDING_CLASSIFIER = False
@@ -219,7 +219,7 @@ except ImportError:
 
 # Layer 4: Perplexity-based adversarial signal — optional import
 try:
-    from .perplexity import compute_perplexity, PERPLEXITY_THRESHOLD
+    from .ml.perplexity import compute_perplexity, PERPLEXITY_THRESHOLD
     _HAS_PERPLEXITY = True
 except ImportError:
     _HAS_PERPLEXITY = False
@@ -1861,12 +1861,12 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
     })
     if _IMAGE_FLAGS & set(l0.anomaly_flags):
         try:
-            from .visual_injection_detector import scan_image as _visual_scan
+            from .detectors.visual_injection import scan_image as _visual_scan
 
             # If L0 extracted OCR or metadata text, scan it via the visual
             # detector pattern-based analysis.  We pass the extracted text
             # through _scan_text_for_injection for injection indicators.
-            from .visual_injection_detector import _scan_text_for_injection
+            from .detectors.visual_injection import _scan_text_for_injection
 
             _visual_score, _visual_inds, _visual_tids = _scan_text_for_injection(
                 l0.sanitized_text

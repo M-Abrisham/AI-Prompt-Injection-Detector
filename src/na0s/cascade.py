@@ -23,16 +23,16 @@ from .predict import (
     _get_cached_models, _get_cached_scaler, _transform, _get_model_version,
     _chunk_text, _head_tail_extract, _CHUNK_WORD_THRESHOLD, MAX_CHUNKS,
 )
-from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
+from .layer1 import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .config import THRESHOLDS, MAX_INPUT_LENGTH
 from .layer2 import obfuscation_scan
 from .layer0 import layer0_sanitize
 from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult
 from .models import get_model_path
-from .signal_boost import calculate_boost
-from ._voting import weighted_decision as _voting_weighted_decision
-from .complexity_router import (
+from .fusion.signal_boost import calculate_boost
+from .fusion.voting import weighted_decision as _voting_weighted_decision
+from .fusion.complexity_router import (
     assess_complexity, get_pipeline_stages, is_adaptive_routing_enabled,
 )
 
@@ -41,20 +41,20 @@ import numpy as np
 _logger = logging.getLogger(__name__)
 
 # Layer 6: RRF fusion — optional alternative to linear weighted voting
-from .rrf_fusion import rrf_decision as _rrf_decision
+from .fusion.rrf import rrf_decision as _rrf_decision
 
 # Layer 6: Groundedness check
-from .groundedness import verify_verdict_grounded as _verify_grounded
+from .fusion.groundedness import verify_verdict_grounded as _verify_grounded
 
 # Layer 6: Performance SLO tracking
-from .performance_slo import SLOTracker
+from .fusion.performance_slo import SLOTracker
 
 # Layer 6: Evidence grading (imported for test-patchability)
-from .evidence_grading import filter_graded_hits
+from .fusion.evidence_grading import filter_graded_hits
 
 # N5: PromptGuard transformer classifier — optional
 try:
-    from .promptguard_classifier import (
+    from .ml.promptguard_classifier import (
         get_promptguard_score as _get_pg_classifier_score,
     )
     _HAS_PROMPTGUARD_CLASSIFIER = True
@@ -97,7 +97,7 @@ except ImportError:
 # ``enable_ensemble=True`` (Path A) which uses ensemble.py for a principled
 # weighted average of calibrated probabilities from both models.
 try:
-    from .predict_embedding import classify_prompt_embedding, load_models as _load_embedding_models
+    from .ml.predict_embedding import classify_prompt_embedding, load_models as _load_embedding_models
     _HAS_EMBEDDING = True
 except ImportError:
     _HAS_EMBEDDING = False
@@ -107,7 +107,7 @@ except ImportError:
 # signals.  Uses ensemble.py which does a proper weighted average of
 # calibrated P(malicious) from both models.
 try:
-    from .ensemble import ensemble_scan as _ensemble_scan
+    from .fusion.ensemble import ensemble_scan as _ensemble_scan
     _HAS_ENSEMBLE = True
 except ImportError:
     _HAS_ENSEMBLE = False
@@ -121,7 +121,7 @@ except ImportError:
 # capped (NA0S_EMBEDDING_MAX_SCORE, default 0.20), so this is safe to wire on
 # by default exactly like scan().
 try:
-    from .embedding_classifier import get_embedding_classifier as _get_centroid_classifier
+    from .ml.embedding_classifier import get_embedding_classifier as _get_centroid_classifier
     _HAS_EMBEDDING_CENTROID = True
 except ImportError:
     _HAS_EMBEDDING_CENTROID = False
@@ -131,7 +131,7 @@ if os.environ.get("NA0S_EMBEDDING_ENABLED", "").strip().lower() in ("0", "false"
 
 # Layer 7: LLM checker — optional import
 try:
-    from .llm_checker import LLMChecker
+    from .judge.checker import LLMChecker
     _HAS_LLM_CHECKER = True
 except ImportError:
     _HAS_LLM_CHECKER = False
@@ -491,7 +491,7 @@ class WeightedClassifier:
         if os.environ.get("NA0S_USE_RRF") == "1":
             rrf_signals = {"ml": ml_prob_malicious}
             if hit_names:
-                from .rules import SEVERITY_WEIGHTS as _sw
+                from .layer1 import SEVERITY_WEIGHTS as _sw
                 rule_w = 0.0
                 for hn in hit_names:
                     sev = _RULE_SEVERITIES.get(hn, "medium")
@@ -500,7 +500,7 @@ class WeightedClassifier:
             if obfuscation_flags:
                 rrf_signals["obfuscation"] = min(0.15 * len(obfuscation_flags), 0.3)
             if structural is not None:
-                from ._voting import STRUCTURAL_SIGNAL_WEIGHTS as _ssw
+                from .fusion.voting import STRUCTURAL_SIGNAL_WEIGHTS as _ssw
                 sw = sum(
                     w for feat, w in _ssw.items()
                     if structural.get(feat, 0)

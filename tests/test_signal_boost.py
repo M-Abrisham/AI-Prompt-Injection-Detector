@@ -478,7 +478,7 @@ class TestUnknownTypeDropLogging(unittest.TestCase):
     def test_dict_entry_logged(self):
         """A dict in rule_hits should be dropped AND logged."""
         import logging as _logging
-        with self.assertLogs("na0s.signal_boost", level="DEBUG") as cm:
+        with self.assertLogs("na0s.fusion.signal_boost", level="DEBUG") as cm:
             calculate_boost(
                 [RuleHit(name="override"), {"not_a_rule": True}],
                 ["base64"],
@@ -489,7 +489,7 @@ class TestUnknownTypeDropLogging(unittest.TestCase):
 
     def test_none_entry_logged(self):
         """None in rule_hits should be dropped AND logged."""
-        with self.assertLogs("na0s.signal_boost", level="DEBUG") as cm:
+        with self.assertLogs("na0s.fusion.signal_boost", level="DEBUG") as cm:
             calculate_boost(
                 ["override", None],
                 ["base64"],

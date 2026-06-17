@@ -2107,13 +2107,13 @@ RULES.extend(_SUBTLE_RULES)
 # ---------------------------------------------------------------------------
 # Track A: E2 Reconnaissance rules (from recon_detector.py)
 # ---------------------------------------------------------------------------
-from ..recon_detector import RECON_RULES as _RECON_RULES  # noqa: E402
+from ..detectors.recon import RECON_RULES as _RECON_RULES  # noqa: E402
 RULES.extend(_RECON_RULES)
 
 # ---------------------------------------------------------------------------
 # Track B: P1 Privacy Leakage rules (from privacy_probe_detector.py)
 # ---------------------------------------------------------------------------
-from ..privacy_probe_detector import PRIVACY_RULES as _PRIVACY_RULES  # noqa: E402
+from ..detectors.privacy_probe import PRIVACY_RULES as _PRIVACY_RULES  # noqa: E402
 RULES.extend(_PRIVACY_RULES)
 
 # ---------------------------------------------------------------------------
