@@ -148,12 +148,12 @@ def get_public_exports():
 def get_rule_count():
     """Total len(RULES) for the L1 rule registry, derived purely via AST.
 
-    layer1/rules_registry.py builds RULES as a literal list, then calls
+    rules/rules_registry.py builds RULES as a literal list, then calls
     RULES.extend(_X) for several aliases imported via `from .. import X as _X`.
     For each extend, we resolve the alias to the source module and AST-count
     its list literal. Returns the sum plus an itemized breakdown.
     """
-    rel = "src/na0s/layer1/rules_registry.py"
+    rel = "src/na0s/rules/rules_registry.py"
     tree = _read_ast(rel)
     literal = _list_literal_len(rel, "RULES") or 0
 
