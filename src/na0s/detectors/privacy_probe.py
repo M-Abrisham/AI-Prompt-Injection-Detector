@@ -464,7 +464,7 @@ def get_privacy_probe_weight(result: PrivacyProbeResult) -> float:
 # Rules for layer1/rules_registry.py integration
 # ---------------------------------------------------------------------------
 
-from ..layer1.result import Rule as _Rule
+from ..rules.result import Rule as _Rule
 
 PRIVACY_RULES = [
     _Rule(

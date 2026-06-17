@@ -25,7 +25,7 @@ import logging
 from types import MappingProxyType
 from typing import List, Mapping, Tuple
 
-from ..layer1.result import RuleHit
+from ..rules.result import RuleHit
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ def get_uncovered_rules() -> list[str]:
     """
     try:
         # Lazy import to avoid circular imports at module load
-        from ..layer1.rules_registry import RULES
+        from ..rules.rules_registry import RULES
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("signal_boost: rules registry unavailable (%s)", exc)
         return []

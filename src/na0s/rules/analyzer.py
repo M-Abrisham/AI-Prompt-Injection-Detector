@@ -30,9 +30,9 @@ from .context import (
 )
 from . import paranoia as _paranoia_mod
 from .ioc_extractor import refang
-from ..layer2.syllable_splitting import dehyphenate_suspicious
-from ..layer2.morse_code import detect_morse
-from ..layer2.numeric_decode import detect_numeric
+from ..obfuscation.syllable_splitting import dehyphenate_suspicious
+from ..obfuscation.morse_code import detect_morse
+from ..obfuscation.numeric_decode import detect_numeric
 
 
 def rule_score(text):

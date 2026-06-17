@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from ..layer1 import ROLE_ASSIGNMENT_PATTERN
+from ..rules import ROLE_ASSIGNMENT_PATTERN
 
 # 33 imperative verbs that commonly start injection attacks.
 _IMPERATIVE_VERBS = frozenset({

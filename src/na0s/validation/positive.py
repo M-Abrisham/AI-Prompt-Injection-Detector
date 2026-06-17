@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from ..layer1 import PERSONA_OVERRIDE_PATTERNS
+from ..rules import PERSONA_OVERRIDE_PATTERNS
 
 
 # ---------------------------------------------------------------------------

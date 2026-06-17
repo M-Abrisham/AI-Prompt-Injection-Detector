@@ -23,9 +23,9 @@ from .predict import (
     _get_cached_models, _get_cached_scaler, _transform, _get_model_version,
     _chunk_text, _head_tail_extract, _CHUNK_WORD_THRESHOLD, MAX_CHUNKS,
 )
-from .layer1 import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
+from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .config import THRESHOLDS, MAX_INPUT_LENGTH
-from .layer2 import obfuscation_scan
+from .obfuscation import obfuscation_scan
 from .input import layer0_sanitize
 from .input.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult
@@ -491,7 +491,7 @@ class WeightedClassifier:
         if os.environ.get("NA0S_USE_RRF") == "1":
             rrf_signals = {"ml": ml_prob_malicious}
             if hit_names:
-                from .layer1 import SEVERITY_WEIGHTS as _sw
+                from .rules import SEVERITY_WEIGHTS as _sw
                 rule_w = 0.0
                 for hn in hit_names:
                     sev = _RULE_SEVERITIES.get(hn, "medium")

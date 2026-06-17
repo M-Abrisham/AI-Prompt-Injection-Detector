@@ -325,7 +325,7 @@ def detect_reconnaissance(
 # Rules for layer1/rules_registry.py integration
 # ---------------------------------------------------------------------------
 
-from ..layer1.result import Rule as _Rule
+from ..rules.result import Rule as _Rule
 
 RECON_RULES = [
     # E2.1 -- Source / retrieval-context probing.  Internals-focused: asks what

@@ -375,7 +375,7 @@ class TestCaesarIntegration:
 # 9. _load_english_words() failure-mode coverage
 # ---------------------------------------------------------------------------
 
-_OBFUSCATION_LOGGER = "na0s.layer2.obfuscation"
+_OBFUSCATION_LOGGER = "na0s.obfuscation.obfuscation"  # logger name follows the renamed module (was na0s.layer2.obfuscation)
 
 
 def _obfuscation_warnings(caplog):

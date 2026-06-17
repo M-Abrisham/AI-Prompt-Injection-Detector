@@ -75,9 +75,9 @@ from .input.timeout import (
     SCAN_TIMEOUT,
     with_timeout,
 )
-from .layer1.context import _is_legitimate_roleplay, _has_contextual_framing
-from .layer2 import obfuscation_scan
-from .layer1 import rule_score_detailed, SEVERITY_WEIGHTS
+from .rules.context import _is_legitimate_roleplay, _has_contextual_framing
+from .obfuscation import obfuscation_scan
+from .rules import rule_score_detailed, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
 from .config import MAX_INPUT_LENGTH
 from .integrity.safe_pickle import safe_load
@@ -205,14 +205,14 @@ if _embedding_env in ("0", "false"):
 
 # Layer 2: ASCII art detector — optional import
 try:
-    from .layer2.ascii_art_detector import detect_ascii_art
+    from .obfuscation.ascii_art_detector import detect_ascii_art
     _HAS_ASCII_ART = True
 except ImportError:
     _HAS_ASCII_ART = False
 
 # Layer 2: Whitespace steganography detector — optional import
 try:
-    from .layer2.whitespace_stego import detect_whitespace_stego
+    from .obfuscation.whitespace_stego import detect_whitespace_stego
     _HAS_WHITESPACE_STEGO = True
 except ImportError:
     _HAS_WHITESPACE_STEGO = False
@@ -1297,7 +1297,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         label = "MALICIOUS"
 
     # --- Narrative / legitimate-role dampening ---
-    from .layer1.context import _NARRATIVE_FRAME
+    from .rules.context import _NARRATIVE_FRAME
     if threshold > 0.0 and not detailed_hits and not obs_flags:
         _is_narrative = bool(_NARRATIVE_FRAME.search(clean))
         _is_legit_role = _is_legitimate_roleplay(clean) or _is_legitimate_roleplay(text)

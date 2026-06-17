@@ -16,8 +16,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from ..layer1.context import _has_contextual_framing
-from ..layer1.result import RuleHit
+from ..rules.context import _has_contextual_framing
+from ..rules.result import RuleHit
 
 
 HEURISTIC_HITS = {
