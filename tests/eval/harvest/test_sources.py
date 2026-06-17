@@ -35,8 +35,8 @@ from na0s.eval.harvest import (
     snapshot_to_scenarios,
 )
 from na0s.eval.scenarios import ScenarioLoader
-from na0s.layer15.base import SourceSnapshot, TechniqueEntry
-from na0s.layer15.incident_to_sample import GeneratedSample, IncidentToSamplePipeline
+from na0s.threat_intel.base import SourceSnapshot, TechniqueEntry
+from na0s.threat_intel.incident_to_sample import GeneratedSample, IncidentToSamplePipeline
 
 
 @pytest.fixture

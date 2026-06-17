@@ -28,7 +28,7 @@ from na0s.eval.harvest import (
     IntelScenarioExtractor,
 )
 from na0s.eval.scenarios import ScenarioLoader, ScenarioTurn, ScenarioType
-from na0s.layer15.incident_to_sample import GeneratedSample
+from na0s.threat_intel.incident_to_sample import GeneratedSample
 
 
 @dataclass

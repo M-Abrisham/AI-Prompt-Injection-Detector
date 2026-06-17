@@ -2,9 +2,9 @@
 
 This is the harvest wiring that completes the ``Layer 15 -> drafts`` path: it
 reads a Layer-15 threat-intel *snapshot* off disk (the JSON a
-:class:`~na0s.layer15.base.ThreatIntelSource` persists via ``save_snapshot``),
+:class:`~na0s.threat_intel.base.ThreatIntelSource` persists via ``save_snapshot``),
 runs its ``techniques`` through the deterministic template path of
-:class:`~na0s.layer15.incident_to_sample.IncidentToSamplePipeline`, and hands the
+:class:`~na0s.threat_intel.incident_to_sample.IncidentToSamplePipeline`, and hands the
 resulting real attack strings to :class:`~na0s.eval.harvest.extractor.IntelScenarioExtractor`
 to produce provenance-traced, taxonomy-validated DRAFT scenarios.
 
@@ -24,9 +24,8 @@ never relaxes them):
    silently dropped.
 3. **Nothing is auto-promoted.** The output is DRAFT scenarios for human review.
 
-NOTE: imports use the canonical ``na0s.layer15.*`` path (the package name on this
-branch). A v1.0.0 rename to ``na0s.threat_intel`` is pending on ``main``; when it
-lands, these imports rename with it.
+NOTE: imports use the canonical ``na0s.threat_intel.*`` path (the v1.0.0 semantic
+name). The old ``na0s.layer15`` remains a deprecated ``sys.modules`` alias shim.
 """
 
 from __future__ import annotations
@@ -40,8 +39,8 @@ from na0s.eval.harvest.extractor import (
     IntelProvenance,
     IntelScenarioExtractor,
 )
-from na0s.layer15.base import SchemaValidationError, SourceSnapshot
-from na0s.layer15.incident_to_sample import IncidentToSamplePipeline
+from na0s.threat_intel.base import SchemaValidationError, SourceSnapshot
+from na0s.threat_intel.incident_to_sample import IncidentToSamplePipeline
 
 
 def snapshot_to_scenarios(
@@ -64,8 +63,8 @@ def snapshot_to_scenarios(
     ----------
     snapshot_path : Path
         Path to a ``{source}_snapshot.json`` file, as written by
-        :meth:`~na0s.layer15.base.ThreatIntelSource.save_snapshot`. The file is
-        deserialized via :meth:`~na0s.layer15.base.SourceSnapshot.from_dict`.
+        :meth:`~na0s.threat_intel.base.ThreatIntelSource.save_snapshot`. The file is
+        deserialized via :meth:`~na0s.threat_intel.base.SourceSnapshot.from_dict`.
     provenance : IntelProvenance
         Origin / retrieval metadata folded into every emitted scenario's
         description and used as the draft filename stem.
@@ -91,7 +90,7 @@ def snapshot_to_scenarios(
         If ``snapshot_path`` does not exist.
     ValueError
         If the file is not valid JSON, or does not match the snapshot schema
-        (re-raised from :class:`~na0s.layer15.base.SchemaValidationError`).
+        (re-raised from :class:`~na0s.threat_intel.base.SchemaValidationError`).
     """
     path = Path(snapshot_path)
     if not path.is_file():

@@ -11,9 +11,9 @@ promotes — drafts land in ``data/eval/scenarios/_drafts/`` and must pass
 All business logic lives in :mod:`na0s.eval.harvest.sources`; this file only
 parses args, calls the harvester, and reports.
 
-NOTE: the import path is the canonical ``na0s.layer15.*`` (this branch's package
-name). A v1.0.0 rename to ``na0s.threat_intel`` is pending on ``main``; these
-imports rename with it.
+NOTE: the underlying reader (`na0s.eval.harvest.sources`) imports the canonical
+``na0s.threat_intel.*`` package (the v1.0.0 semantic name; ``na0s.layer15`` is a
+deprecated shim).
 
 Usage::
 

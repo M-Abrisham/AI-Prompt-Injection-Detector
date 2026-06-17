@@ -2,7 +2,7 @@
 
 This is the deterministic, offline core of the ``threat-intel-harvester``
 capability. It converts attack strings that have already been *synced* from
-threat intel (AIID incident text via :class:`~na0s.layer15.incident_to_sample`,
+threat intel (AIID incident text via :class:`~na0s.threat_intel.incident_to_sample`,
 benchmark prompt columns, or structured intel records) into provenance-traced,
 taxonomy-validated DRAFT scenarios written to ``data/eval/scenarios/_drafts/``.
 
@@ -20,7 +20,7 @@ Design guarantees (these are the security contract, not nice-to-haves):
    ``source="harvest_pipeline"`` and the origin + retrieval date folded into
    ``description``.
 4. **No network, no external LLM.** Nothing here calls out; the LLM path in
-   :class:`~na0s.layer15.incident_to_sample.IncidentToSamplePipeline` is the
+   :class:`~na0s.threat_intel.incident_to_sample.IncidentToSamplePipeline` is the
    caller's concern — this module consumes the *output* (real text) only.
 5. **Nothing is auto-promoted.** Output is DRAFT YAML for human review.
 
