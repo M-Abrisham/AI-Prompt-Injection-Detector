@@ -52,7 +52,7 @@ Optional extras live in [pyproject.toml](pyproject.toml). Once a `pyproject_extr
 - **Semantic attacks** — fictional framing, indirect extraction, RAG poisoning, multilingual obfuscation. <!-- src: src/na0s/detectors/, src/na0s/multilingual_handler.py -->
 - **Multi-turn attacks** — fabricated history, escalation, payload splitting, scheming. **8** detectors over session state. <!-- src: src/na0s/layer16/detectors/; count via facts.yaml#L16_detectors -->
 
-Coverage spans **29** attack categories and **276** techniques. <!-- facts.yaml#taxonomy -->
+Coverage spans **30** attack categories and **278** techniques. <!-- facts.yaml#taxonomy -->
 
 ---
 
@@ -167,7 +167,7 @@ After `pip install -e .` the `na0s` shorthand is on `$PATH`. Exit codes follow t
 
 ## Taxonomy
 
-**29** categories, **276** techniques. <!-- facts.yaml#taxonomy -->
+**30** categories, **278** techniques. <!-- facts.yaml#taxonomy -->
 
 The largest by technique count:
 
@@ -246,7 +246,7 @@ pytest tests/canary/                    # one package
 pytest --collect-only -q tests/         # what scripts/extract_facts.py uses
 ```
 
-**8653** tests across **265** files at last extraction. **8** collection errors in modules with unmet optional dependencies (dataset / cleanlab / shadow-eval). <!-- facts.yaml#test_count, facts.yaml#test_files -->
+**9167** tests across **284** files at last extraction. **0** collection errors. <!-- facts.yaml#test_count, facts.yaml#test_files -->
 
 ---
 
