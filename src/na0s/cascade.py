@@ -27,8 +27,8 @@ from .layer0 import layer0_sanitize
 from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult
 from .models import get_model_path
-from .signal_boost import calculate_boost
-from ._voting import weighted_decision as _voting_weighted_decision
+from .fusion.signal_boost import calculate_boost
+from .fusion.voting import weighted_decision as _voting_weighted_decision
 from .fusion.complexity_router import (
     assess_complexity, get_pipeline_stages, is_adaptive_routing_enabled,
 )
@@ -41,13 +41,13 @@ _logger = logging.getLogger(__name__)
 from .fusion.rrf import rrf_decision as _rrf_decision
 
 # Layer 6: Groundedness check
-from .groundedness import verify_verdict_grounded as _verify_grounded
+from .fusion.groundedness import verify_verdict_grounded as _verify_grounded
 
 # Layer 6: Performance SLO tracking
 from .fusion.performance_slo import SLOTracker
 
 # Layer 6: Evidence grading (imported for test-patchability)
-from .evidence_grading import filter_graded_hits
+from .fusion.evidence_grading import filter_graded_hits
 
 # N5: PromptGuard transformer classifier — optional
 try:
@@ -480,7 +480,7 @@ class WeightedClassifier:
             if obfuscation_flags:
                 rrf_signals["obfuscation"] = min(0.15 * len(obfuscation_flags), 0.3)
             if structural is not None:
-                from ._voting import STRUCTURAL_SIGNAL_WEIGHTS as _ssw
+                from .fusion.voting import STRUCTURAL_SIGNAL_WEIGHTS as _ssw
                 sw = sum(
                     w for feat, w in _ssw.items()
                     if structural.get(feat, 0)

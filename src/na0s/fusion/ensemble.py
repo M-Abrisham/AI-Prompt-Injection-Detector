@@ -17,7 +17,7 @@ import os
 
 from na0s.scan_result import ScanResult
 from na0s.predict import scan as tfidf_scan
-from na0s._voting import get_decision_threshold as _get_decision_threshold
+from .voting import get_decision_threshold as _get_decision_threshold
 
 # Layer 5: Embedding-based classifier -- optional import
 try:

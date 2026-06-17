@@ -84,7 +84,7 @@ from .integrity.safe_pickle import safe_load
 from .models import get_model_path, KNOWN_HASHES
 from .integrity.safe_content import calculate_safe_content_score
 from .multilingual_intent import detect_multilingual_intents, HEURISTIC_HITS
-from ._voting import (
+from .fusion.voting import (
     weighted_decision as _voting_weighted_decision,
     get_decision_threshold as _get_decision_threshold,
     FP_EXEMPT_HITS,
