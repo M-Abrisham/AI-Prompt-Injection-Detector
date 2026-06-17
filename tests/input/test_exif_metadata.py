@@ -523,7 +523,7 @@ class TestPredictFlagMapIntegration(unittest.TestCase):
         # model files), we read the source and check for the mapping.
         import os
         predict_path = os.path.join(
-            os.path.dirname(__file__), "..", "src", "na0s", "predict.py"
+            os.path.dirname(__file__), "..", "..", "src", "na0s", "predict.py"
         )
         with open(predict_path, "r") as f:
             source = f.read()

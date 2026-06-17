@@ -13,7 +13,7 @@ import sys
 import unittest
 
 # Ensure project root is on the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 os.environ.setdefault("SCAN_TIMEOUT_SEC", "0")
 
 from na0s.layer0.normalization import (

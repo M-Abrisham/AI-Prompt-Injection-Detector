@@ -23,7 +23,7 @@ import sys
 import unittest
 
 # Ensure src is on the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 # Disable scan timeout to avoid signal.SIGALRM issues in test threads
 os.environ["SCAN_TIMEOUT_SEC"] = "0"

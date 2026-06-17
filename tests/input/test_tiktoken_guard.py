@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 # Ensure the project root is importable
 sys.path.insert(
-    0, os.path.join(os.path.dirname(__file__), "..", "src")
+    0, os.path.join(os.path.dirname(__file__), "..", "..", "src")
 )
 
 # Set timeout env to avoid threading issues in tests
