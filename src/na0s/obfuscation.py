@@ -1,4 +1,5 @@
-"""Backward-compatibility shim: re-exports from layer2.obfuscation.
+# SHIM -- do not add new code here
+"""Backward-compat shim. Canonical location: na0s.layer2.obfuscation
 
 All obfuscation logic now lives in ``na0s.layer2.obfuscation``.
 This module preserves ``from na0s.obfuscation import ...`` for existing

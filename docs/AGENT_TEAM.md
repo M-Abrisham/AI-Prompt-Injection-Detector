@@ -98,3 +98,28 @@ A change is merge-ready only if all are true:
 - no unexpected increase in false positives
 - taxonomy tags remain correct for affected techniques
 
+## Concurrent Work: Worktree & Branch Discipline (added 2026-06-16)
+
+Multiple agents run against this repo at the same time. **Rule #1: never switch branches in the primary checkout `/Users/mehrnoosh/Na0S`** — a branch switch there rewrites tracked files and destroys other agents' *uncommitted* work. Each agent works in its own `git worktree`. Full protocol lives in `CLAUDE.md` → "Multi-Agent Worktree Discipline".
+
+### How to start work safely
+```bash
+git worktree add .claude/worktrees/<task> <base-branch>     # or /tmp/na0s_<task>
+cd .claude/worktrees/<task>
+PYTHONPATH="$PWD/src" python3 -m pytest tests/<area>/ -q     # test from the worktree
+git add <explicit paths only>                               # NEVER `git add -A` / `git add .`
+git commit -m "<scoped message>"
+git worktree remove .claude/worktrees/<task>                # when merged/abandoned
+```
+
+### Hot shared files — coordinate, edit only in your worktree
+`src/na0s/predict.py`, `src/na0s/cascade.py`, `src/na0s/layer1/rules_registry.py`, `src/na0s/_voting.py`, `src/na0s/__init__.py`. Multiple roles touch these (Rule Engineer, ML, refactors). Editing them in the shared checkout is the main collision source.
+
+### Live worktree/branch map (snapshot 2026-06-16 — re-verify with `git worktree list`)
+- `/Users/mehrnoosh/Na0S` — PRIMARY checkout, on `hardening/d8-context-window`. Read-mostly; do NOT branch-switch here.
+- `/private/tmp/na0s_d8_wt` — d8 context-window agent (detached HEAD, locked).
+- `.claude/worktrees/agent-aa0756264bec936ab`, `.../agent-aa7b8ad42df33657a` — dependabot dependency bumps.
+
+### Incident that prompted this protocol (2026-06-16)
+A branch switch in the PRIMARY checkout (→ `hardening/d8-context-window`) wiped a refactor agent's uncommitted import-canonicalization edits to `cascade.py`/`predict.py`. The d8 agent's then-uncommitted WIP was subsequently committed under the wrong message (commit `f6b3ab8`, "refactor: repoint core pipeline imports…", which actually contains D8 context-window code). Fix forward: isolate in worktrees, scope every `git add`, keep the primary checkout on a stable branch.
+
