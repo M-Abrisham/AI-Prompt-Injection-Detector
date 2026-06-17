@@ -117,7 +117,7 @@ def _has_pattern_match(text: str, patterns: List[re.Pattern]) -> bool:
 
 # Pre-compiled agreement pattern (moved from inside function to module level)
 _AGREEMENT_PAT = re.compile(
-    r"\b( ?:agree(?:d|s)?|yes|ok(?:ay)?|sure|will\s+do|confirm(?:ed|s)?|approve(?:d|s)?|grant(?:ed|s)?|certainly|of\s+course)\b",
+    r"\b(?:agree(?:d|s)?|yes|ok(?:ay)?|sure|will\s+do|confirm(?:ed|s)?|approve(?:d|s)?|grant(?:ed|s)?|certainly|of\s+course)\b",
     re.IGNORECASE,
 )
 _NEGATED_AGREEMENT_PAT = re.compile(

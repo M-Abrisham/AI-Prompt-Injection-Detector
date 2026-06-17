@@ -154,6 +154,17 @@ try:
 except ImportError:
     _HAS_INTENT_GUARD = False
 
+# C1 social-engineering detectors (C1.6 sycophancy / C1.7 conflicting-
+# instruction / C1.8 negation-confusion) — optional import.  These fill the
+# single-turn C1 gap (no rule/intent coverage existed for these techniques).
+try:
+    from .detectors.sycophancy import detect_sycophancy
+    from .detectors.conflicting_instruction import detect_conflicting_instruction
+    from .detectors.negation_confusion import detect_negation_confusion
+    _HAS_C1_DETECTORS = True
+except ImportError:
+    _HAS_C1_DETECTORS = False
+
 # RAG poisoning detector (I1.x / IM.x) — optional import
 try:
     from .rag.poison_detector import detect_rag_poisoning, get_rag_poison_weight
@@ -1086,6 +1097,13 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                     hits.append(hit_name)
                     hit_names_seen.add(hit_name)
                     _local_severities[hit_name] = harmful_result.severity
+                # C1-G03: fuse the harmful-intent weight into composite — it
+                # was computed but never added (forgotten wiring).  The weight
+                # is 0 unless CSAM (0.45) or harmful+injection (0.25), so
+                # benign text is unaffected.
+                composite = min(composite + harmful_weight, 1.0)
+                if composite >= threshold and "SAFE" in label:
+                    label = "MALICIOUS"
         except Exception:
             pass  # Harmful intent detection failure is non-fatal
 
@@ -1154,6 +1172,12 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                         hit_names_seen.add(hit_name)
                         _sev = "high" if len(intent_result.intent_categories) >= 2 else "medium"
                         _local_severities[hit_name] = _sev
+                # C1-G03: fuse the intent-guard weight into composite — it was
+                # computed but never added (forgotten wiring).  Capped at 0.15,
+                # so it nudges rather than decides.
+                composite = min(composite + intent_weight, 1.0)
+                if composite >= threshold and "SAFE" in label:
+                    label = "MALICIOUS"
         except Exception:
             pass  # Intent analysis failure is non-fatal
 
@@ -1927,6 +1951,32 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
                         hits.append(hit_name)
         except Exception:
             logger.debug("Visual injection detector not available", exc_info=True)
+
+    # --- C1 social-engineering detectors (C1.6/C1.7/C1.8) ---
+    # Sycophancy, conflicting-instruction, and negation-confusion had no
+    # single-turn detector (rules/intent stop at C1.5).  Each is precision-
+    # gated (2-cue co-occurrence) and validated against the benign siblings in
+    # compliance_evasion_c1.py, so benign text is unaffected; fuse the boost
+    # into risk and surface the canonical C1.x technique tag.
+    if _HAS_C1_DETECTORS:
+        for _c1_fn, _c1_name in (
+            (detect_sycophancy, "sycophancy"),
+            (detect_conflicting_instruction, "conflicting_instruction"),
+            (detect_negation_confusion, "negation_confusion"),
+        ):
+            try:
+                _c1_res = _c1_fn(l0.sanitized_text)
+            except Exception:
+                logger.debug("C1 detector %s failed", _c1_name, exc_info=True)
+                _c1_res = None
+            if _c1_res is not None and _c1_res.detected:
+                risk = min(risk + _c1_res.boost, 1.0)
+                _c1_hit = "c1:" + _c1_name
+                if _c1_hit not in hits:
+                    hits.append(_c1_hit)
+                for _tid in _c1_res.technique_ids:
+                    if _tid not in technique_tags:
+                        technique_tags.append(_tid)
 
     # Re-evaluate malicious verdict after chunked analysis and structural
     # features may have boosted the risk score above the threshold.

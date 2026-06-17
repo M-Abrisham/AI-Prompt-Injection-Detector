@@ -65,6 +65,61 @@ than `scan()`. Status (commit SHA to be filled on push):
 
 ---
 
+## Compliance/Jailbreak (C1) Hardening — 2026-06-17 (branch `hardening/c1-compliance-jailbreak`)
+
+Gap audit (14 findings, adversarially verified). Headline correction: the live
+artifact measures C1 at **0.64** on the D8 branch (not the stale 24% in
+COVERAGE_MATRIX); the real gate failures are now **D2 / E1 / O1 / P1**. Three
+root causes for historically-low C1 recall: (1) measurement — the recall harness
+calls `scan(text)` with NO `session_id`, so the multi-turn C1.1/C1.6 stack never
+runs; (2) detection shape — every wired single-turn C1 detector is a closed
+frame+`_HARMFUL_KEYWORDS` AND-gate, so analogical/coded harm slips through; (3)
+dead/absent code. **Implemented this branch (tested, FPR held):**
+
+- [x] **C1-G05** — NEW single-turn detectors for the three techniques that had
+  ZERO coverage: `detectors/sycophancy.py` (C1.6), `conflicting_instruction.py`
+  (C1.7), `negation_confusion.py` (C1.8), each with a 2-cue co-occurrence FP gate
+  validated against the `compliance_evasion_c1.py` benign siblings (34/27/39
+  unit tests). Wired into `predict.scan()`; surface canonical C1.x tags.
+- [x] **C1-G03** — `harmful_weight` and `intent_weight` were computed but never
+  added to the composite (dead code; the intent_guard docstring falsely claimed
+  otherwise). Now fused (harmful is 0 unless CSAM/injection; intent capped 0.15).
+  Flipped the C1.5 system-admin authority test xfail→pass.
+- [x] **C1-G09** — `context_poisoning.py:120` `_AGREEMENT_PAT` malformed capturing
+  group `( ?:` → `(?:` (was breaking agreement recognition → false-prior FPs).
+
+**Deferred (higher-risk / architectural — documented for follow-up):**
+- [ ] **C1-G01** (P1) — make the recall harness multi-turn-aware (split Turn-N
+  probes, pass `session_id`) + an escalation-slope fallback, so Crescendo/
+  sycophancy are actually measured.
+- [ ] **C1-G02** (P1) — replace the closed frame+keyword AND-gate with soft-OR
+  multi-signal fusion + a C1 floor (the root cause of low recall). Needs FPR
+  calibration (~1.2% ceiling).
+- [ ] **C1-G06** — embedding/ML intent classifier for implied/analogical harm.
+- [ ] **C1-G04** — frame+harmful-object floor for C1.3/C1.4 (fire-but-fail at
+  severity `high`=0.20); the code deliberately keeps these below `critical_content`
+  for FP reasons, so promotion needs measured FP validation.
+- [ ] **C1-G07** — factor the C1 standalone-detector block into a shared helper so
+  `cascade.CascadeClassifier` gets C1 parity with `scan()`.
+- [ ] **C1-G10** — thread a `role` param through `process_turn`/`add_turn` so the
+  `cot_compliance` detector (assistant-turn-only) can activate in the live path.
+- [ ] **C1-G11** — collapse the byte-identical `C` / `C1` taxonomy blocks
+  (data/taxonomy.yaml:467 vs 490) to one canonical id; retire the duplicate parent
+  probe (~597 dup samples). Needs coordinated probe-class retirement.
+- [ ] **C1-G13** — label the C1 holdout by sub-technique and promote C1.6/7/8
+  cases (so they're measured) via the SIFT eval-curation skill.
+- [ ] **C1-G14** — ensure obfuscation/decoding canonicalizes input BEFORE C1
+  intent scoring (cipher/low-resource-language bypass evades the English-only path).
+- [ ] **C1-G12** — re-run `technique_analysis.py` on a checkout WITH the holdout
+  and reconcile the stale COVERAGE_MATRIX 24% (the harness multi-turn issue, G01,
+  must be fixed first for an honest C1.1/C1.6 number).
+- [ ] **Harvester** — the weekly harvester (`scripts/weekly_harvest.py`) targets
+  generic "jailbreak" but has NO C1 sub-technique queries (crescendo, Bad Likert
+  Judge, sycophancy, PAP persuasion); add them so C1 coverage is targeted, not
+  incidental.
+
+---
+
 ## Progress Overview
 
 | Layer  | Progress               | Done/Total | Status   |
@@ -433,7 +488,7 @@ All core functionality implemented: 19-step sanitization pipeline, 9 bug fixes (
 ### Description
 regex-based signature engine that detects known attack patterns. Runs 117 pre-compiled rules across 68 technique IDs with paranoia-level filtering on a PL1-PL4 scale (PL1-PL3 currently populated; env-configurable via `RULES_PARANOIA_LEVEL` at [paranoia.py:13](src/na0s/rules/paranoia.py#L13); see [rules_registry.py](src/na0s/rules/rules_registry.py) docstring for current distribution). Novel industry-first detectors: summarization extraction, authority escalation, constraint negation, meta-referential probing, gaslighting. Context-aware suppression (6 frames: educational, question, quoting, code, narrative, techdoc) prevents FPs on legitimate security discussions — critical-severity rules such as `data_exfiltration_pii` and `serialization_injection` are excluded from the `_CONTEXT_SUPPRESSIBLE` list and fire even inside framing. All patterns are ReDoS-safe: `Rule.__post_init__` invokes `safe_compile(..., check_safety=True)` automatically for every rule. Rules are integrated into both `predict.py` and `cascade.py` with dual-pass evaluation (raw + sanitized text, deduplicated via `hit_names_seen`). Unicode angle-bracket homoglyph folding (12 variants: 6 left + 6 right at [unicode_defense.py](src/na0s/rules/unicode_defense.py)) protects XML/chat-template rules from bypass before rule evaluation. Historical bug fixes and sprint-by-sprint additions live in [CHANGELOG.md](CHANGELOG.md).
 
-**Target directory structure** (v1.0.0 refactor — `layer1/` → `rules/`; 4 shim files deleted, dead-code duplicate of `whitespace_stego.py` already deleted 2026-04-16, extension modules consolidated). **Source dirs renamed ✅ (`f587e07`)** — `na0s.layer1.*` resolves via the alias shim; the `tests/rules/` tree below is still TODO (tests remain at `tests/` root):
+**Target directory structure** (v1.0.0 refactor — `layer1/` → `rules/`; 4 shim files deleted, dead-code duplicate of `whitespace_stego.py` STILL pending deletion as of 2026-06-17 — see note below, extension modules consolidated). **Source dirs renamed ✅ (`f587e07`)** — `na0s.layer1.*` resolves via the alias shim; the `tests/rules/` tree below is still TODO (tests remain at `tests/` root):
 ```
 src/na0s/rules/                                   tests/rules/
 │                                                 │
@@ -458,9 +513,13 @@ v1.0.0 deletions (shims that re-export from layer2/ — obfuscation/ is the real
   layer1/morse_code.py, layer1/numeric_decode.py,
   layer1/ascii_art_detector.py, layer1/syllable_splitting.py
 
-Already deleted (2026-04-16):
-  layer1/whitespace_stego.py (544 LOC of dead code — a stale duplicate of
-  layer2/whitespace_stego.py; zero call sites referenced the layer1 path).
+Pending deletion (NOT yet deleted — verified STILL PRESENT 2026-06-17, git-tracked, 544 LOC):
+  layer1/whitespace_stego.py — a stale duplicate of layer2/whitespace_stego.py.
+  Lines 1-3 are a shim re-exporting layer2; lines 4-544 are an unreachable older
+  copy (local _safe_*_env, divergent Method-3 gate len>=1 vs layer2 len>=3).
+  layer1/__init__.py:26 re-exports from layer2, so the local body has zero call
+  sites and is dead — but the earlier "deleted 2026-04-16" claim was never executed.
+  ACTION: delete src/na0s/layer1/whitespace_stego.py.
   The layer2 version (508 LOC, newer) remains the canonical implementation
   and will move to obfuscation/whitespace_stego.py as part of Layer 2's refactor.
 
@@ -478,7 +537,7 @@ Totals: 7 core modules + 6 registry modules = 13 source files │ tests organize
 
 ### Completed (53 items)
 
-Core API and infrastructure: `Rule` and `RuleHit` dataclasses with `Rule.__post_init__` auto-invoking `safe_compile(check_safety=True)`, `rule_score()` and `rule_score_detailed()` APIs (single-pass dedupe), `SEVERITY_WEIGHTS` shared with `predict.py`/`cascade.py`, dual-pass evaluation over raw + sanitized text deduplicated via `hit_names_seen`. 4-level paranoia system (`RULES_PARANOIA_LEVEL` env var, PL1–PL4). 6 audit-bug fixes on 2026-02-18 (technique mismap, duplicate evaluation, severity underrating, DRY violation, raw-text-only evaluation, pattern divergence). Rule library grew to **117 rules across 68 technique IDs**: 6 P0 critical (fake_system_prompt, chat_template_injection, xml_role_tags, api_key_extraction, forget_override, developer_mode), 7 P1 high (new_instruction, delimiter_confusion, completion_trick, tool_enumeration, unauthorized_tool_call, recursive_output, persona_split), 5 novel industry-first (summarization_extraction, authority_escalation, constraint_negation, meta_referential, gaslighting), 5 P2 (hypothetical_bypass, multilingual_override_latin + _cjk covering 20 languages, multilingual_intent semantic detector, recursive_jailbreak), 2 P0-CRITICAL hardening (12-variant angle-bracket homoglyph bypass fix, T1.2 destructive_action), 4 RAG rules (policy_update, knowledge_base_instruction, context_separator, fake_retrieval_markers), 1 worm signature detector. Extension modules wired: `recon_detector.py` (5 E2 probes), `privacy_probe_detector.py` (6 P1 probes), `subtle_override_rules.py` (4 D1 overrides), `multilingual_intent.py` semantic detector. `ioc_extractor.py` with 15+ defanging patterns, 73 tests. Context-suppression reconciled (10 new rule names added; critical-severity rules like `data_exfiltration_pii` and `serialization_injection` kept exempt). Cleanup this session: `rules_registry.py` module docstring updated 110→117 with PL distribution + 68 technique IDs; roadmap `**Files**:` / `**Status**:` metadata corrected; 544-line dead-code duplicate `layer1/whitespace_stego.py` deleted 2026-04-16 (zero call sites; layer2 copy remains canonical). See [CHANGELOG.md](CHANGELOG.md) v0.1.0, v0.1.1, v0.2.0 for sprint-by-sprint history.
+Core API and infrastructure: `Rule` and `RuleHit` dataclasses with `Rule.__post_init__` auto-invoking `safe_compile(check_safety=True)`, `rule_score()` and `rule_score_detailed()` APIs (single-pass dedupe), `SEVERITY_WEIGHTS` shared with `predict.py`/`cascade.py`, dual-pass evaluation over raw + sanitized text deduplicated via `hit_names_seen`. 4-level paranoia system (`RULES_PARANOIA_LEVEL` env var, PL1–PL4). 6 audit-bug fixes on 2026-02-18 (technique mismap, duplicate evaluation, severity underrating, DRY violation, raw-text-only evaluation, pattern divergence). Rule library grew to **117 rules across 68 technique IDs**: 6 P0 critical (fake_system_prompt, chat_template_injection, xml_role_tags, api_key_extraction, forget_override, developer_mode), 7 P1 high (new_instruction, delimiter_confusion, completion_trick, tool_enumeration, unauthorized_tool_call, recursive_output, persona_split), 5 novel industry-first (summarization_extraction, authority_escalation, constraint_negation, meta_referential, gaslighting), 5 P2 (hypothetical_bypass, multilingual_override_latin + _cjk covering 20 languages, multilingual_intent semantic detector, recursive_jailbreak), 2 P0-CRITICAL hardening (12-variant angle-bracket homoglyph bypass fix, T1.2 destructive_action), 4 RAG rules (policy_update, knowledge_base_instruction, context_separator, fake_retrieval_markers), 1 worm signature detector. Extension modules wired: `recon_detector.py` (5 E2 probes), `privacy_probe_detector.py` (6 P1 probes), `subtle_override_rules.py` (4 D1 overrides), `multilingual_intent.py` semantic detector. `ioc_extractor.py` with 15+ defanging patterns, 73 tests. Context-suppression reconciled (10 new rule names added; critical-severity rules like `data_exfiltration_pii` and `serialization_injection` kept exempt). Cleanup this session: `rules_registry.py` module docstring updated 110→117 with PL distribution + 68 technique IDs; roadmap `**Files**:` / `**Status**:` metadata corrected; 544-line dead-code duplicate `layer1/whitespace_stego.py` STILL PRESENT as of 2026-06-17 (the 2026-04-16 deletion was claimed but never executed; zero call sites, layer2 copy remains canonical) — scheduled for deletion. See [CHANGELOG.md](CHANGELOG.md) v0.1.0, v0.1.1, v0.2.0 for sprint-by-sprint history.
 
 ### TODO List
 
@@ -552,6 +611,14 @@ Core pipeline: Shannon entropy with 2-of-3 composite voting (KL-divergence from 
 
 **Documentation (identified 2026-04-16 by source-grounded audit):**
 - [ ] `obfuscation.py:136` — `shannon_entropy()` is a public function (exported from `__init__.py`) but has no docstring. Every other public function in Layer 2 is documented. **Fix**: add one-line docstring with Args/Returns.
+
+**Whitespace-stego coverage gaps (identified 2026-06-17 by source-grounded audit).** `layer2/whitespace_stego.py` today decodes ONLY trailing ASCII space/tab (`rstrip(" \t")`, SNOW + simple-binary); measured 71.4% (45/63) covers only that surface. Missing carriers:
+- [ ] **WS-1 Unicode-whitespace stego carrier (D5.7)** — extend beyond ASCII `" "`/`"\t"` to decode U+00A0 / U+2000–200A / U+202F / U+205F / U+3000 / U+180E / U+1680 as a stego carrier (currently only Layer-0 *folded*, never bitstream-decoded). **Effort**: M.
+- [ ] **WS-2 Zero-width bitstream decode (D5.2)** — decode U+200B/C/D/FEFF sequences as binary payload (zero-width chars are L0-*stripped*, never decoded as hidden data). **Effort**: M.
+- [ ] **WS-3 Line-ending stego** — detect LF/CRLF/CR-per-line and U+2028/U+2029 as a bitstream (`\r` is currently stripped at `whitespace_stego.py:115`). **Effort**: S.
+- [ ] **WS-4 Inter-word & leading-indentation encoding** — analyze multi-space *between* words and leading tab/space indentation, not just trailing whitespace. **Effort**: M.
+- [ ] **WS-5 Threshold justification** — derive/document the Method-4 trailing-WS ratio `0.50` and Method-2 byte gates `24`/`48` (currently arbitrary magic numbers, not env-overridable); promote to `_env_utils`. **Effort**: S.
+- [ ] **WS-6 Taxonomy row** — the detector emits `D4.10` (`predict.py:1750`) but THREAT_TAXONOMY.md has no `D4.10` row; add it and note D5.2/D5.7 are L0 strip/fold only (no bitstream decode). **Effort**: S.
 
 ---
 

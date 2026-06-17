@@ -870,9 +870,11 @@ class TestC1_5_AuthorityImpersonation(unittest.TestCase):
             "vocabulary (phishing, red team, pretext). " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_system_admin_claim(self):
         """System admin claim, detected via root access vocabulary.
+
+        Now detected after wiring the intent-guard authority-escalation weight
+        into the composite (C1-G03); previously xfail.
 
         Source: CrowdStrike -- authority impersonation attack patterns.
         "Reset root access", "without the current password" are
