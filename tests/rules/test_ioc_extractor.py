@@ -15,7 +15,7 @@ import unittest
 os.environ.setdefault("SCAN_TIMEOUT_SEC", "0")
 
 # Ensure src/ is on the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from na0s.layer1.ioc_extractor import refang, extract_iocs, IocResult
 
