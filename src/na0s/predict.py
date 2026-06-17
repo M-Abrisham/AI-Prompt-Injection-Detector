@@ -903,11 +903,15 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     # --- Fictional frame detection (C1) ---
     # Detect attacks wrapped in fictional/hypothetical/academic framing.
     fictional_weight = 0.0
+    fictional_has_inner = False
+    fictional_inner_type = ""
     if _HAS_FICTIONAL_FRAME:
         try:
             ff_result = detect_fictional_frame(clean)
             if ff_result.has_fictional_frame:
                 fictional_weight = get_fictional_frame_weight(ff_result)
+                fictional_has_inner = ff_result.has_inner_attack
+                fictional_inner_type = ff_result.inner_attack_type
                 hit_name = "fictional_frame:" + ff_result.frame_type
                 if hit_name not in hit_names_seen:
                     hits.append(hit_name)
@@ -921,6 +925,24 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                         _local_severities[inner_name] = "high"
         except Exception:
             pass  # Fictional frame detection failure is non-fatal
+
+    # Wire fictional frame signal into composite scoring.  (Previously the
+    # weight was computed but never added, leaving C1 detection inert.)
+    # "generic_attack" inner matches *conceptual* references (the words
+    # jailbreak / DAN / "ignore instructions") that occur in benign educational,
+    # quoting, and WAF-analysis contexts, so it is excluded -- only concrete
+    # harmful/extraction/override/disable inner requests contribute weight/floor.
+    if fictional_weight > 0.0 and fictional_inner_type != "generic_attack":
+        composite = min(composite + fictional_weight, 1.0)
+        # Floor: a frame wrapping a concrete harmful request (frame + inner
+        # attack -- a conjunctive gate) is strong C1 evidence, but the ML model,
+        # trained mostly on direct injection, scores these benign-looking
+        # framings as confidently safe.  Floor to ensure detection.  Frame-only
+        # (no inner attack) is NOT floored -- that is the false-positive guard.
+        if fictional_has_inner and composite < threshold:
+            composite = max(composite, threshold + 0.01)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
 
     # --- Indirect extraction detection (E1) ---
     # Detect completion tricks, translation tricks, encoding tricks, etc.
@@ -1138,6 +1160,29 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
             if _has_high_e1:
                 composite = max(composite, threshold + 0.01)
                 label = "MALICIOUS"
+
+    # --- E2 reconnaissance floor ---
+    # A reconnaissance probe (tool/source/config enumeration, filter recon,
+    # model/config fingerprinting) that survived context suppression is strong
+    # evidence, but a single recon rule rarely crosses threshold on its own --
+    # the ML model scores these benign-looking questions as confidently safe.
+    # Floor it.  E2.3 fingerprinting is included as a deliberate strict
+    # threat-model choice for an embedded SDK (the benign holdout contains no
+    # self-fingerprinting questions, so measured FPR is unaffected); the
+    # trade-off is that bare "what model are you?" is now flagged.
+    if "SAFE" in label and composite < threshold:
+        _RECON_FLOOR_TIDS = ("E2.1", "E2.2", "E2.3", "E2.4", "E2.5")
+        _has_recon_probe = any(
+            dh.severity in ("high", "critical")
+            and any(
+                tid in _RECON_FLOOR_TIDS
+                for tid in _RULE_TECHNIQUE_IDS.get(dh.name, [])
+            )
+            for dh in detailed_hits
+        )
+        if _has_recon_probe:
+            composite = max(composite, threshold + 0.01)
+            label = "MALICIOUS"
 
     # --- D5 Unicode obfuscation signal ---
     _UNICODE_OBFUSCATION_FLAGS = frozenset({
