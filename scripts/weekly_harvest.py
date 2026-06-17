@@ -72,18 +72,28 @@ HF_QUERIES = [
     "prompt security",
     "guardrail bypass",
     "LLM safety",
+    # Stego / invisible-character smuggling (D4.10, D5.2/D5.8/D5.9) — these
+    # families had no discovery coverage; the eval set has zero stego samples.
+    "unicode steganography",
+    "invisible prompt injection",
+    "unicode tag smuggling",
+    "zero-width injection",
 ]
 
 ARXIV_QUERIES = [
     "all:prompt+injection+LLM",
     "all:jailbreak+large+language+model",
     "all:adversarial+prompt+attack",
+    "all:unicode+steganography+LLM",
+    "all:invisible+character+prompt+injection",
 ]
 
 GITHUB_QUERIES = [
     "prompt+injection+dataset",
     "jailbreak+LLM+dataset",
     "adversarial+prompt+dataset",
+    "unicode+smuggling+prompt+injection",
+    "whitespace+steganography",
 ]
 
 # Dataset IDs already used in Na0S (pre-populated for known_datasets.txt)
