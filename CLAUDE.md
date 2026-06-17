@@ -50,7 +50,7 @@ Several Claude agents may operate on this repo at once (check `git worktree list
 ### Test organization
 - Tests mirror the source package structure: `tests/canary/`, `tests/judge/`, `tests/ml/`, etc.
 - New tests go in the matching subdirectory, NOT as flat files at `tests/` root
-- `tests/test_layer16/` and `tests/parsers/office/` are the reference patterns
+- `tests/conversation/` and `tests/parsers/office/` are the reference patterns
 - Core pipeline tests (test_cascade*.py, test_predict*.py, test_scan_*.py) stay at `tests/` root
 - Use `pytest` with `unittest.mock` for mocking. Never hit real APIs in tests.
 
