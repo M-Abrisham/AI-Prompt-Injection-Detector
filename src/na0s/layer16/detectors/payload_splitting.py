@@ -89,7 +89,7 @@ def _try_detect_fragmented(turn_texts: List[str]) -> Optional[dict]:
     as ``text`` and previous turns as ``session_history``.
     """
     try:
-        from na0s.payload_assembly_detector import detect_fragmented_payload
+        from na0s.detectors.payload_assembly import detect_fragmented_payload
 
         current_text = turn_texts[-1]
         history = turn_texts[:-1] if len(turn_texts) > 1 else None
@@ -118,7 +118,7 @@ def _try_detect_multiturn(turn_texts: List[str]) -> Optional[dict]:
     but together form an attack.
     """
     try:
-        from na0s.payload_assembly_detector import detect_multiturn_assembly
+        from na0s.detectors.payload_assembly import detect_multiturn_assembly
 
         if len(turn_texts) < 2:
             return None

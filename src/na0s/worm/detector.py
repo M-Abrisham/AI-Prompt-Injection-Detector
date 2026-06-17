@@ -21,7 +21,7 @@ import unicodedata
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
-from na0s.replication_similarity import replication_similarity
+from na0s.ml.replication_similarity import replication_similarity
 
 logger = logging.getLogger(__name__)
 
