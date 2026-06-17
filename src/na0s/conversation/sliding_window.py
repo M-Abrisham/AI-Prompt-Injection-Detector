@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from na0s.layer16.models import ConversationTurn
+from na0s.conversation.models import ConversationTurn
 
 # Default weight parameters
 _DEFAULT_DECAY = 0.9  # per-turn multiplicative decay

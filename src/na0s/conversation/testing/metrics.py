@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 
-from na0s.layer16.models import Alert
+from na0s.conversation.models import Alert
 
 
 @dataclass

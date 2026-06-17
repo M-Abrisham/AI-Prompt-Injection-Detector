@@ -1,64 +1,58 @@
-"""Layer 16 — Multi-Turn Detection.
+# SHIM -- do not add new code here
+"""Backward-compat package shim. Canonical location: na0s.conversation
 
-Adds conversation-level memory and stateful analysis to Na0S. Detects
-multi-turn attacks where adversaries spread payloads across messages,
-gradually escalate, plant context in early turns, or fabricate history.
+Aliases the package AND every (possibly nested) submodule into sys.modules
+under the old ``na0s.layer16`` name, so e.g.
+``from na0s.layer16.detectors.scheming import X`` returns the SAME module
+object as ``na0s.conversation.detectors.scheming`` -- preserving object
+identity for ``unittest.mock.patch`` on nested old paths.
 
-ARCHITECTURE DECISION: Post-Processor Pattern (Option C).
-Layer 16 runs AFTER single-turn scan() completes. When a session_id
-is provided, it records the turn, runs multi-turn detectors on the
-accumulated conversation state, and merges alerts into ScanResult.
-The existing stateless API is unchanged — session_id is optional.
+Recursion (pkgutil.walk_packages) is required because this package has nested
+subpackages (detectors/, storage/, testing/, baselines/); a flat
+iter_modules would alias only the top level and leave nested old paths as
+distinct objects (mock.patch would then patch a stale copy -> false green).
 
-Usage::
-
-    from na0s.layer16 import ConversationSecurityMonitor
-
-    monitor = ConversationSecurityMonitor()
-    session_id = monitor.create_session()
-    analysis = monitor.process_turn("user message", session_id=session_id)
-    if analysis.has_alerts:
-        for alert in analysis.alerts:
-            print(f"{alert.alert_type}: {alert.severity}")
+Optional backends (storage.redis_backend, etc.) may raise ImportError at
+import time when their extra is not installed. walk_packages imports each
+submodule eagerly, so an onerror handler swallows those failures: the shim
+still loads and aliases everything importable.
 """
+import importlib as _importlib
+import pkgutil as _pkgutil
+import sys as _sys
+import warnings as _warnings
 
-# Conversation monitor has optional/runtime-only dependencies in some builds.
-# Keep package imports resilient so tests can import models/config in isolation.
-try:  # pragma: no cover - exercised indirectly in integration tests
-    from na0s.layer16.conversation_monitor import ConversationSecurityMonitor
-except Exception:  # pragma: no cover
-    ConversationSecurityMonitor = None  # type: ignore[misc,assignment]
-from na0s.layer16.exceptions import (
-    MaxSessionsReachedError,
-    SessionExpiredError,
-    SessionNotFoundError,
+_warnings.warn(
+    "na0s.layer16 is deprecated; use na0s.conversation instead",
+    DeprecationWarning,
+    stacklevel=2,
 )
-from na0s.layer16.models import (
-    Alert,
-    ConversationState,
-    ConversationTurn,
-    MultiTurnAnalysis,
-    SessionConfig,
-    ThreatLevel,
-    UserRiskProfile,
-)
-from na0s.layer16.session_manager import SessionManager
-from na0s.layer16.sliding_window import SlidingWindow
 
-__all__ = [
-    "Alert",
-    "ConversationState",
-    "ConversationTurn",
-    "MaxSessionsReachedError",
-    "MultiTurnAnalysis",
-    "SessionConfig",
-    "SessionExpiredError",
-    "SessionManager",
-    "SessionNotFoundError",
-    "SlidingWindow",
-    "ThreatLevel",
-    "UserRiskProfile",
-]
+_CANONICAL = "na0s.conversation"
+_OLD = __name__  # "na0s.layer16"
 
-if ConversationSecurityMonitor is not None:
-    __all__.insert(1, "ConversationSecurityMonitor")
+_canonical = _importlib.import_module(_CANONICAL)
+
+# Alias the package object itself first so any submodule import that resolves
+# its parent via sys.modules[_OLD] gets the canonical package.
+_sys.modules[_OLD] = _canonical
+
+
+def _onerror(_name):
+    # Swallow eager-import failures (e.g. optional-backend ImportError such as
+    # storage.redis_backend when 'redis' is not installed). walk_packages would
+    # otherwise propagate and abort aliasing of the remaining modules.
+    pass
+
+
+# Recursively walk the canonical package and alias every importable submodule
+# under the old name, preserving object identity.
+for _info in _pkgutil.walk_packages(_canonical.__path__, _CANONICAL + ".", onerror=_onerror):
+    _suffix = _info.name[len(_CANONICAL) + 1:]  # e.g. "detectors.scheming"
+    try:
+        _sub = _importlib.import_module(_info.name)
+    except Exception:
+        # Optional dependency missing or submodule import failed; skip aliasing
+        # it but keep going so the rest of the package stays usable.
+        continue
+    _sys.modules[f"{_OLD}.{_suffix}"] = _sub

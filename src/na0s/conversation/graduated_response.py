@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Dict, Iterable
 
-from na0s.layer16 import config as layer16_config
-from na0s.layer16.models import Alert, ConversationState, ThreatLevel, UserRiskProfile
+from na0s.conversation import config as layer16_config
+from na0s.conversation.models import Alert, ConversationState, ThreatLevel, UserRiskProfile
 
 _LEVEL_RANK = {
     ThreatLevel.NORMAL: 0,

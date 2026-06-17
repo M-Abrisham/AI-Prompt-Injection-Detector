@@ -16,7 +16,7 @@ _BASELINE_PATH = (
     Path(__file__).resolve().parent.parent.parent
     / "src"
     / "na0s"
-    / "layer16"
+    / "conversation"
     / "baselines"
     / "v1_baseline.json"
 )

@@ -11,22 +11,22 @@ import logging
 import threading
 from typing import Dict, List, Optional
 
-from na0s.layer16 import config as layer16_config
-from na0s.layer16.exceptions import SessionNotFoundError
-from na0s.layer16.models import (
+from na0s.conversation import config as layer16_config
+from na0s.conversation.exceptions import SessionNotFoundError
+from na0s.conversation.models import (
     Alert,
     MultiTurnAnalysis,
     SessionConfig,
 )
-from na0s.layer16.graduated_response import compute_threat_level, get_response_action
-from na0s.layer16.models import ThreatLevel, UserRiskProfile
-from na0s.layer16.session_manager import SessionManager
-from na0s.layer16.state import (
+from na0s.conversation.graduated_response import compute_threat_level, get_response_action
+from na0s.conversation.models import ThreatLevel, UserRiskProfile
+from na0s.conversation.session_manager import SessionManager
+from na0s.conversation.state import (
     add_turn,
     compute_peak_accumulation,
     get_risk_trend,
 )
-from na0s.layer16.user_risk_profile import UserRiskProfileStore
+from na0s.conversation.user_risk_profile import UserRiskProfileStore
 
 logger = logging.getLogger(__name__)
 
@@ -35,42 +35,42 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 try:
-    from na0s.layer16.detectors.escalation import EscalationDetector
+    from na0s.conversation.detectors.escalation import EscalationDetector
 except ImportError:  # pragma: no cover
     EscalationDetector = None  # type: ignore[misc,assignment]
 
 try:
-    from na0s.layer16.detectors.payload_splitting import PayloadSplittingDetector
+    from na0s.conversation.detectors.payload_splitting import PayloadSplittingDetector
 except ImportError:  # pragma: no cover
     PayloadSplittingDetector = None  # type: ignore[misc,assignment]
 
 try:
-    from na0s.layer16.detectors.fabricated_history import FabricatedHistoryDetector
+    from na0s.conversation.detectors.fabricated_history import FabricatedHistoryDetector
 except ImportError:  # pragma: no cover
     FabricatedHistoryDetector = None  # type: ignore[misc,assignment]
 
 try:
-    from na0s.layer16.detectors.context_poisoning import ContextPoisoningDetector
+    from na0s.conversation.detectors.context_poisoning import ContextPoisoningDetector
 except ImportError:  # pragma: no cover
     ContextPoisoningDetector = None  # type: ignore[misc,assignment]
 
 try:
-    from na0s.layer16.detectors.stylometry import BehavioralStylometryDetector
+    from na0s.conversation.detectors.stylometry import BehavioralStylometryDetector
 except ImportError:  # pragma: no cover
     BehavioralStylometryDetector = None  # type: ignore[misc,assignment]
 
 try:
-    from na0s.layer16.detectors.embedding_drift import EmbeddingDriftDetector
+    from na0s.conversation.detectors.embedding_drift import EmbeddingDriftDetector
 except ImportError:  # pragma: no cover
     EmbeddingDriftDetector = None  # type: ignore[misc,assignment]
 
 try:
-    from na0s.layer16.detectors.cot_compliance import CoTComplianceDetector
+    from na0s.conversation.detectors.cot_compliance import CoTComplianceDetector
 except ImportError:  # pragma: no cover
     CoTComplianceDetector = None  # type: ignore[misc,assignment]
 
 try:
-    from na0s.layer16.detectors.scheming import SchemingDetector
+    from na0s.conversation.detectors.scheming import SchemingDetector
 except ImportError:  # pragma: no cover
     SchemingDetector = None  # type: ignore[misc,assignment]
 

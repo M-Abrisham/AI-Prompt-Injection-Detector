@@ -129,26 +129,26 @@ constants:
   _CHUNK_WORD_THRESHOLD: 512
 L16_detectors:
 - name: ContextPoisoningDetector
-  file: src/na0s/layer16/detectors/context_poisoning.py
+  file: src/na0s/conversation/detectors/context_poisoning.py
   line: 263
 - name: CoTComplianceDetector
-  file: src/na0s/layer16/detectors/cot_compliance.py
+  file: src/na0s/conversation/detectors/cot_compliance.py
   line: 166
 - name: EmbeddingDriftDetector
-  file: src/na0s/layer16/detectors/embedding_drift.py
+  file: src/na0s/conversation/detectors/embedding_drift.py
   line: 115
 - name: EscalationDetector
-  file: src/na0s/layer16/detectors/escalation.py
+  file: src/na0s/conversation/detectors/escalation.py
   line: 86
 - name: FabricatedHistoryDetector
-  file: src/na0s/layer16/detectors/fabricated_history.py
+  file: src/na0s/conversation/detectors/fabricated_history.py
   line: 44
 - name: PayloadSplittingDetector
-  file: src/na0s/layer16/detectors/payload_splitting.py
+  file: src/na0s/conversation/detectors/payload_splitting.py
   line: 223
 - name: SchemingDetector
-  file: src/na0s/layer16/detectors/scheming.py
+  file: src/na0s/conversation/detectors/scheming.py
   line: 298
 - name: BehavioralStylometryDetector
-  file: src/na0s/layer16/detectors/stylometry.py
+  file: src/na0s/conversation/detectors/stylometry.py
   line: 397

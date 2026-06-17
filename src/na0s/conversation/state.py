@@ -18,7 +18,7 @@ MAX_TURN_TEXT_LENGTH = 50_000
 # payload-assembly windows so in-flight multi-turn context is never dropped.
 _RECENT_ALWAYS_RETAIN = 50
 
-from na0s.layer16.models import Alert, ConversationState, ConversationTurn
+from na0s.conversation.models import Alert, ConversationState, ConversationTurn
 
 
 def _evict_to_cap(turns: List[ConversationTurn], cap: int) -> List[ConversationTurn]:

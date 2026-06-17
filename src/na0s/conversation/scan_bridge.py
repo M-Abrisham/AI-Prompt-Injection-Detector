@@ -8,7 +8,7 @@ only activates when session_id is explicitly provided.
 
 Usage::
 
-    from na0s.layer16.scan_bridge import rescan_text
+    from na0s.conversation.scan_bridge import rescan_text
 
     result = rescan_text("combined multi-turn text")
     if result.is_malicious:

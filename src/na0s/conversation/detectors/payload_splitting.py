@@ -301,7 +301,7 @@ class PayloadSplittingDetector(MultiTurnDetector):
             # Validate via re-scan: if assembled text is truly malicious
             # boost confidence; otherwise emit a weaker monitoring alert.
             try:
-                from na0s.layer16.scan_bridge import rescan_text as _rescan
+                from na0s.conversation.scan_bridge import rescan_text as _rescan
 
                 assembled = multiturn_det.get("assembled_text", "")
                 if assembled:
@@ -349,7 +349,7 @@ class PayloadSplittingDetector(MultiTurnDetector):
         # Stage 2: Re-scan each candidate
         # ----------------------------------------------------------
         try:
-            from na0s.layer16.scan_bridge import rescan_text  # lazy import
+            from na0s.conversation.scan_bridge import rescan_text  # lazy import
 
             for candidate_text, label in candidates:
                 result = rescan_text(candidate_text)

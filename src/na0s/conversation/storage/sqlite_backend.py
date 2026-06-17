@@ -12,10 +12,10 @@ import threading
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from na0s.layer16.config import SQLITE_DB_PATH
-from na0s.layer16.models import ConversationState
-from na0s.layer16.state import from_dict, to_dict
-from na0s.layer16.storage.base import StorageBackend
+from na0s.conversation.config import SQLITE_DB_PATH
+from na0s.conversation.models import ConversationState
+from na0s.conversation.state import from_dict, to_dict
+from na0s.conversation.storage.base import StorageBackend
 
 
 class SQLiteBackend(StorageBackend):

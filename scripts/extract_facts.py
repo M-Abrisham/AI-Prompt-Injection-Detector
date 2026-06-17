@@ -331,8 +331,8 @@ def get_constants():
 
 
 def get_l16_detectors():
-    """Class names extending MultiTurnDetector under layer16/detectors/."""
-    base = REPO_ROOT / "src" / "na0s" / "layer16" / "detectors"
+    """Class names extending MultiTurnDetector under conversation/detectors/."""
+    base = REPO_ROOT / "src" / "na0s" / "conversation" / "detectors"
     found = []
     for p in sorted(base.glob("*.py")):
         if p.name in ("__init__.py", "base_detector.py"):

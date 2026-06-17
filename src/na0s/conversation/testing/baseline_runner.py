@@ -9,11 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from na0s.layer16.conversation_monitor import ConversationSecurityMonitor
-from na0s.layer16.models import SessionConfig
-from na0s.layer16.testing.conversation_harness import ConversationTestHarness
-from na0s.layer16.testing.metrics import DetectionMetrics
-from na0s.layer16.testing.scenario_loader import TestScenario
+from na0s.conversation.conversation_monitor import ConversationSecurityMonitor
+from na0s.conversation.models import SessionConfig
+from na0s.conversation.testing.conversation_harness import ConversationTestHarness
+from na0s.conversation.testing.metrics import DetectionMetrics
+from na0s.conversation.testing.scenario_loader import TestScenario
 
 # Default fixture directory (src/na0s/layer16/testing -> repo root -> tests/...)
 _DEFAULT_FIXTURES = (

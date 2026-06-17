@@ -269,7 +269,7 @@ def _get_conversation_monitor():
     if _conversation_monitor is None:
         with _conversation_monitor_lock:
             if _conversation_monitor is None:
-                from na0s.layer16.conversation_monitor import ConversationSecurityMonitor
+                from na0s.conversation.conversation_monitor import ConversationSecurityMonitor
                 _conversation_monitor = ConversationSecurityMonitor()
     return _conversation_monitor
 

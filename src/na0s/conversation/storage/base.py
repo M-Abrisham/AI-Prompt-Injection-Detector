@@ -9,7 +9,7 @@ from __future__ import annotations
 import abc
 from typing import List, Optional
 
-from na0s.layer16.models import ConversationState
+from na0s.conversation.models import ConversationState
 
 
 class StorageBackend(abc.ABC):

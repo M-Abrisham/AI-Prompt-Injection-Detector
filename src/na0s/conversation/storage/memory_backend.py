@@ -10,9 +10,9 @@ import threading
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from na0s.layer16.config import MAX_SESSIONS
-from na0s.layer16.models import ConversationState
-from na0s.layer16.storage.base import StorageBackend
+from na0s.conversation.config import MAX_SESSIONS
+from na0s.conversation.models import ConversationState
+from na0s.conversation.storage.base import StorageBackend
 
 
 class MemoryBackend(StorageBackend):

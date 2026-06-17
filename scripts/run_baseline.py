@@ -16,9 +16,9 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "src"))
 
-from na0s.layer16.testing.baseline_runner import BaselineRunner  # noqa: E402
+from na0s.conversation.testing.baseline_runner import BaselineRunner  # noqa: E402
 
-_BASELINES_DIR = _REPO / "src" / "na0s" / "layer16" / "baselines"
+_BASELINES_DIR = _REPO / "src" / "na0s" / "conversation" / "baselines"
 
 
 def main() -> None:

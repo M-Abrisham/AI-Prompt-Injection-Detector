@@ -12,8 +12,8 @@ import threading
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from na0s.layer16 import config as layer16_config
-from na0s.layer16.models import UserRiskProfile
+from na0s.conversation import config as layer16_config
+from na0s.conversation.models import UserRiskProfile
 
 
 # Risk multipliers by flag level

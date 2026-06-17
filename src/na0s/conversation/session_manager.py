@@ -11,8 +11,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from na0s.layer16.models import ConversationState, SessionConfig
-from na0s.layer16.state import add_turn
+from na0s.conversation.models import ConversationState, SessionConfig
+from na0s.conversation.state import add_turn
 
 
 MAX_SESSIONS = 10_000

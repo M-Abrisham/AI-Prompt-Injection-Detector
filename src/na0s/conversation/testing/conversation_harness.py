@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from na0s.layer16.conversation_monitor import ConversationSecurityMonitor
-from na0s.layer16.models import Alert, MultiTurnAnalysis, SessionConfig
+from na0s.conversation.conversation_monitor import ConversationSecurityMonitor
+from na0s.conversation.models import Alert, MultiTurnAnalysis, SessionConfig
 
 
 class ConversationTestHarness:

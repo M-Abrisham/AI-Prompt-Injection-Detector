@@ -21,10 +21,10 @@ except ImportError as _exc:
         "Install it with:  pip install redis"
     ) from _exc
 
-from na0s.layer16.config import REDIS_URL
-from na0s.layer16.models import ConversationState
-from na0s.layer16.state import from_dict, to_dict
-from na0s.layer16.storage.base import StorageBackend
+from na0s.conversation.config import REDIS_URL
+from na0s.conversation.models import ConversationState
+from na0s.conversation.state import from_dict, to_dict
+from na0s.conversation.storage.base import StorageBackend
 
 _KEY_PREFIX = "na0s:session:"
 
