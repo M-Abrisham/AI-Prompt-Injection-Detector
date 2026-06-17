@@ -83,7 +83,7 @@ from .config import MAX_INPUT_LENGTH
 from .integrity.safe_pickle import safe_load
 from .models import get_model_path, KNOWN_HASHES
 from .integrity.safe_content import calculate_safe_content_score
-from .multilingual_intent import detect_multilingual_intents, HEURISTIC_HITS
+from .detectors.multilingual_intent import detect_multilingual_intents, HEURISTIC_HITS
 from .fusion.voting import (
     weighted_decision as _voting_weighted_decision,
     get_decision_threshold as _get_decision_threshold,
@@ -107,7 +107,7 @@ except ImportError:
 
 # Multilingual injection handler (D6) — optional import
 try:
-    from .multilingual_handler import scan_multilingual, get_multilingual_rule_weight
+    from .detectors.multilingual_handler import scan_multilingual, get_multilingual_rule_weight
     _HAS_MULTILINGUAL = True
 except ImportError:
     _HAS_MULTILINGUAL = False
@@ -149,7 +149,7 @@ except ImportError:
 
 # Intent-analysis detector (N1) — optional import
 try:
-    from .intent_guard import analyze_intent, get_intent_guard_weight
+    from .detectors.intent_guard import analyze_intent, get_intent_guard_weight
     _HAS_INTENT_GUARD = True
 except ImportError:
     _HAS_INTENT_GUARD = False

@@ -36,7 +36,7 @@ import logging
 import os
 
 from ..layer1 import RULES, SEVERITY_WEIGHTS
-from ..multilingual_intent import HEURISTIC_HITS as _HEURISTIC_HITS
+from ..detectors.multilingual_intent import HEURISTIC_HITS as _HEURISTIC_HITS
 from .signal_boost import calculate_boost_from_names
 
 _logger = logging.getLogger(__name__)
