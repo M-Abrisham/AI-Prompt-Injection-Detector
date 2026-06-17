@@ -15,11 +15,11 @@ from na0s.conversation.testing.conversation_harness import ConversationTestHarne
 from na0s.conversation.testing.metrics import DetectionMetrics
 from na0s.conversation.testing.scenario_loader import TestScenario
 
-# Default fixture directory (src/na0s/layer16/testing -> repo root -> tests/...)
+# Default fixture directory (src/na0s/conversation/testing -> repo root -> tests/...)
 _DEFAULT_FIXTURES = (
     Path(__file__).resolve().parent.parent.parent.parent.parent
     / "tests"
-    / "test_layer16"
+    / "conversation"
     / "fixtures"
 )
 
