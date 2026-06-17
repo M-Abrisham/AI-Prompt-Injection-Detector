@@ -39,7 +39,7 @@ Ship detection improvements quickly without regressing:
   - `src/na0s/layer1/context.py`
   - `src/na0s/layer2/obfuscation.py`
 - Runs:
-  - `pytest -q tests/test_rules.py tests/test_scan_integration.py`
+  - `pytest -q tests/rules/test_rules.py tests/test_scan_integration.py`
 
 ### 4) ML & Embedding Agent
 - Owns: feature/model training, threshold calibration, embedding behavior.
