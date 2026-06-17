@@ -26,11 +26,13 @@ _PREDICT_SOURCE = _read_predict_source()
 class TestNormalizationFlagMapping(unittest.TestCase):
     """Verify normalization.py stego/homoglyph flags are mapped."""
 
-    def test_unicode_tag_stego_mapped_to_D5_2(self):
-        self.assertIn('"unicode_tag_stego": "D5.2"', _PREDICT_SOURCE)
+    def test_unicode_tag_stego_mapped_to_D5_8(self):
+        # Tag-character smuggling is its own technique (was mislabeled D5.2).
+        self.assertIn('"unicode_tag_stego": "D5.8"', _PREDICT_SOURCE)
 
-    def test_variation_selector_stego_mapped_to_D5_2(self):
-        self.assertIn('"variation_selector_stego": "D5.2"', _PREDICT_SOURCE)
+    def test_variation_selector_stego_mapped_to_D5_9(self):
+        # Variation-selector stego is its own technique (was mislabeled D5.2).
+        self.assertIn('"variation_selector_stego": "D5.9"', _PREDICT_SOURCE)
 
     def test_mixed_script_homoglyphs_mapped_to_D5_3(self):
         self.assertIn('"mixed_script_homoglyphs": "D5.3"', _PREDICT_SOURCE)
@@ -136,8 +138,8 @@ class TestFlagMapTechniqueIds(unittest.TestCase):
     """Verify each new flag maps to the correct technique ID."""
 
     _EXPECTED = {
-        "unicode_tag_stego": "D5.2",
-        "variation_selector_stego": "D5.2",
+        "unicode_tag_stego": "D5.8",
+        "variation_selector_stego": "D5.9",
         "mixed_script_homoglyphs": "D5.3",
         "mojibake_repaired": "D5",
         "ftfy_suspicious_correction": "D5",
