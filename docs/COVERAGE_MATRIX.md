@@ -2,109 +2,166 @@
 
 # Prompt-Injection Coverage Matrix
 
-Authoritative, audit-ready mapping of Na0S's internal injection-method (IM) taxonomy to the OWASP Top 10 for LLM Applications (2025) and MITRE ATLAS, with a per-class coverage score, the implementing components, backing tests, and the residual detection gap.
+Audit-ready, two-dimensional mapping of Na0S's internal injection taxonomy to the OWASP Top 10 for LLM Applications (2025) and MITRE ATLAS. The matrix is **2D**: **attack-class rows** (the *what*) × an orthogonal **evasion-modifier axis** (the *how it's disguised*). Scores are graded against the **runtime detection path**, and — for every category the recall harness covers — against **measured recall** rather than expert estimate.
+
+**v2.1 grounds the scores in measured data.** The two-sided recall harness (`scripts/technique_analysis.py` → `benchmarks/results/technique_analysis.json`) is now the single source of truth for coverage. Where it measures a category, the row's score **is** that measured recall (`Basis = measured`); elsewhere the score is rubric-estimated from runtime wiring (`Basis = estimated`). **The measured numbers came in materially below the v1.0/v2.0 estimates** (e.g. D1 direct-injection 72.5% measured vs 92 estimated; compliance 24% vs 72; exfiltration 48% vs 78) — confirming the estimates were optimistic. Treat the harness artifact, not the prose estimates, as authoritative.
 
 ---
 
 | Field | Value |
 |-------|-------|
-| **Version** | v1.0-draft |
-| **Last reviewed** | 2026-06-03 (initial agent-assisted build) |
+| **Version** | v2.1 (2D, measured-grounded) |
+| **Last reviewed** | 2026-06-16 (harness-grounded rebuild on branch `feat/inj0017-inter-model-detector`; D8 hardening in-flight) |
 | **Owner** | @M-Abrisham |
-| **Source catalog — MITRE ATLAS** | v2026.05 (format-version 6.0.0; collection version 2026.05; modified 2026-05-27) — https://github.com/mitre-atlas/atlas-data/releases/download/v2026.05/ATLAS-2026.05.yaml |
-| **Source catalog — OWASP** | OWASP Top 10 for LLM Applications 2025 (version 2025 / v2.0; `LLMxx:2025` label form) — https://genai.owasp.org/llm-top-10/ |
-| **Review cadence** | Quarterly (re-confirm IDs against the then-current ATLAS / OWASP releases) |
+| **Coverage source of truth** | `scripts/technique_analysis.py` → `benchmarks/results/technique_analysis.json` (schema v2; threshold **0.55**; measured 2026-06-17, uncommitted). **Not** the per-row "samples" columns and **not** `BENCHMARK_RESULTS.md` (whose 100% D8 row is known-mislabeled and unfixed). |
+| **Source catalog — MITRE ATLAS** | v2026.05 (format-version 6.0.0; collection 2026.05; modified 2026-05-27) — https://github.com/mitre-atlas/atlas-data/releases/download/v2026.05/ATLAS-2026.05.yaml |
+| **Source catalog — OWASP** | OWASP Top 10 for LLM Applications 2025 (`LLMxx:2025`) — https://genai.owasp.org/llm-top-10/ |
+| **Internal taxonomy** | `data/taxonomy.yaml` v1.0 — 29 categories, 276 techniques. |
+| **Review cadence** | Quarterly + re-run the harness; upgrade `estimated` rows to `measured` as the holdout grows. |
+
+**Harness headline (measured @ 0.55):** overall malicious recall **57.1%** (194/340, CI 51.8–62.2) · overall benign FPR **1.2%** (6/500, CI 0.6–2.6) · overall evasion **47.6%** (270/567). The recall gate **fails** on C1, D2, E1, E2, O1, P1.
 
 ---
 
 ## Scoring rubric
 
-Each class is scored 0–100 on how completely Na0S detects it today. The score reflects three signals in order of weight: (1) a named implementing component exists in `src/`, (2) dedicated tests exercise it, and (3) the coverage spans the whole class rather than a sub-scope. Bands:
+Each class is scored 0–100 on how completely Na0S **detects it at runtime today**. For categories the harness covers, the score **is the measured recall** (rounded), `Basis = measured`. Otherwise the score is assigned by band from runtime **wiring** + **test depth**, `Basis = estimated`; `mixed` means part of the row is measured and part estimated. Sample-generator existence in `scripts/taxonomy/` earns **no** score on its own.
 
 | Band | Score | Meaning |
 |------|-------|---------|
-| **Validated** | 85–100 | Full class coverage, implementing component verified, **and** a dedicated/targeted pytest backs it. Scores stay below 95 when no concrete pass-rate is captured. |
-| **Asserted** | 70–84 | Component(s) verified and tests located, but tests are generic (probe-contract / shared-rule) rather than per-technique assertions, or coverage is a verified sub-scope of the class. |
-| **Partial** | 45–69 | A real slice is covered and tested, but a named, material portion of the class has no detection path. |
-| **Taxonomy-only** | 15–44 | Class is named in `data/taxonomy.yaml` and may have probe/sample assets, but has **no** dedicated runtime detector and **no** test; credit only for adjacent/overlapping detection. |
-| **Not modeled** | 0–14 | No dedicated detector, samples, or taxonomy entry for the class; only incidental downstream mitigation. |
+| **Validated** | 85–100 | Wired into the default scan path with a dedicated test; measured recall ≥85% **or** (no harness slice) full wiring + targeted test. |
+| **Asserted** | 70–84 | Wired + tested, but tests generic or coverage a verified sub-scope; or measured recall 70–84%. |
+| **Partial** | 45–69 | A real slice wired/measured, but a material portion has no detection path, or the detector is gated/opt-in; or measured recall 45–69%. |
+| **Taxonomy-only** | 15–44 | Named in `data/taxonomy.yaml`, no wired detector / failing recall; or measured recall 15–44%. |
+| **Not modeled** | 0–14 | No detector, samples, or taxonomy entry. |
 
-**Confidence** (`high` / `med` / `low`) qualifies how firmly the score is evidenced. **Validation** distinguishes `validated` (a named test was located) from `asserted` (claimed but no test located). The **FP/recall** column records whether benign/contrast samples exist for false-positive control; it does not assert a measured rate.
+> **Wiring is load-bearing; measurement overrides estimate.** A detector that exists but is never invoked by the default `scan()` scores Partial at best. And where the harness has measured a category, that number wins over any estimate — even when it is lower.
 
 ---
 
-## Coverage matrix
+## Coverage matrix — attack-class rows
 
-| Row | OWASP LLM 2025 | MITRE ATLAS | Class (subtype) | Gate | Coverage | Conf. | Components | Validation | FP/recall | Severity | Residual gap |
-|-----|----------------|-------------|-----------------|------|----------|-------|------------|------------|-----------|----------|--------------|
-| **INJ-0001** (IM0001) | LLM01:2025 — Prompt Injection | AML.T0051.000 — LLM Prompt Injection: Direct | Direct Prompt Injection | input | **92** | high | `layer1/rules_registry.py` (real engine; `rules.py` is a 29-line shim), `layer0/`, `cascade.py`, `scripts/taxonomy/instruction_override.py` (D1.x), `data/taxonomy.yaml` D1–D8 | validated: `test_scan_d1_instruction_override.py`, d3–d8 scan suites, `test_rules.py`, `test_cascade.py`, `test_l12_probe_validation.py` | D1.x benign pairs present for FP control | critical | None material; cited `rules.py` is a compat shim, not the engine. |
-| **INJ-0002** (IM0002) | LLM01:2025 — Prompt Injection | AML.T0051.000 — LLM Prompt Injection: Direct | Prompt Body Injection (in-body / structural-boundary) | input | **88** | high | `scripts/taxonomy/structural_boundary.py` (D3.4), `scripts/taxonomy/payload_delivery.py` (D7.3), `layer0/html_extractor.py`, `data/taxonomy.yaml` D3.4/D7.3 | validated: `test_scan_d3_structural_boundary.py`, `test_scan_d7_payload_delivery.py`, `test_html_extractor.py`, `test_l12_probe_validation.py` | D3.4/D7.3 benign samples in probe files | high | None material; delimiter/code-block subset is narrower than the full class. |
-| **INJ-0003** (IM0003) | LLM01:2025 — Prompt Injection | AML.T0051.001 — LLM Prompt Injection: Indirect | Multimodal Prompt Injection (document/image attachments) | input | **68** | med | `scripts/taxonomy/multimodal_injection.py` (M3.1 PDF/DOCX hidden text, M1.2 SVG), `layer0/content_type.py`, `layer0/doc_extractor.py`, `layer0/ocr_extractor.py`, `layer0/image_threat.py` | validated: `test_doc_extractor.py`, `test_pdf_javascript.py`, `test_layer0_image_threat.py`, `test_ocr_extractor.py` | extractor tests cover benign docs/images | high | No audio (M2.x) path; OCR extractor exists but no OCR-injection classifier; cited M1.4/M1.5 IDs are fictional (actual: M3.1/M1.2). |
-| **INJ-0004** (IM0004) | LLM01:2025 — Prompt Injection | *No ATLAS equivalent* — human-relay vector; closest `AML.T0011` User Execution (not exact) | Social-engineering delivery vector (user induced to relay payload) | input | **8** | low | None found modeling the social-engineering delivery vector as a distinct class. | asserted: no test located | n/a | medium | Not modeled. Submitted payload still hits IM0001 input detection, but the delivery class has no dedicated detector, samples, or taxonomy entry. |
-| **INJ-0005** (IM0005) | LLM01:2025 — Prompt Injection | AML.T0011 — User Execution *(closest, not exact; human-delivery vector)* | Social-engineering delivery vector (user tricked into submitting payload) | input | **8** | low | None found. | asserted: no test located | n/a | medium | Not modeled. Only the resulting payload (if submitted) is caught by IM0001 input detectors. |
-| **INJ-0006** (IM0006) | LLM05:2025 — Improper Output Handling | AML.T0061 — LLM Prompt Self-Replication | Output-channel injection / prompt self-replication (worm) | output | **78** | high | `src/na0s/output/scanner.py` (32 KB; `output_scanner.py` is a shim), `src/na0s/output/propagation.py` (`PropagationScanner`, `worm_propagation` tag, single-hop output→input rescan) | validated: `tests/output/test_propagation.py`, `test_scanner.py`, `test_scanner_redaction.py`, `test_advanced.py` | scanner redaction test covers benign outputs | high | Single-hop rescan present; multi-hop cross-**model** lineage / propagation across distinct systems is absent. |
-| **INJ-0007** (IM0007) | LLM01:2025 — Prompt Injection | AML.T0080.001 — AI Agent Context Poisoning: Thread *(corrected from AML.T0092)* | Context manipulation / multi-turn splitting / middleware tampering | mixed | **58** | med | `scripts/taxonomy/context_overflow.py` (D8.x), `scripts/taxonomy/payload_delivery.py` (D7.2), `data/taxonomy.yaml` Category AD (AD1.1–AD3.6, 19 techniques) + IM4.x, `context_manipulation_detector.py` (592-byte shim) | validated: `test_scan_d8_context_manipulation.py`, `tests/test_layer16/test_payload_splitting.py` | D7.2/D8 benign samples in probe files | high | D8/D7.2 covered+tested, but Category AD (middleware/proxy tampering) and IM4.x are taxonomy-only — no probe, samples, or detector. |
-| **INJ-0008** (IM0008) | LLM01:2025 — Prompt Injection | AML.T0051.001 — LLM Prompt Injection: Indirect | Indirect Prompt Injection via ingested data | input | **84** | high | `scripts/taxonomy/data_source_poisoning.py` (I1.x, incl. I1.7 email-sig, I1.8 broad-distribution), `scripts/taxonomy/html_markup_injection.py` (I2), `layer0/html_extractor.py`, `layer1/rules_registry.py` (RAG rules R1.1–R1.4) | validated: `test_rag_injection_rules.py`, `tests/rag/test_rag_poison_detector.py`, `tests/rag/test_rag_position_scanner.py`, `test_html_extractor.py` | I1.7/I1.8 benign samples present | critical | None material; tests are RAG-rule/probe-contract rather than per-I1.x assertions. |
-| **INJ-0009** (IM0009) | LLM08:2025 — Vector and Embedding Weaknesses | AML.T0070 — RAG Poisoning | Indirect Injection via internal docs / knowledge-base poisoning | input | **76** | med | `scripts/taxonomy/data_source_poisoning.py` (I1.2 doc-injection, I1.4 database/KB poisoning incl. internal wiki/API-doc), `data/taxonomy.yaml` I1.2/I1.4, layer1 RAG rules | validated: `test_rag_injection_rules.py`, `tests/rag/test_rag_poison_detector.py` | data_source_poisoning benign samples cover internal-doc FPs | critical | No I1.4-specific named pytest; internal-KB poisoning exercised only via generic RAG-poison + probe-contract tests. |
-| **INJ-0010** (IM0010) | LLM01:2025 — Prompt Injection | AML.T0051.001 — LLM Prompt Injection: Indirect | Indirect Injection via external web/email/feeds | input | **76** | med | `scripts/taxonomy/data_source_poisoning.py` (I1.1 web incl. Wikipedia, I1.3 email), `data/taxonomy.yaml` I1.1/I1.3 (RSS/API roll up under these) | validated: `test_rag_injection_rules.py`, `test_html_extractor.py` (DataSourcePoisoningProbe contract) | I1.1/I1.3 benign samples present | critical | No external-feed-specific pytest; RSS/API have no separate technique ID. |
-| **INJ-0011** (IM0011) | LLM01:2025 — Prompt Injection | AML.T0051.001 — LLM Prompt Injection: Indirect | Indirect Injection from attacker-controlled source | input | **70** | med | `scripts/taxonomy/data_source_poisoning.py` (I1.1 attacker-controlled web), `data/taxonomy.yaml` AD2.4 webhook (taxonomy-only) | validated: `test_rag_injection_rules.py` (DataSourcePoisoningProbe contract) | shares I1.1 benign samples | high | No probe distinguishes "attacker-owned" from other external sub-flavors; webhook callback (AD2.4) is taxonomy-only. |
-| **INJ-0012** (IM0012) | LLM01:2025 — Prompt Injection | AML.T0051.001 — LLM Prompt Injection: Indirect | Indirect Injection from compromised trusted source (GitHub/SO/npm) | input | **72** | med | `scripts/taxonomy/data_source_poisoning.py` (I1.1 explicit Stack Overflow / GitHub README samples); npm conceptually under same I1.1 block | validated: `test_rag_injection_rules.py` (DataSourcePoisoningProbe contract) | shares I1.1 benign samples | high | Explicit GitHub/SO samples exist but no sub-class pytest; npm-package poisoning is conceptual, not a distinct sample/detector. |
-| **INJ-0013** (IM0013) | LLM01:2025 — Prompt Injection | AML.T0051.001 — LLM Prompt Injection: Indirect | Indirect Injection via attacker-influenced UGC (reviews/comments/wiki) | input | **72** | med | `scripts/taxonomy/data_source_poisoning.py` (I1.1 explicit Yelp/Reddit/wiki-edit samples) | validated: `test_rag_injection_rules.py` (DataSourcePoisoningProbe contract) | shares I1.1 benign samples | high | Explicit UGC samples exist but no sub-class pytest; detection is generic I1.1, not a distinct UGC-influence detector. |
-| **INJ-0014** (IM0014) | LLM03:2025 — Supply Chain | AML.T0010.002 — AI Supply Chain Compromise: Data | Supply-chain / ETL ingestion-pipeline compromise | mixed | **52** | med | `scripts/taxonomy/supply_chain.py` (S1.3–S1.5 samples), `scripts/taxonomy/ingestion_manipulation.py` (51 KB, IG1.x incl. IG1.7 ETL), `data/taxonomy.yaml` S1.3–S1.5 + IG | validated: `test_l12_probe_validation.py` (SupplyChainProbe, IngestionManipulationProbe contract); asserted: no technique-specific detector test | supply_chain/ingestion probes include benign pairs | high | Samples + probes exist, but **no** dedicated runtime detector module and only generic contract tests — no technique-specific assertions. |
-| **INJ-0015** (IM0015) | LLM01:2025 — Prompt Injection | AML.T0080.001 — AI Agent Context Poisoning: Thread | Context-memory poisoning via prior model output | mixed | **86** | high | `src/na0s/layer16/detectors/context_poisoning.py` (`ContextPoisoningDetector`, `taxonomy_ids==['D1.20']`), `scripts/taxonomy/instruction_override.py` (D1.20 samples), `data/taxonomy.yaml` D1.20 | validated: `tests/test_layer16/test_context_poisoning.py` (~20+ test fns) | D1.20_benign + false-agreement benign cases in test | high | None material; samples + dedicated detector + dedicated test all exist. |
-| **INJ-0016** (IM0016) | LLM01:2025 — Prompt Injection *(corrected from LLM08:2025)* | AML.T0080.000 — AI Agent Context Poisoning: Memory | Persistent agent-memory poisoning | agent-tool | **40** | low | `data/taxonomy.yaml` I1.6 / IG1.8 (named); `scripts/taxonomy/data_source_poisoning.py` (I1.4/I1.5 vector/cache-DB samples — adjacent, not the named technique). No dedicated agent-memory detector in `src/`. | asserted: no test located | n/a for the named class (no dedicated samples) | high | No explicit agent-memory-attack detector and no named pytest; named technique (I1.6/IG1.8) is taxonomy-only. |
-| **INJ-0017** (IM0017) | LLM06:2025 — Excessive Agency | AML.T0080.000 — AI Agent Context Poisoning: Memory *(corrected from AML.T0080.001 Thread)* | Multi-agent / inter-model propagation | agent-tool | **44** | med | `scripts/taxonomy/agent_tool_abuse.py` (T1.3), `scripts/taxonomy/inter_model_propagation.py` (42 KB; IM1.x + IM3.1 agent-to-agent samples), `data/taxonomy.yaml` T1.3 + IM1–IM6. No multi-agent detector in `src/`; inter_model_propagation probe not imported by `src/`. | validated: `tests/detectors/test_mcp_tool_detector.py` (T1.3 only); asserted: no test for IM1.x/IM3.1 propagation | T1.3 has benign cases in MCP detector test; IM1.x/IM3.x probes have benign templates but no FP test | critical | IM3.1 agent-to-agent and IM1.x cross-model samples exist as probe assets but are wired to no detector and have no pytest; only adjacent T1.3 tool-chaining is detected+tested. |
+| Row | Cat | OWASP | ATLAS | Class (subtype) | Gate | Score | Basis | Measured recall (harness @0.55) | Components (runtime) | Severity | Residual gap |
+|-----|-----|-------|-------|-----------------|------|-------|-------|------------------------------|----------------------|----------|--------------|
+| **INJ-0001** | D1 | LLM01 | T0051.000 Direct | Direct prompt injection / instruction override | input | **73** | measured | **72.5%** (29/40) | `layer1/rules_registry.py`, `structural/`, ML — WIRED; `test_scan_d1…` (38 pass) | critical | 27% of direct-override holdout missed; estimate (92) was +20pts optimistic. |
+| **INJ-0002** | D3 | LLM01 | T0051.000 Direct | Structural-boundary / in-body injection | input | **83** | measured | **83.3%** (25/30) | `rules_registry.py` (D3 rules), `html_extractor.py` — WIRED | high | Strongest measured class after D8-adjacent; delimiter subset. |
+| **INJ-0003** | M | LLM01 | T0051.001 Indirect | Multimodal injection (doc/image/audio) | input | **68** | estimated | — (not in harness) | `layer0/content_type.py`, `doc_extractor.py`, `ocr_extractor.py`, `detectors/visual_injection.py` (gated) — PARTIAL | high | No audio analysis; visual detector L0-gated; **unmeasured** (likely <68 by analogy to other measured drops). |
+| **INJ-0004** | — | LLM01 | *no ATLAS* (closest T0011) | Social-engineering relay (user induced) | input | **8** | estimated | — | None | medium | Not modeled. |
+| **INJ-0005** | — | LLM01 | T0011 User Execution *(closest)* | Social-engineering courier | input | **8** | estimated | — | None | medium | Not modeled. |
+| **INJ-0006** | O | LLM05 | T0061 Self-Replication | Output-channel injection / worm + harmful-output | output | **50** | mixed | **O1 30%** (6/20) measured; worm est. | `output/scanner.py`, `output/propagation.py` (worm, wired+tested); `detectors/harmful_intent.py` (O1, WIRED) | high | O1 harmful-output intent measured **30%**; worm single-hop only; O2 output-injection via `cascade.scan_output()` (separate call). |
+| **INJ-0007** | D8 | LLM01 | T0080.001 Thread | Context-window manipulation / multi-turn | mixed | **64** | measured | **64%** (16/25) | `detectors/context_manipulation.py` (**now wired** — was dead code), `detectors/token_budget.py`, `detectors/state_confusion.py`, per-segment ML max-pool, `rag/position_scanner.py`, multi-turn fold-in — all WIRED *(D8 hardening in-flight, pending commit)* | high | Wiring now complete (all 6 D8.x have a path; 14/14 scan tests green) — residual is **recall calibration**: ~7 round-number gate thresholds unvalidated; multi-turn needs `session_id`; detectors gate at >512 words. |
+| **INJ-0008** | I1 | LLM01 | T0051.001 Indirect | Indirect injection via ingested data | input | **84** | estimated | — (not in harness) | `data_source_poisoning.py`, `rag/poison_detector.py` (WIRED), R1.x rules | critical | **Unmeasured** — estimate likely optimistic given measured drops elsewhere; add I1 to the holdout next cycle. |
+| **INJ-0009** | I1 | LLM08 | T0070 RAG Poisoning | Indirect via internal docs / KB poisoning | input | **76** | estimated | — | `data_source_poisoning.py` (I1.2/I1.4), `rag/poison_detector.py` | critical | Unmeasured; generic RAG-poison path. |
+| **INJ-0010** | I1 | LLM01 | T0051.001 Indirect | Indirect via external web/email/feeds | input | **76** | estimated | — | `data_source_poisoning.py` (I1.1/I1.3), `html_extractor.py` | critical | Unmeasured. |
+| **INJ-0011** | I1 | LLM01 | T0051.001 Indirect | Indirect from attacker-controlled source | input | **70** | estimated | — | `data_source_poisoning.py` (I1.1); AD2.4 taxonomy-only | high | Unmeasured. |
+| **INJ-0012** | I1 | LLM01 | T0051.001 Indirect | Indirect from compromised trusted source | input | **72** | estimated | — | `data_source_poisoning.py` (I1.1 SO/GitHub) | high | Unmeasured. |
+| **INJ-0013** | I1 | LLM01 | T0051.001 Indirect | Indirect via attacker-influenced UGC | input | **72** | estimated | — | `data_source_poisoning.py` (I1.1 UGC) | high | Unmeasured. |
+| **INJ-0014** | S, IG | LLM03 | T0010.002 Supply Chain: Data | Supply-chain / ETL ingestion compromise | mixed | **52** | estimated | — | `supply_chain.py`, `ingestion_manipulation.py`, `safe_pickle.py`+`KNOWN_HASHES` (load-time) | high | Load-time integrity only; IG1.x no `src/` detector; unmeasured. |
+| **INJ-0015** | D1.20 | LLM01 | T0080.001 Thread | Context-memory poisoning via prior output | mixed | **86** | estimated | — (not in harness) | `layer16/detectors/context_poisoning.py` (WIRED) | high | Dedicated detector + 40-test suite; **unmeasured by the recall harness** — only Validated row not measured. |
+| **INJ-0016** | I1.6, IG1.8 | LLM01 | T0080.000 Memory | Persistent agent-memory poisoning | agent-tool | **40** | estimated | — | taxonomy-only (I1.6/IG1.8) | high | No detector, no test. |
+| **INJ-0017** | IM, IG, AD | LLM06 | T0080.000 Memory *(dual: T0061)* | Inter-model / cross-system propagation | agent-tool | **44** | estimated | — | `inter_model_propagation.py` probe; `detectors/inter_model.py` is a **non-wired stub** (returns empty; recall test RED) | critical | Stub present, functional detection absent. |
+| **INJ-0018** | D2 | LLM01 | T0054 Jailbreak | Persona / roleplay jailbreak (DAN) | input | **57** | measured | **56.7%** (17/30) | `persona_roleplay.py` (D2), rules + `structural/` (role→D2.1) — WIRED | high | **Gate FAILS** (CI-low 0.39); estimate (70) was +13 optimistic. |
+| **INJ-0019** | E | LLM07 | T0056 Extract System Prompt; T0057 Data Leakage | Exfiltration / system-prompt & secret extraction | mixed | **48** | measured | **E1 48%** (12/25); **E2 0%** (0/20) | `detectors/extraction.py` (WIRED), E1/E2 rules, `output/scanner.py`, `canary/` | critical | **E2 active-recon measured 0%** — wired but ineffective (gate FAILS). Estimate (78) was +30 optimistic. |
+| **INJ-0020** | P, P2 | LLM02 | T0057 Data Leakage; T0024 Exfil via API | Privacy / PII / training-data extraction | input | **35** | measured | **P1 35%** (7/20) | `detectors/privacy_probe.py` (WIRED), P1 rules | high | **Gate FAILS**; P2 membership-inference untagged. Estimate (74) was +39 optimistic. |
+| **INJ-0021** | C, C1 | LLM01 | T0054 Jailbreak | Compliance / policy / safety evasion | input | **24** | measured | **C1 24%** (6/25) | `detectors/fictional_frame.py` (WIRED), compliance rules | high | **Gate FAILS, lowest measured class.** Estimate (72) was +48 optimistic — the largest estimate error. |
+| **INJ-0022** | C1MT | LLM01 | T0080.001 Thread | Multi-turn escalation / Crescendo | mixed | **56** | estimated | — (C1MT not in harness) | `layer16/detectors/escalation.py` + `ConversationSecurityMonitor`; **now folds into `scan()`** when `session_id` set (D8-G02) | high | Multi-turn fold-in is opt-in via `session_id`; default `scan(text)` provides none; unmeasured. |
+| **INJ-0023** | A | LLM01 | T0054 Jailbreak *(automated)* | Adversarial-ML / automated jailbreak (GCG/PAIR/TAP) | input | **48** | estimated | — | `layer0/tokenization.py` (A1.1), `perplexity.py` (gated) — PARTIAL | high | GCG-suffix only; PAIR/TAP/AutoDAN/LatentBreak (fluent, evade perplexity) undetected. |
+| **INJ-0024** | P3 | LLM05 *(adjacent)* | *no clean ATLAS* | Malicious code generation | input | **42** | estimated | — | `malicious_code_gen.py` (P3); overlaps `harmful_intent.py` O1.2 only | high | No P3 detector; samples-only for the named technique. |
+| **INJ-0025** | R | LLM10 | T0034 Cost Harvesting; T0029 DoS | Resource exhaustion / DoS / cost-amplification | mixed | **46** | estimated | — | `layer0/resource_guard.py`, length/chunk caps, R1 rules — PARTIAL | medium | Input-side R1.1 only; output-side recursive/cost not detected. |
+| **INJ-0026** | T | LLM06 | T0053 Tool Invocation; T0011.002 Poisoned Tool | Agent / tool / MCP abuse | agent-tool | **50** | estimated | — | `detectors/mcp_tool.py` reachable only via unexported `scan_tools()` (not default `scan()`); T1 text rules fire | critical | Manifest analysis off the default path; not benchmarked vs MCPTox/MCPSecBench. |
+
+---
+
+## Coverage matrix — evasion-modifier axis (measured detection rates)
+
+Evasion is centralized preprocessing applied to every input before class detection, so class rows inherit it. The harness measures each modifier directly (`per_evasion_type`, n=63 each unless noted):
+
+| Modifier | Cat | Mechanism (runtime) | Measured detection | Status |
+|----------|-----|---------------------|--------------------|--------|
+| **Base64** | D4 | decode-and-rescan ([obfuscation.py](src/na0s/layer2/obfuscation.py)) | **90.5%** (57/63) | strong |
+| **Whitespace stego** | D4/D5 | SNOW/statistical/trailing-WS detectors | **71.4%** (45/63) | good |
+| **Hex (incl. spaced)** | D4 | `_EMBEDDED_HEX_RE` + new `_SPACED_HEX_RE` (≥8 pairs, keyword-gated) | **69.8%** (44/63) | **0%→70% (spaced-hex fix)** |
+| **Syllable-split** | D4 | syllable normalizer | **60.3%** (38/63) | partial |
+| **Unicode homoglyph** | D5 | NFKC + homoglyph fold | **57.1%** (36/63) | partial |
+| **ROT13 / Caesar** | D4 | brute-force decode (keyword-gated) | **31.7%** (20/63) | weak |
+| **Mixed-encoding** | CT | — | **20.6%** (13/63) | weak |
+| **Reversed** | D4 | full + per-word reverse (keyword-gated) | **15.9%** (10/63) | weak |
+| **Leetspeak** | D4 | leet normalizer (keyword-gated) | **11.1%** (7/63) | weakest |
+| **Multi-buff stacking** | MB, CT | recursive decode (depth-4) | **33%** (measured via `na0s.scan`, not harness) | **OPEN GAP** |
+
+Category-level measured (per-category holdout, different pool): **D4 80%, D5 80%, D6 multilingual 67%, D7 delivery 64%**.
+
+**The stacking gap, confirmed by measurement.** [layer2/obfuscation.py](src/na0s/layer2/obfuscation.py) recurses, but its ROT13/Reverse/Leet/Caesar decoders are **keyword-gated per layer** — a chain whose *inner* transform is keyword-gated never peels (the intermediate layer has no plaintext keywords to satisfy the gate). Measured: **33%** overall MB recall, **0%** on every chain with a keyword-gated inner transform (Base64+ROT13, ROT13+Leet, Reverse+ROT13, …), **100%** only when both buffs are non-gated codecs/unicode. This is also visible above: base64 90% vs rot13 32%, leetspeak 11%, reversed 16%, mixed-encoding 21%. **Per-row exceptions:** multimodal (INJ-0003) — decode doesn't reach inside image/audio; samples-only rows (INJ-0016/0017/0024) — no base detector to evade.
+
+> **Buff provenance.** Na0S's 8 `_buffs.py` transforms are a superset of garak's 6 built-in buffs; the "29 probes × 8 buffs" framing is inspired-by, not parity-with, garak.
 
 ---
 
 ## Summary rollup
 
-**17 classes mapped.** Mean (equal-weight) coverage: **63.1%**. Severity-weighted coverage (critical×4, high×3, medium×2, low×1): **66.1%**.
+**26 classes mapped** (17 original + 9 new `INJ-0018…0026`). **8 rows now measured/mixed; 18 estimated.** Mean (equal-weight) coverage: **55.1%**. Severity-weighted (critical×4, high×3, medium×2): **57.1%** — coincident with the harness's overall 57.1% recall.
+
+The mean fell from v2.0's 61.8% **because measurement replaced optimistic estimates**, not because coverage regressed. Net real movement is *up* (D8 hardening landed; D4 spaced-hex 0→70%) but the measured numbers expose that estimates ran **+13 to +48 points high** on every category the harness touches.
 
 **By score band**
 
 | Band | Count | Rows |
 |------|-------|------|
-| Validated (85–100) | 3 | INJ-0001, INJ-0002, INJ-0015 |
-| Asserted (70–84) | 7 | INJ-0006, INJ-0008, INJ-0009, INJ-0010, INJ-0011, INJ-0012, INJ-0013 |
-| Partial (45–69) | 3 | INJ-0003, INJ-0007, INJ-0014 |
-| Taxonomy-only (15–44) | 2 | INJ-0016, INJ-0017 |
+| Validated (85–100) | 1 | INJ-0015 *(estimated — only Validated row not yet harness-measured)* |
+| Asserted (70–84) | 8 | INJ-0001, INJ-0002, INJ-0008, INJ-0009, INJ-0010, INJ-0011, INJ-0012, INJ-0013 |
+| Partial (45–69) | 10 | INJ-0003, INJ-0006, INJ-0007, INJ-0014, INJ-0018, INJ-0019, INJ-0022, INJ-0023, INJ-0025, INJ-0026 |
+| Taxonomy-only (15–44) | 5 | INJ-0016, INJ-0017, INJ-0020, INJ-0021, INJ-0024 |
 | Not modeled (0–14) | 2 | INJ-0004, INJ-0005 |
 
-INJ-0002 scores 88 and sits in the Validated band; INJ-0008 scores 84 (top of Asserted).
+**Measured vs estimated — the honesty gap.** Where both exist: D1 92→**72.5**, D3 88→**83.3**, D2 70→**56.7**, exfil 78→**48** (E2 **0**), privacy 74→**35**, compliance 72→**24**. The 8 estimated Asserted rows (INJ-0008…0013 indirect-injection, all unmeasured) are the **highest-risk overstatements** — by the observed pattern they likely measure 15–25 points lower; adding I1 to the holdout is the top measurement priority.
 
-**By severity**
+**Priority signal (measured + structural):**
+1. **INJ-0021 compliance (24%)** and **INJ-0019 E2 recon (0%)** — lowest measured, gate-failing, wired-but-ineffective. Detection logic, not wiring, is the gap.
+2. **INJ-0020 privacy (35%)**, **INJ-0018 jailbreak (57%)**, **O1 (30%)** — gate-failing measured slices.
+3. **Evasion stacking (33%)** — keyword-gated chaining; affects every class.
+4. **INJ-0017 (44, stub)** and **INJ-0026 (50, unexported entrypoint)** — agent-tool surface, structurally unwired.
 
-| Severity | Count | Rows |
-|----------|-------|------|
-| Critical | 5 | INJ-0001, INJ-0008, INJ-0009, INJ-0010, INJ-0017 |
-| High | 10 | INJ-0002, INJ-0003, INJ-0006, INJ-0007, INJ-0011, INJ-0012, INJ-0013, INJ-0014, INJ-0015, INJ-0016 |
-| Medium | 2 | INJ-0004, INJ-0005 |
-| Low | 0 | — |
+---
 
-**Priority signal.** The most actionable gaps are the two critical-severity rows scoring below the Partial floor: **INJ-0017** (multi-agent / inter-model propagation, 44 — probe assets exist but no detector, no test) and the supply-chain row **INJ-0014** (high, 52 — samples/probes but no runtime detector). The agent-tool gate (INJ-0016, INJ-0017) is the weakest-covered surface overall.
+## Framework reverse-traceability
+
+Maps **8 of 10** OWASP LLM 2025 items: LLM01, LLM02 (INJ-0020), LLM03, LLM05, LLM06, LLM07 (INJ-0019), LLM08, LLM10 (INJ-0025).
+
+**Deliberately out of scope** (a prompt-injection matrix): **LLM04** Data & Model Poisoning (training-time/model-weight; runtime RAG/ingestion poisoning *is* covered via INJ-0008/0009/0014) and **LLM09** Misinformation (intrinsic hallucination; injection-induced misinfo covered transitively).
 
 ---
 
 ## Rows needing external-taxonomy judgment
 
-The following rows carry `no_clean_atlas_match = true`: no MITRE ATLAS technique cleanly describes the class, and the listed ID is the closest available approximation. These mappings are deliberately conservative and should be re-checked each review cycle against new ATLAS releases.
+- **INJ-0004 — human-relay delivery:** no clean ATLAS equivalent (T0011 User Execution is execution-scoped, not prompt-relay).
+- **INJ-0005 — deceived courier:** `AML.T0011` as "closest, not exact."
+- **INJ-0024 — malicious code generation:** no clean ATLAS; OWASP LLM05 (adjacent).
+- **INJ-0017 dual-map:** `AML.T0080.000 (Memory)` for persistence + `AML.T0061 (Self-Replication)` for cross-model propagation.
 
-- **INJ-0004 — human-relay delivery (user induced to paste/relay the prompt).** **Decision: no clean ATLAS equivalent.** Verified against MITRE ATLAS **v2026.05** (all candidate IDs confirmed present: `T0011`, `T0051.000/.001/.002`, `T0052/.000`, `T0065`, `T0093`). No technique describes a human socially-engineered into relaying an attacker's prompt into an AI. The closest neighbor, `AML.T0011` User Execution (*"rely upon specific actions by a user… social engineering to get them to… open a malicious document file or link"*; maps to ATT&CK T1204), is scoped to gaining **execution** (code, packages, tools, links) — not relaying a text prompt, which produces inference, not execution. Note the row's legacy "Indirect PI" title is a misnomer in the ATLAS sense (ATLAS "Indirect" = payload pulled from a separate **data** channel and hidden from the user; here the user consciously pastes it).
-- **INJ-0005 — deceived human as unwitting courier (user tricked into forwarding/submitting a payload).** **Decision: keep `AML.T0011` User Execution as "closest, not exact."** Same catalog verification. T0011 is the nearest match by tactic (Execution / `AML.TA0005`) and actor framing (adversary relies on a deceived user's action), but ATLAS scopes the action to executing code / invoking a tool / clicking a link rather than couriering a text payload. Rejected by catalog text: `T0093` (adversary plants the payload — wrong actor), `T0052/.000` (adversary/LLM phishes the victim — inverse direction), `T0051.001/.002` (the "unwitting user" is the injection victim, not the courier). The two rows differ deliberately: INJ-0004 is pure prompt-relay (no artifact), whereas INJ-0005 couriers an artifact, which sits one step closer to T0011's "open a malicious document."
-
-No other rows are flagged `no_clean_atlas_match`. INJ-0017 originally read as borderline but resolves cleanly to `AML.T0080.000 (Memory)` after the verification correction. *(Source note: verify ATLAS IDs against the **v2026.05** release file pinned in the header — the `main/dist/ATLAS.yaml` branch currently serves an older 5.6.0 build that lacks `AML.T0093` and the `T0011` sub-techniques.)*
-
----
-
-## How this maps back (reverse traceability)
-
-Read the matrix in either direction:
-
-- **From a framework finding to Na0S.** Given an OWASP `LLMxx:2025` item or a MITRE ATLAS `AML.Txxxx` technique, scan the matching column to find every `INJ-####` / `IM####` class that addresses it, then jump to the **Components** column for the implementing module(s) and the **Validation** column for the backing test(s). Note that LLM01:2025 and `AML.T0051.001 (Indirect)` are many-to-one anchors (INJ-0008 through INJ-0013 all specialize the indirect-injection surface by data source).
-- **From Na0S code to a framework.** Each `INJ-####` row keys to an internal `IM####` taxonomy code (1:1) and to the `D*/I*/M*/S*/IG*/IM*/AD/T*` technique families in `data/taxonomy.yaml` and `scripts/taxonomy/`. A code change in any listed component traces forward to its OWASP + ATLAS obligations via that row.
-- **Audit trail.** Four mapping corrections versus the initial draft — INJ-0007 (ATLAS `AML.T0092` → `AML.T0080.001`), INJ-0016 (OWASP `LLM08:2025` → `LLM01:2025`), INJ-0017 (ATLAS `AML.T0080.001` → `AML.T0080.000`), and INJ-0004 (ATLAS `AML.T0011` closest-fit → *no ATLAS equivalent*, after per-row analysis of the human-relay vector) — each made to match the authoritative ATLAS v2026.05 / OWASP 2025 catalog semantics. Re-validate all IDs at the next quarterly review.
+*(Verify ATLAS IDs against the v2026.05 release pinned in the header.)*
 
 ---
 
-*Owner: @M-Abrisham. Last validated: 2026-06-03 (initial agent-assisted build). Re-confirm every quarter against the then-current MITRE ATLAS and OWASP LLM Top 10 releases.*
+## Known doc-hygiene issues (referenced, not owned by this file)
+
+These live in sibling docs that are under active edit; flagged here for the next sync rather than silently depended on:
+
+- **`THREAT_TAXONOMY.md`** — IM category still tagged `OWASP LLM01/LLM15` (**LLM15 does not exist** in OWASP 2025; should be LLM06 per this matrix). Internal count drift: "20 categories" vs "eighteen" in adjacent lines. The "zero training samples" line is now stale for D4/D5/D6 (the file's own measured-coverage note supersedes it).
+- **`data/taxonomy.yaml`** — IM category carries the invalid `owasp-llm:2025:llm15` tag (source of the THREAT_TAXONOMY error).
+- **`docs/TAXONOMY.md`** — says "19 categories / 103+ techniques"; authoritative count is **29 / 276**; disagrees with THREAT_TAXONOMY's "20 / 108".
+
+---
+
+## Audit trail (→ v2.1)
+
+- **Measured grounding.** Scores for the 13 harness-covered categories now use measured recall @0.55 (`Basis = measured`/`mixed`); the rest stay `estimated`. Harness artifact is the declared source of truth, over the per-row "samples" columns and over `BENCHMARK_RESULTS.md` (whose 100% D8 row is known-mislabeled and unfixed — **not** used here).
+- **D8 hardening reflected (in-flight, pending commit).** INJ-0007 rises 58→64 (measured): `context_manipulation.py` no longer dead code, multi-turn verdict folds into `scan()`, new `token_budget.py`/`state_confusion.py`, per-segment max-pool, cascade parity — all six D8.x techniques wired, 14/14 scan tests green. Residual is recall calibration (~7 round-number gates unvalidated), not wiring.
+- **D4 spaced-hex reflected.** Evasion axis hex 0%→69.8% (measured). Multi-buff stacking remains **OPEN** (measured 33%, keyword-gated chaining untouched).
+- **2D structure + 9 new rows + Category column** retained from v2.0. Four v1.0 ATLAS/OWASP mapping corrections retained.
+- **Sibling-doc edits left untouched** — ROADMAP_V2.md and THREAT_TAXONOMY.md carry the author's own in-flight measured-coverage notes; this file is kept consistent with them, not overwritten onto them.
+
+> **Scoring caveat.** `estimated` rows express relative ordering, not measured detection; the measured-vs-estimated gap above shows estimates run optimistic. Upgrading `estimated` → `measured` (extend the holdout to I1/M/E2/T/etc., re-run the harness, record per-row pass-rate) is the standing next-quarter obligation.
+
+---
+
+*Owner: @M-Abrisham. Last validated: 2026-06-16 (harness-grounded v2.1). Re-run the recall harness each cycle and re-confirm IDs against the then-current MITRE ATLAS / OWASP LLM Top 10.*
