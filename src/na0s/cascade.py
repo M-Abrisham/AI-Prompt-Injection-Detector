@@ -26,6 +26,11 @@ from .predict import (
 from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .config import THRESHOLDS, MAX_INPUT_LENGTH
 from .layer2 import obfuscation_scan
+try:
+    from .layer2.whitespace_stego import detect_whitespace_stego
+    _HAS_WHITESPACE_STEGO = True
+except ImportError:
+    _HAS_WHITESPACE_STEGO = False
 from .layer0 import layer0_sanitize
 from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult
@@ -470,6 +475,29 @@ class WeightedClassifier:
         # calling _voting.  obs_flags are scored separately as obf_weight;
         # adding them to hits would double-count them as medium-severity rules.
         # They are added to hit_names AFTER the _voting call for reporting.
+
+        # --- Layer 2: Whitespace steganography — parity with predict.scan() ---
+        # MUST run on RAW text (before L0 strips trailing whitespace).  scan()
+        # wires this at predict.py:838; the cascade path previously did not,
+        # leaving CascadeClassifier blind to SNOW/binary trailing-WS stego.
+        if _HAS_WHITESPACE_STEGO:
+            try:
+                _stego_raw = raw_text if raw_text is not None else text
+                _stego = detect_whitespace_stego(_stego_raw)
+                if _stego.detected:
+                    obfuscation_flags = list(obfuscation_flags) + ["whitespace_stego"]
+                    # Recover the hidden payload and run rules on it so a
+                    # stego-smuggled injection contributes real severity, not
+                    # just a weak obfuscation flag (mirrors predict.py's
+                    # decoded_views rule pass).
+                    if _stego.decoded_payload:
+                        for _rh in rule_score_detailed(_stego.decoded_payload):
+                            if _rh.name not in hit_names_seen:
+                                detailed_hits.append(_rh)
+                                hit_names_seen.add(_rh.name)
+                                hit_names.append(_rh.name)
+            except Exception:
+                _logger.debug("Whitespace stego (Layer 2) failed", exc_info=True)
 
         # --- Layer 3: Structural features (Phase 3a) ---
         structural = None
