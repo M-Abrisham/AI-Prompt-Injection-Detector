@@ -23,6 +23,48 @@ L16 Multi-Turn | L17 Doc Scanning (35%) | L18 RAG Security | L19 Agent/MCP | L20
 
 ---
 
+## Context-Window (D8) Manipulation Hardening — 2026-06-16 (branch `hardening/d8-context-window`)
+
+Gap audit (15 findings, adversarially verified) closed the orphaned-detector +
+annotate-only-multi-turn problem. The dedicated D8 detector was dead code with a
+false "called from cascade.py" docstring; multi-turn analysis was computed then
+discarded; there was no token-budget accounting; cascade had weaker D8 coverage
+than `scan()`. Status (commit SHA to be filled on push):
+
+- [x] **D8-G01/G04/G05/G08/G14/G15** — Hardened `detectors/context_manipulation.py`
+  and WIRED it into `predict.scan()` (long-input path) with its boost fused
+  (capped) into the composite score: real D8.4 strategic-displacement (middle
+  burial) branch, canonical D8.6 id for attention-hijack, newline-preserving
+  segment split, ML-aware `classify_fn`, derived `/8.0` divisor, corrected docstring.
+- [x] **D8-G02** — Multi-turn verdict now feeds `scan()`: `recommendation`/
+  `threat_level`/`cumulative_risk` fold into `risk_score`/`is_malicious`; bare
+  `except: pass` replaced with a logged warning. New `ScanResult` fields:
+  `multi_turn_threat_level`, `multi_turn_recommendation`, `cumulative_risk`.
+- [x] **D8-G03** — New `detectors/token_budget.py` (tiktoken-or-heuristic) flags
+  input approaching the model context window (D8.1 eviction), corroboration-gated
+  in the pipeline; env `NA0S_MODEL_CONTEXT_WINDOW`. 14 unit tests.
+- [x] **D8-G05/G06** — Per-segment ML max-pool over chunks (incl. the middle band)
+  in `predict.scan()`; a buried needle is no longer averaged below threshold.
+- [x] **D8-G07** — New `detectors/state_confusion.py` (D8.5 async/session-state
+  forgery) with a two-family co-occurrence FP gate; wired into `scan()`. 24 tests.
+- [x] **D8-G09** — `rag/position_scanner.py` wired into `scan()` for concatenated
+  RAG context + new size-dominance/token-share term; broadened imperative regex.
+- [x] **D8-G10** — Live-session eviction is now risk-weighted (`state._evict_to_cap`):
+  benign flooding can no longer push a suspicious earlier turn out of the window.
+- [x] **D8-G11** — Cascade parity: `WeightedClassifier.classify` runs the same
+  chunk + head/tail rule pass on long inputs (was full-text-only).
+- [x] **D8-G12/G13** — New `tests/test_scan_d8_context_window_hardening.py` (14
+  scan-level tests) covering D8.4/D8.5/D8.6, token-budget, multi-turn fusion,
+  cascade parity, RAG position + neutral-anchor FP guards.
+- [ ] **D8-G12 (follow-up)** — Persist per-D8.x recall in `technique_analysis.json`
+  and fix the mislabeled 100% D8 row in `BENCHMARK_RESULTS.md` (benchmark tooling).
+- [ ] **D8-G04 (follow-up)** — System-prompt-distance/anchor-offset metric (needs
+  defender-known system-prompt span; the hardest 6000-word weak-payload `xfail`
+  remains a known gap — corroboration gate intentionally won't force it over
+  threshold to protect precision).
+
+---
+
 ## Progress Overview
 
 | Layer  | Progress               | Done/Total | Status   |
@@ -489,6 +531,16 @@ Totals: 7 source files │ 11+ Layer-2-touching test files (official 9 + 2 uncat
 ### Completed (41 items)
 
 Core pipeline: Shannon entropy with 2-of-3 composite voting (KL-divergence from English + compression ratio), punctuation-flood detection (≥30% ratio), casing-transition detection (≥6 transitions), Base64/hex/URL-encoding decoders, recursive `_scan_single_layer()` with `max_depth=4`, SHA-256 cycle detection, 10× expansion limit, and `DecodedView` dataclass for forensic encoding-chain provenance (`decoded_chain`, `encoding_chains`, `max_depth_reached`, `parent_index`). 3 audit fixes on 2026-02-20 (entropy threshold raised to composite voting, flat decode budget replaced with recursive unwrap, combined signal boosting added as `signal_boost.py` — 292 LOC, MAX_BOOST=0.3 cap, 45 tests). Decoder expansions: ROT13/Caesar brute-force (shifts 1–25 skip 13, 370k-word English dictionary validation, 10KB cap), Leetspeak normalizer (9 substitutions, 10% density gate), Reversed text (full-string + per-word), Morse code (ITU-R M.1677, 80% density gate, 4-layer FP defense — first-in-class), Binary/Octal/Decimal ASCII (three decoders, 70% printability gate, FP exemptions for Unix perms/IPs/versions — first-in-class), Pig Latin (consonant-cluster decoding, 50+ "-ay" exclusion set), Whitespace steganography (SNOW structural 0.95, statistical anomaly 0.70, simple binary 0.60, trailing-WS 0.50 — first-in-class), ASCII art detection (5-signal weighted vote summing to 1.0, Unicode box-drawing/braille/block — first-in-class against ArtPrompt ACL 2024), Syllable-splitting (25 Unicode dashes, 83 suspicious words, 77 compound whitelist, 50 safe prefixes — first-in-class against Meta Prompt Guard 2). Unicode Tag Character stego moved to Layer 0. Gap Closure Sprint 2026-02-28: content-type aware entropy thresholds (Track C — code/yaml/json raised 4.5→5.5, code-fence exemption, 26 tests) + encoding-chain depth/diversity scoring (Track D — depth bonus 0.05/level max 0.10, diversity bonus 0.02/type max 0.10, total boost [0.0, 0.20], 11 tests) + cross-track integration (27 tests). Package restructure: promoted from top-level/layer1 into `src/na0s/layer2/` on 2026-02-26 with backward-compat shims at old import paths. Hardcoded thresholds externalized via `_env_utils.py` (env-overridable). All 4 hardcoded values from the original TODO now live as named constants. See [CHANGELOG.md](CHANGELOG.md) v0.2.0 for the detailed per-feature history.
+
+### Recent Fixes (2026-06-16)
+
+- [x] **D4.3 spaced-hex decoder gap** — `_extract_embedded_hex()` only matched *contiguous* 16+‑char hex runs, so the common real‑world form `"...command: 49 67 6e 6f ..."` (space‑separated pairs + natural‑language prefix; Promptfoo/Praetorian) bypassed detection. Added `_SPACED_HEX_RE` (≥8 space‑separated pairs) + a shared `_accept_hex_decode()` helper, keyword‑gated on the spaced path so benign hex dumps (e.g. an encoded recipe) are not flagged. **Result**: `hex_encoding` evasion recall **0% → 69.8%** on the recall harness with **no new benign false positives** (the new `_scan` benign hard-negative tests stay green) — the keyword gate trades ~16pp of attack recall for FP-safety, the right call for an embedded SDK. _(commit pending)_
+
+### Benchmarking — Recall Harness as Single Source of Truth (2026-06-16)
+
+- [x] **`scripts/technique_analysis.py` upgraded to a two-sided harness** — was recall-only (misleading: a block-everything detector scores 100%). Now adds **Part 3 benign FPR** (`safe_holdout.jsonl`), **Wilson 95% CIs** + per-slice `n` on every rate, an opt-in **`--gate`** mode (per-category recall floor on the CI *lower* bound + pooled benign FPR ceiling on the CI *upper* bound, **fail-closed** on missing coverage), auto-regeneration of the gitignored datasets, and a richer versioned JSON artifact. Precision/F1 intentionally omitted (TP and FP come from differently-sized pools with no shared prevalence). Wired via `make recall-harness` / `make recall-gate` and a non-blocking CI step. **Baseline @ threshold 0.55**: overall recall **57.1%** (194/340, CI 51.8–62.2), benign FPR **1.2%** (6/500, CI 0.6–2.6 — measured on the 500-sample hard-negative safe holdout), evasion **47.6%** (270/567); **D6 now measured** (66.7%). Gate surfaces the real coverage gaps: **E2 recon ~0%**, C1 24%, O1 30%, P1 35%. _(commit pending)_
+- [x] **Data/generator hygiene** — fixed two pre-existing failures (`test_holdout_malicious`: stale `source="holdout"` expectation → `"generated"`, added `P1` to the valid-category set) and stopped `gen_all_datasets.py` from clobbering the canonical 9-type evasion file (the older 7-type generator silently dropped `hex_encoding`). _(commit pending)_
+- [ ] **Ratchet the gate floors** as the surfaced gaps close (E2/O1/C1/P1), then drop `continue-on-error` in `ci.yml` to make the recall gate blocking. **Priority**: P1.
 
 ### TODO List
 

@@ -834,9 +834,12 @@ class TestD8_Combined(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_d8_many_shot_plus_flooding(self):
-        """D8.2 many-shot pattern embedded in D8.1 filler."""
+        """D8.2 many-shot pattern embedded in D8.1 filler.
+
+        Now detected after the D8 hardening (token-budget + dedicated
+        context-manipulation detector wired into scan()); previously xfail.
+        """
         filler_start = _lorem_filler(500)
         shots = []
         for i in range(10):

@@ -14,7 +14,34 @@ from typing import Any, Dict, List, Optional
 MAX_TURNS_PER_SESSION = 500
 MAX_TURN_TEXT_LENGTH = 50_000
 
+# Always retain the most recent N turns on eviction — covers the escalation /
+# payload-assembly windows so in-flight multi-turn context is never dropped.
+_RECENT_ALWAYS_RETAIN = 50
+
 from na0s.layer16.models import Alert, ConversationState, ConversationTurn
+
+
+def _evict_to_cap(turns: List[ConversationTurn], cap: int) -> List[ConversationTurn]:
+    """Risk-weighted eviction down to *cap* turns (G10).
+
+    Plain FIFO tail-slicing lets an attacker flood a session with benign turns
+    to push an earlier SUSPICIOUS turn out of the window.  Instead we always
+    keep the most recent ``_RECENT_ALWAYS_RETAIN`` turns and fill the remaining
+    slots with the HIGHEST-RISK older turns, preserving chronological order so
+    escalation-slope and contiguous-assembly detectors still see a valid trend.
+    """
+    if len(turns) <= cap:
+        return turns
+    recent = turns[-_RECENT_ALWAYS_RETAIN:]
+    older = turns[:-_RECENT_ALWAYS_RETAIN]
+    slots = cap - len(recent)
+    if slots <= 0:
+        return turns[-cap:]
+    # Pick the highest-risk older turns, then restore chronological order.
+    keep_idx = sorted(
+        sorted(range(len(older)), key=lambda i: older[i].risk_score, reverse=True)[:slots]
+    )
+    return [older[i] for i in keep_idx] + recent
 
 
 def add_turn(
@@ -60,7 +87,7 @@ def add_turn(
     )
     state.turns.append(turn)
     if len(state.turns) > MAX_TURNS_PER_SESSION:
-        state.turns = state.turns[-MAX_TURNS_PER_SESSION:]
+        state.turns = _evict_to_cap(state.turns, MAX_TURNS_PER_SESSION)
     state.last_activity = datetime.now(timezone.utc)
 
     # Update cumulative risk: EMA with decay, capped at [0.0, 1.0].
