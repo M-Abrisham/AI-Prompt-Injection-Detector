@@ -377,6 +377,21 @@ RULES = [
          r"(?:unrestricted|unfiltered|uncensored|unmoderated|"
          r"unaligned|jailbroken)\s+"
          r"(?:mode|access|version|output|response)"
+         # Content-policy bypass (D1/D4): "override/disregard content policy"
+         r"|(?:override|disregard|ignore|disable|remove|turn\s+off|bypass|"
+         r"circumvent|lift|suspend|drop|relax)\s+"
+         r"(?:(?:all|any|every|the|your)\s+){0,2}"
+         r"content\s+(?:policy|policies|filters?|restrictions?|moderation)"
+         r"|(?:you\s+have|pretend\s+you\s+have|act\s+as\s+if\s+you\s+have|"
+         r"there\s+are\s+no|with)\s+no\s+"
+         r"content\s+(?:policy|policies|filters?|restrictions?|moderation)"
+         r"|(?:answer|respond|reply|proceed|speak|write)\s+"
+         r"(?:\w+\s+){0,3}?without(?:\s+any)?\s+"
+         r"content\s+(?:policy|policies|filters?|restrictions?|moderation)"
+         r"|content\s+(?:policy|policies|filters?|restrictions?|moderation)\s+"
+         r"(?:relaxed|disabled|removed|lifted|turned\s+off|suspended)\s+"
+         r"(?:for|in|during)\s+(?:this|the|our)\s+"
+         r"(?:session|chat|conversation|turn|request|task)"
          r")",
          technique_ids=["C1.1", "D2.2"],
          severity="critical",

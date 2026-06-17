@@ -100,12 +100,92 @@ def _register(
     name: str,
     pattern: str,
     is_extraction: bool = False,
+    guarded: bool = False,
 ) -> None:
-    """Compile *pattern* and register it in the privacy pattern list."""
+    """Compile *pattern* and register it in the privacy pattern list.
+
+    ``guarded=True`` marks a broad pattern that must be suppressed when the
+    request is self-referential (the user asking about their *own* history),
+    which is benign.  See the self-referential guard in
+    :func:`detect_privacy_probe`.
+    """
     compiled = safe_compile(pattern, re.IGNORECASE, check_safety=True)
     _PRIVACY_PATTERNS.append(
-        (probe_type, technique_id, name, compiled, is_extraction)
+        (probe_type, technique_id, name, compiled, is_extraction, guarded)
     )
+
+
+# ---------------------------------------------------------------------------
+# Self-referential guard
+# ---------------------------------------------------------------------------
+# The malicious vs benign axis for history/session requests is *third-party /
+# cross-session* framing (attack) vs *first-person* (benign).  A broad pattern
+# is suppressed when the text is self-referential (first person) AND has no
+# genuine cross-user reference.  References to the user's OWN session
+# ("my last session") are stripped before the cross-user check so they are not
+# misread as cross-user ("last session").
+
+_THIRD_PARTY_NOUN = r"(?:users?|customers?|accounts?|persons?|people|colleagues?|coworkers?|teammates?|clients?|members?)"
+
+_SELF_REF = re.compile(
+    r"\b(?:my|mine|our|ours)\b"
+    r"|\b(?:show|give|tell|send|get)\s+me\s+(?:my|our)\b",
+    re.IGNORECASE,
+)
+
+_MY_OWN_SESSION = re.compile(
+    r"\b(?:my|our)\s+(?:(?:last|previous|prior|current|own|recent|earlier)\s+){0,2}"
+    r"(?:session|conversation|chat|messages?|history|queries|questions?|discussion)\b"
+    r"|\b(?:what|which)\s+(?:i|we)\s+(?:asked|said|wrote|sent|discussed|agreed|requested|queried)\b"
+    r"|\b(?:we|i)\s+(?:discussed|agreed|talked\s+about)\b"
+    r"|\brecall\s+(?:my|our|what\s+(?:i|we))\b"
+    r"|\bsummariz\w*\s+(?:my|our|the\s+(?:chat|conversation|discussion))\b"
+    r"|\bwhat\s+did\s+(?:i|we)\s+(?:ask|say|discuss|talk)\b",
+    re.IGNORECASE,
+)
+
+_CROSS_USER = re.compile(
+    r"\b(?:other|another|different|specific|particular|each|every|all|some|certain)\s+" + _THIRD_PARTY_NOUN + r"\b"
+    r"|\b(?:previous|prior|past|last)\s+(?:users?|people|persons?)\b"
+    r"|\b(?:their|them|they|somebody|someone|everyone|everybody|anyone|anybody)\b"
+    r"|\b(?:every|each|all)\s+(?:user|customer|account|person|one)\b"
+    r"|\b(?:colleague|coworker|co-worker|teammate|client)s?(?:'s?)?\b"
+    r"|\bbelong(?:s|ing)?\s+to\b"
+    r"|\bother\s+(?:guy|person|user|people|account|fellow|dude|customer)\b"
+    r"|\ba\s+(?:different|specific|particular|certain)\s+\w+\b"
+    r"|\b(?:who\s+else|someone\s+else|everyone\s+else|anyone\s+else)\b|\bothers?'?\b"
+    r"|\bbefore\s+(?:me|mine)\b|\buser\s+id\b|\b[A-Z][a-z]+(?:'s)\b"
+    r"|\b(?:from|of|for|by)\s+(?:each|every|all|another|other)\b"
+    r"|\b(?:all|every|each)\s+accounts?\b",
+    re.IGNORECASE,
+)
+
+_NAMED_PERSON = re.compile(r"\b(?:belonging\s+to|of|for|from|about)\s+([A-Z][a-z]{2,})\b")
+
+_THIRD_PARTY_OWNER = re.compile(
+    r"\b(?:other|another|different|specific|particular|each|every|all|some|certain)\s+" + _THIRD_PARTY_NOUN + r"\b"
+    r"|\b(?:previous|prior|past|last)\s+(?:users?|people|persons?)\b"
+    r"|\b(?:their|them|somebody|someone\s+else|anyone\s+else|everyone\s+else)\b"
+    r"|\b(?:every|each|all)\s+(?:user|customer|account|person)\b"
+    r"|\b(?:colleague|coworker|co-worker|teammate|client)s?(?:'s?)?\b"
+    r"|\bbelong(?:s|ing)?\s+to\b"
+    r"|\bother\s+(?:guy|person|user|people|account|fellow|dude|customer)\b"
+    r"|\ba\s+(?:different|specific|particular|certain)\s+(?:user|customer|account|person|colleague)\b"
+    r"|\buser\s+id\b|\b(?:all|every|each)\s+accounts?\b",
+    re.IGNORECASE,
+)
+
+_UI_CONTEXT = re.compile(r"\b(?:component|widget|react|vue|angular|css|html|frontend|render|tooltip|sidebar|navbar)\b", re.IGNORECASE)
+
+
+def _is_self_referential(text: str) -> bool:
+    """INVERTED guard: suppress ONLY a tight first-person-own request with no
+    third-party reference (broad cross-user OR a named non-self owner)."""
+    nm = _NAMED_PERSON.search(text)
+    has_named_owner = bool(nm and nm.group(1) != "I")
+    return (bool(_MY_OWN_SESSION.search(text))
+            and not bool(_CROSS_USER.search(text))
+            and not has_named_owner)
 
 
 # -- P1.1: Conversation extraction ------------------------------------------
@@ -215,6 +295,60 @@ _register(
     r"\bsaved\s+from\s+previous\b",
 )
 
+# -- P1.1/P1.4 broadened (self-referential guarded) -------------------------
+# The original patterns were too literal (no quantifier slot, no synonym verbs,
+# no third-party framing), so most conversation-history / cross-session probes
+# slipped through.  These broad patterns are GUARDED: suppressed when the
+# request is first-person (the user asking about their own history).
+
+_register(
+    "conversation_extraction", "P1.1", "show_history_broad",
+    # Requires the history-specific noun "conversation" -- generic nouns
+    # (question/message/session) over-matched benign text ("share their answer
+    # ... next question").  Chat/message history is covered by chat_history_phrase.
+    r"\b(?:show|display|list|print|recall|share|retrieve|dump|reveal|read|see|view|access)\b.{0,50}?"
+    r"\bconversations?\b",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "conversation_extraction", "P1.1", "chat_history_phrase",
+    r"\b(?:chat|conversation|message|session|interaction|dialogue)\s+histor(?:y|ies)\b",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "conversation_extraction", "P1.1", "who_else_asked",
+    r"\b(?:who\s+else|other\s+people|everyone\s+else|anyone\s+else|somebody|the\s+other\s+(?:guy|person|user|fellow))\b.{0,50}?"
+    r"\b(?:ask|asked|said|say|talk|shar|tell|told|quer|question|messag)",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "conversation_extraction", "P1.1", "queries_processed",
+    r"\b(?:queries|questions|messages|requests|conversations?)\s+(?:processed|handled|received|seen)\s+"
+    r"(?:by\s+(?:your|the)\s+system|previously|today|recently|so\s+far)\b",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "cross_session", "P1.4", "other_users_broad",
+    r"\b(?:other|another|previous|prior|past|last)\s+(?:users?|people|persons?)\b",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "cross_session", "P1.4", "before_me",
+    r"\bbefore\s+(?:me|mine|my\s+session)\b",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "cross_session", "P1.4", "user_id_target",
+    r"\buser\s+id\s+\w+\b.{0,30}?\b(?:ask|asked|say|said|want|query|conversation|tell|told)",
+    is_extraction=True, guarded=True,
+)
+_register(
+    "cross_session", "P1.4", "enumerate_users",
+    r"\b(?:list|show|display|enumerate)\b.{0,40}?\busers?\b.{0,30}?"
+    r"\b(?:interact|chatted|talked|asked|messag|conversation)",
+    is_extraction=True, guarded=True,
+)
+
 # -- P1.5: Serialization injection -----------------------------------------
 
 _register(
@@ -277,12 +411,36 @@ def detect_privacy_probe(text: str) -> Optional[PrivacyProbeResult]:
     if _EDUCATIONAL_FRAME.search(text):
         return None
 
-    # Scan all patterns.
+    # Scan all patterns.  Broad (guarded) patterns are skipped when the request
+    # is a benign first-person history request ("show me my conversation").
+    self_referential = _is_self_referential(text)
+
+    # Owner/UI gate.  A few broad phrase patterns ("chat history", "who else
+    # asked ...") legitimately appear in benign developer/team contexts, so they
+    # only count when a genuine third-party owner is referenced (or, for
+    # "chat history", when not framed as a UI component).
+    _named = _NAMED_PERSON.search(text)
+    has_third_party_owner = bool(_THIRD_PARTY_OWNER.search(text)) or (
+        _named is not None and _named.group(1) != "I"
+    )
+    in_ui = bool(_UI_CONTEXT.search(text))
+
     matched_types: List[str] = []
     matched_technique_ids: List[str] = []
     has_extraction = False
 
-    for probe_type, technique_id, _name, compiled, is_extraction in _PRIVACY_PATTERNS:
+    for probe_type, technique_id, _name, compiled, is_extraction, guarded in _PRIVACY_PATTERNS:
+        # Suppress conversation-history / cross-session signals (broad OR
+        # original) for benign first-person requests.  Other P1 probe types
+        # (training-data extraction, serialization, membership) are not
+        # self-referential and are never suppressed here.
+        if self_referential and (guarded or probe_type in ("conversation_extraction", "cross_session")):
+            continue
+        # Owner/UI gate for the two ambiguous phrase patterns.
+        if _name in ("chat_history_phrase", "who_else_asked") and not has_third_party_owner:
+            continue
+        if _name == "chat_history_phrase" and in_ui:
+            continue
         match = compiled.search(text)
         if match:
             if probe_type not in matched_types:
@@ -362,7 +520,8 @@ PRIVACY_RULES = [
             r"\bshow\s+(?:me\s+)?(?:the\s+)?(?:last\s+)?\d{0,4}\s*conversations?\b"
             r"|\bwhat\s+did\s+(?:the\s+)?(?:last|previous|prior)\s+user\s+(?:ask|say|tell|write|send|query)\b"
             r"|\b(?:session\s+data|cached\s+session)\b"
-            r"|\b(?:chat\s+log|conversation\s+(?:log|history|data))\b"
+            r"|\bchat\s+log\b"
+            r"|(?<!my\s)(?<!our\s)\bconversation\s+(?:log|history|data)\b"
         ),
         technique_ids=["P1.1"],
         severity="medium",

@@ -28,6 +28,8 @@ import re
 from dataclasses import dataclass, field
 from typing import List
 
+from na0s.layer0.safe_regex import safe_compile
+
 
 @dataclass
 class FictionalFrameResult:
@@ -47,7 +49,7 @@ class FictionalFrameResult:
 
 _FICTIONAL_FRAME_PATTERNS = [
     # Story/novel/movie framing
-    ("fictional", re.compile(
+    ("fictional", safe_compile(
         r"\b(?:imagine|pretend|suppose|let'?s?\s+say|hypothetically|"
         r"in\s+(?:my|our|the|a|this)\s+(?:novel|story|book|fiction|screenplay|script|fanfic|movie|game|scenario|world|simulation)|"
         r"write\s+a\s+(?:story|scene|script|novel|screenplay)|"
@@ -59,7 +61,7 @@ _FICTIONAL_FRAME_PATTERNS = [
         re.IGNORECASE,
     )),
     # Hypothetical framing
-    ("hypothetical", re.compile(
+    ("hypothetical", safe_compile(
         r"\b(?:hypothetically|theoretically|in\s+theory|"
         r"what\s+(?:if|would\s+happen\s+if)|"
         r"(?:purely|just)\s+(?:hypothetical|theoretical)|"
@@ -70,16 +72,23 @@ _FICTIONAL_FRAME_PATTERNS = [
         r"thought\s+experiment)\b",
         re.IGNORECASE,
     )),
-    # Academic/research framing
-    ("academic", re.compile(
-        r"\b(?:for\s+(?:my|a|an)\s+(?:research|thesis|dissertation|paper|study|class|course|assignment|project|lecture|report)|"
+    # Academic/research/credential framing.  Credential and occupation claims
+    # ("I am a licensed pharmacist", "I work for a gun shop") are justification
+    # framing -- they carry weight 0 on their own (Layer 3) and only matter when
+    # paired with harmful inner content, which is the false-positive control.
+    ("academic", safe_compile(
+        r"\b(?:for\s+(?:my|a|an)\s+(?:research|thesis|dissertation|paper|study|class|course|assignment|project|lecture|report|phd|ph\.?d|doctorate)|"
         r"(?:academic|scholarly|educational|pedagogical)\s+(?:purposes?|context|research)|"
-        r"(?:i'?m|we'?re)\s+(?:researching|studying|writing\s+(?:a\s+paper|about))|"
-        r"from\s+(?:a|an)\s+(?:academic|research|educational)\s+(?:perspective|standpoint))\b",
+        r"(?:i'?m|i\s+am|we'?re|we\s+are)\s+(?:researching|studying|writing\s+(?:a\s+paper|about))|"
+        r"from\s+(?:a|an)\s+(?:academic|research|educational)\s+(?:perspective|standpoint)|"
+        r"(?:i\s+am|i'?m|as)\s+(?:a|an)\s+(?:licensed|certified|registered|professional|practicing|qualified|government|federal|forensic|security)?\s*"
+        r"(?:pharmacist|chemist|physician|doctor|nurse|accountant|researcher|scientist|official|officer|agent|investigator|analyst|consultant|attorney|lawyer|journalist|professor|engineer|inspector|technician)\b|"
+        r"i\s+work\s+(?:for|at|in)\s+(?:a|an|the)\s+(?:gun\s+shop|pharmacy|lab(?:oratory)?|hospital|bank|security\s+firm|government|police|military|chemical\s+(?:plant|company))|"
+        r"for\s+(?:a|my)\s+(?:video\s+game|mobile\s+game))\b",
         re.IGNORECASE,
     )),
     # Emotional manipulation
-    ("emotional", re.compile(
+    ("emotional", safe_compile(
         r"\b(?:(?:my|someone'?s?)\s+life\s+depends?\s+on|"
         r"(?:i'?m|someone\s+is)\s+(?:desperate|dying|in\s+danger|going\s+to\s+die)|"
         r"this\s+is\s+(?:a\s+)?(?:life\s+or\s+death|emergency|urgent|critical)\s+(?:situation)?|"
@@ -91,7 +100,7 @@ _FICTIONAL_FRAME_PATTERNS = [
         re.IGNORECASE,
     )),
     # Authority impersonation
-    ("authority", re.compile(
+    ("authority", safe_compile(
         r"\b(?:(?:as|i\s+am)\s+(?:the|a|an|your)\s+(?:system\s+)?(?:administrator|admin|developer|creator|owner|supervisor|manager|engineer|operator|root\s+user)|"
         r"(?:i\s+have|with)\s+(?:admin|root|sudo|elevated|full)\s+(?:access|privileges|permissions|rights)|"
         r"(?:authorized|certified|licensed)\s+(?:personnel|user|operator|technician|consultant|professional|specialist|expert)|"
@@ -108,21 +117,21 @@ _FICTIONAL_FRAME_PATTERNS = [
 
 _INNER_ATTACK_PATTERNS = [
     # Extraction-related inner patterns
-    ("extraction", re.compile(
+    ("extraction", safe_compile(
         r"(?:reveal|show|display|output|print|leak|expose|share|give\s+me|provide|tell\s+me|showing|demonstrating|demonstrate)\s+"
         r"(?:me\s+)?(?:your|the|all|hidden|secret|internal|private|confidential)\s+"
         r"(?:hidden\s+|secret\s+|internal\s+)?(?:system\s+prompt|instructions?|rules?|passwords?|secrets?|configuration|prompt|guidelines|constraints|data)",
         re.IGNORECASE,
     )),
     # Override/disable inner patterns
-    ("override", re.compile(
+    ("override", safe_compile(
         r"(?:ignore|bypass|disable|remove|turn\s+off|deactivate|circumvent|break|overcome)\s+"
         r"(?:all\s+)?(?:your\s+)?(?:safety|security|content|output|ethical|moral)\s*"
         r"(?:filters?|restrictions?|guidelines?|rules?|limitations?|constraints?|measures?|checks?|protections?|guardrails?)",
         re.IGNORECASE,
     )),
     # Harmful content request inner patterns
-    ("harmful", re.compile(
+    ("harmful", safe_compile(
         r"(?:"
         r"(?:how\s+to|teach\s+me|explain\s+how|steps?\s+(?:to|for)|guide\s+(?:to|for|on)|instructions?\s+(?:to|for|on))\s+"
         r"(?:make|build|create|synthesize|exploit|produce|craft|forge|fabricate)\s+"
@@ -135,14 +144,14 @@ _INNER_ATTACK_PATTERNS = [
         re.IGNORECASE,
     )),
     # Disable safety framing
-    ("disable", re.compile(
+    ("disable", safe_compile(
         r"(?:without\s+(?:any\s+)?(?:restrictions?|limitations?|filters?|censorship|constraints?|guardrails?|ethical\s+considerations?)|"
         r"(?:unrestricted|unfiltered|uncensored|unlimited|unethical|amoral)\s+(?:mode|access|response|output|version)|"
         r"(?:no\s+(?:restrictions?|limitations?|filters?|censorship|constraints?|guardrails?|safety|ethical)))",
         re.IGNORECASE,
     )),
     # Generic attack indicators inside frames
-    ("generic_attack", re.compile(
+    ("generic_attack", safe_compile(
         r"(?:jailbreak|DAN|do\s+anything\s+now|developer\s+mode|god\s+mode|"
         r"ignore\s+(?:all\s+)?(?:previous\s+)?instructions|"
         r"forget\s+(?:all\s+)?(?:previous\s+|your\s+)?(?:instructions|rules|training)|"
@@ -151,6 +160,144 @@ _INNER_ATTACK_PATTERNS = [
         re.IGNORECASE,
     )),
 ]
+
+# ---------------------------------------------------------------------------
+# Broadened harmful-content detection
+#
+# The rigid "harmful" pattern above only matches a narrow make/build + bomb
+# shape, so real payloads ("synthesize controlled substances", "code for a
+# keylogger", "techniques to launder money") slipped through.  We treat a
+# request as harmful inner content when an inherently-harmful OBJECT is present,
+# or a dual-use object co-occurs with a production/acquisition VERB.  This is
+# order-independent and only contributes weight when ALSO inside a frame
+# (Layer 3 gate) -- that conjunction is the false-positive control.
+# ---------------------------------------------------------------------------
+
+_HARMFUL_OBJECT_STRONG_RE = safe_compile(
+    r"\b(?:"
+    r"keylogger|ransomware|spyware|rootkit|botnet|trojan|"
+    r"malware|exploit\s+code|working\s+exploit|zero[\s-]?day|"
+    r"phishing\s+(?:kit|script|email|page|campaign|site)|"
+    r"chemical\s+weapons?|biological\s+weapons?|bioweapons?|nerve\s+agent|sarin|"
+    r"methamphetamine|crystal\s+meth|meth\s+lab|cocaine|heroin|fentanyl|mdma|"
+    r"controlled\s+substances?|illegal\s+(?:drugs?|firearms?|weapons?)|"
+    r"explosives?|pipe\s+bomb|ied|detonator|"
+    r"untraceable\s+(?:weapon|firearm|gun|poison)|"
+    r"extremist\s+(?:recruitment|propaganda)|radicaliz\w+|terrorist\s+(?:attack|propaganda|cell)|"
+    r"human\s+trafficking|child\s+(?:exploitation|abuse|sexual)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Dual-use objects: benign in isolation, harmful only with a production verb.
+_HARMFUL_OBJECT_DUAL_RE = safe_compile(
+    r"\b(?:money|funds?|weapons?|firearms?|guns?|rifles?|drugs?|substances?|"
+    r"poison|toxins?|gas|virus|identit(?:y|ies)|credit\s+cards?|passwords?|"
+    r"accounts?|blackmail|sql\s+injection|buffer\s+overflow)\b",
+    re.IGNORECASE,
+)
+
+# Production / acquisition intent: the verb signal that separates an actual
+# request ("synthesize X") from conceptual discussion ("explain how X works").
+_HARMFUL_VERB_RE = safe_compile(
+    r"\b(?:synthesize|synthesise|manufacture|produce|obtain|acquire|purchase|"
+    r"convert|launder|smuggle|traffic|forge|counterfeit|steal|evade|conceal|"
+    r"hack|crack|exploit|detonate|deploy|weaponize|blackmail|poison)\b"
+    r"|(?:how\s+(?:to|do\s+i|can\s+i|would\s+(?:i|they|one))|step[\s-]?by[\s-]?step|steps?\s+(?:to|for)|"
+    r"instructions?\s+(?:to|for|on)|techniques?\s+(?:to|for|used\s+to)|"
+    r"(?:most\s+)?(?:effective|best|easiest|fastest)\s+way\s+to|"
+    r"guide\s+(?:to|for|on)|teach\s+me|walk\s+me\s+through|the\s+code\s+for|"
+    r"show\s+me\s+(?:how|techniques|the\s+(?:steps|process|code))|"
+    r"(?:give|provide)\s+(?:me\s+)?(?:the\s+|a\s+)?(?:code|steps|instructions|examples?|complete|working))",
+    re.IGNORECASE,
+)
+
+# Descriptive / journalistic / research intent: the speaker is reporting on or
+# studying a topic, not requesting actionable production steps.
+_DESCRIPTIVE_INTENT_RE = safe_compile(
+    r"\b(?:"
+    r"writ(?:e|ing)\s+about|report(?:ing|s)?\s+on|cover(?:ing|s|ed)?\b|"
+    r"document(?:s|ing|ed)?\b|investigat(?:e|ing|es|ed)\b|analyz(?:e|ing|es|ed)\b|"
+    r"study(?:ing)?\b|studies\b|studied\b|"
+    r"teach(?:ing|es)?\s+about|discuss(?:ing|es|ed)?\b|explor(?:e|ing|es|ed)\b|"
+    r"examin(?:e|ing|es|ed)\b|explain(?:ing|s)?\b|describ(?:e|ing|es|ed)\b|"
+    r"assess(?:ing|es)?\s+how|disclos(?:e|ed|ing)\s+responsibly|for\s+awareness|"
+    r"learn(?:ing)?\s+about|understand(?:ing)?\s+(?:how|what|why|about|the)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Production / actionable request: the speaker wants steps, code, or a recipe to
+# actually carry out the harmful action -- this overrides descriptive framing.
+_PRODUCTION_REQUEST_RE = safe_compile(
+    r"\b(?:"
+    r"how\s+(?:to|do\s+i|can\s+i|would\s+(?:i|they|one|someone))\s+"
+    r"(?:make|build|create|synthesize|synthesise|produce|manufacture|obtain|"
+    r"acquire|convert|hack|exploit|poison|launder|smuggle|forge|counterfeit|deploy|detonate)|"
+    r"step[\s-]?by[\s-]?step|"
+    r"(?:give|provide|show|tell|send|need|want)\s+(?:me\s+)?(?:the\s+|a\s+)?"
+    r"(?:(?:exact|specific|detailed|complete|working|actual)\s+){0,4}"
+    r"(?:code|steps|instructions?|recipe|formula|method|blueprint|examples?|guide|techniques?)|"
+    r"the\s+code\s+for|i\s+need\s+(?:instructions?|the\s+code|steps?)|"
+    r"instructions?\s+for|(?:most\s+)?(?:effective|best|easiest|fastest)\s+way\s+to|"
+    r"walk\s+me\s+through|teach\s+me\s+how|"
+    r"(?:actual|working|real|functional|complete|specific|exact|detailed)\s+"
+    r"(?:exploit\s+code|exploitation\s+code|payload|malware|ransomware|code|"
+    r"recipe|formula|instructions?|steps?|script|sample|examples?)|"
+    r"exploit\s+code|exploitation\s+code|working\s+exploit"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_PROXIMITY_WINDOW = 60
+
+
+def _has_proximate(obj_re, verb_re, text, window=_PROXIMITY_WINDOW):
+    for vm in verb_re.finditer(text):
+        if obj_re.search(text, max(0, vm.start() - window), vm.end() + window):
+            return True
+    return False
+
+
+def _detect_harmful_request(text):
+    """Return (is_harmful, has_production_verb) for harmful inner content.
+
+    ``is_harmful`` is True when an inherently-harmful object is present, or a
+    dual-use object co-occurs with a production/acquisition verb.
+    ``has_production_verb`` distinguishes an actual request from conceptual
+    discussion so the meta-educational guard can suppress the latter.
+    """
+    has_verb = bool(_HARMFUL_VERB_RE.search(text))
+    is_request = bool(_PRODUCTION_REQUEST_RE.search(text))
+    descriptive = bool(_DESCRIPTIVE_INTENT_RE.search(text))
+    if _HARMFUL_OBJECT_STRONG_RE.search(text):
+        if is_request:
+            return True, True
+        if has_verb and not descriptive:
+            return True, True
+        return False, has_verb
+    if _has_proximate(_HARMFUL_OBJECT_DUAL_RE, _HARMFUL_VERB_RE, text):
+        if descriptive and not is_request:
+            return False, True
+        return True, True
+    return False, has_verb
+
+
+# Suppress inner attack detection when the text discusses attacks conceptually
+# rather than performing them.  "understand how the ignore-instructions attack
+# works" is educational, not an injection.  generic_attack is suppressed under
+# academic framing; object-only harmful (no production verb) is suppressed too --
+# "explain how ransomware works" is discussion, "synthesize meth" is a request.
+_META_EDUCATIONAL = safe_compile(
+    r"\b(?:understand|learn|study|analyze|discuss|explore|investigate|examine)\s+"
+    r"(?:how|what|why|about|the)\s+",
+    re.IGNORECASE,
+)
+_CONCEPTUAL = safe_compile(
+    r"\b(?:understand|learn|study|analyze|discuss|explore|investigate|examine|explain|describe)\s+"
+    r"(?:how|what|why|about|the)\s+",
+    re.IGNORECASE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -200,24 +347,29 @@ def detect_fictional_frame(text: str) -> FictionalFrameResult:
         if match:
             attacks_found.append((attack_type, match.group(0)))
 
-    # Suppress inner attack detection when the text uses meta-educational
-    # language that discusses attacks conceptually rather than performing them.
-    # e.g. "understand how the ignore instructions attack works" is
-    # educational, not an actual injection attempt.
-    # Key: only suppress for "generic_attack" (which matches conceptual
-    # references like "ignore instructions"), NOT for "harmful" (which
-    # matches actual harmful requests like "how to make a bomb").
-    _META_EDUCATIONAL = re.compile(
-        r"\b(?:understand|learn|study|analyze|discuss|explore|investigate|examine)\s+"
-        r"(?:how|what|why|about|the)\s+",
-        re.IGNORECASE,
-    )
+    # Broadened harmful-content detection (object-anchored co-occurrence).
+    # Adds a "harmful" signal only if the rigid pattern above did not already.
+    harmful_is_request, harmful_has_verb = _detect_harmful_request(text)
+    if harmful_is_request and not any(at == "harmful" for at, _ in attacks_found):
+        attacks_found.append(("harmful", "harmful_request"))
+
+    # Suppress inner attack detection when the text discusses attacks
+    # conceptually or descriptively rather than performing them.  Journalism,
+    # research, and education report ON harmful topics without requesting
+    # actionable production steps -- a request signal overrides this.
     if attacks_found and result.frame_type == "academic":
+        descriptive = bool(_DESCRIPTIVE_INTENT_RE.search(text))
+        is_request = bool(_PRODUCTION_REQUEST_RE.search(text))
+        to_suppress = set()
         if _META_EDUCATIONAL.search(text):
-            # Only suppress generic_attack matches, not harmful/override/etc.
+            to_suppress.add("generic_attack")
+        if not harmful_has_verb and _CONCEPTUAL.search(text):
+            to_suppress.add("harmful")
+        if descriptive and not is_request:
+            to_suppress.update({"harmful", "override", "extraction"})
+        if to_suppress:
             attacks_found = [
-                (at, txt) for at, txt in attacks_found
-                if at not in ("generic_attack",)
+                (at, txt) for at, txt in attacks_found if at not in to_suppress
             ]
 
     if attacks_found:
