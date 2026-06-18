@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from na0s.layer0.normalization import (
+from na0s.input.normalization import (
     _extract_zero_width_binary_stego,
     normalize_text,
 )

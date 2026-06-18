@@ -9,8 +9,8 @@ set can't silently rot into no-ops.
 """
 from scripts.gen_stego_eval import build_stego_samples
 
-from na0s.layer2.whitespace_stego import detect_whitespace_stego
-from na0s.layer0.normalization import _extract_zero_width_binary_stego
+from na0s.obfuscation.whitespace_stego import detect_whitespace_stego
+from na0s.input.normalization import _extract_zero_width_binary_stego
 
 _INJECTION_VERBS = ("ignore", "reveal", "disable", "exfiltrate")
 

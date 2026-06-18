@@ -18,7 +18,7 @@ import time
 
 import pytest
 
-from na0s.layer2.whitespace_stego import detect_whitespace_stego
+from na0s.obfuscation.whitespace_stego import detect_whitespace_stego
 from na0s.rag.poison_detector import detect_rag_poisoning
 
 # ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ def _encode_binary_ws(payload, cols=8, carrier="hello world"):
 # Model-dependent tests share this guard (cascade/scan need the trained model).
 try:
     from na0s.models import get_model_path
-    from na0s.safe_pickle import safe_load
+    from na0s.integrity.safe_pickle import safe_load
     _MODEL_PATH = get_model_path("model.pkl")
     _VEC_PATH = get_model_path("tfidf_vectorizer.pkl")
     _MODELS_OK = os.path.isfile(_MODEL_PATH) and os.path.isfile(_VEC_PATH)
