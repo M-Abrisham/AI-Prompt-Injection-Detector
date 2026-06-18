@@ -15,8 +15,10 @@ request and never re-prompts for a request that was already approved/rejected.
 """
 
 import hashlib
+import hmac
 import json
 import logging
+import os
 import secrets
 import subprocess
 from pathlib import Path
@@ -28,6 +30,98 @@ logger = logging.getLogger(__name__)
 
 # Path (relative to repo root) where the cloud publishes the request.
 PENDING_REL_PATH = "data/approval_queue/pending_deploy.json"
+
+# Environment variable holding the shared HMAC key used to sign/verify the
+# mail-drop request. When set on BOTH the cloud producer and the local daemon,
+# only requests signed with this key are accepted.
+HMAC_KEY_ENV = "NA0S_AGENT_APPROVAL_HMAC_KEY"
+
+# Module-level latch so the "signing DISABLED" warning is logged loudly but
+# only once per process, not on every poll of the mail-drop branch.
+_unsigned_mode_warned = False
+
+
+def _approval_key() -> Optional[bytes]:
+    """Return the configured HMAC key as bytes, or None if unset/empty.
+
+    The key is read from the ``NA0S_AGENT_APPROVAL_HMAC_KEY`` environment
+    variable. When it is absent the mail-drop runs in (backward-compatible)
+    unsigned mode — see ``sign_request`` / ``verify_request`` callers.
+    """
+    raw = os.environ.get(HMAC_KEY_ENV)
+    if not raw:
+        return None
+    return raw.encode("utf-8")
+
+
+def _canonical_request_bytes(request: Dict[str, Any]) -> bytes:
+    """Canonical JSON of a request EXCLUDING its ``signature`` field, as bytes.
+
+    Canonicalization is ``json.dumps`` with ``sort_keys=True`` and the compact
+    ``(",", ":")`` separators so the signed bytes are stable under key
+    reordering and insignificant whitespace differences.
+    """
+    without_sig = {k: v for k, v in request.items() if k != "signature"}
+    blob = json.dumps(without_sig, sort_keys=True, separators=(",", ":"))
+    return blob.encode("utf-8")
+
+
+def sign_request(request: Dict[str, Any], key) -> str:
+    """Compute the HMAC-SHA256 signature (hex) of ``request``.
+
+    The signature covers the canonical JSON of the request with any existing
+    ``signature`` field removed, so a request can be (re)signed idempotently.
+
+    Args:
+        request: The request dict to sign.
+        key: The shared secret as ``bytes`` or ``str``.
+
+    Returns:
+        Lowercase hex digest of the HMAC-SHA256.
+    """
+    key_bytes = key.encode("utf-8") if isinstance(key, str) else key
+    return hmac.new(key_bytes, _canonical_request_bytes(request), hashlib.sha256).hexdigest()
+
+
+def verify_request(request: Dict[str, Any], key) -> bool:
+    """Constant-time-verify a request's embedded ``signature`` against ``key``.
+
+    Recomputes the HMAC over the request (excluding ``signature``) and compares
+    it to the embedded ``signature`` using ``hmac.compare_digest``.
+
+    Returns:
+        True iff a ``signature`` is present and matches. False when the
+        ``signature`` field is missing/empty or does not match.
+    """
+    embedded = request.get("signature")
+    if not embedded or not isinstance(embedded, str):
+        return False
+    expected = sign_request(request, key)
+    return hmac.compare_digest(expected, embedded)
+
+
+def sign_pending_request(path) -> str:
+    """Sign an existing ``pending_deploy.json`` in place using the env key.
+
+    Reads the JSON at ``path``, computes the HMAC-SHA256 ``signature`` over its
+    canonical form (excluding any prior ``signature``), writes the signed dict
+    back, and returns the signature hex.
+
+    Raises:
+        RuntimeError: if ``NA0S_AGENT_APPROVAL_HMAC_KEY`` is not configured.
+    """
+    key = _approval_key()
+    if key is None:
+        raise RuntimeError(
+            f"{HMAC_KEY_ENV} is not set; cannot sign {path}. "
+            "Configure the shared HMAC secret before signing approval requests."
+        )
+    path = Path(path)
+    request = json.loads(path.read_text())
+    signature = sign_request(request, key)
+    request["signature"] = signature
+    path.write_text(json.dumps(request, indent=2))
+    return signature
 
 # Keys that change locally as a request is acted on; excluded from the request
 # identity so the same cloud request keeps a stable id across status updates.
@@ -231,10 +325,59 @@ class ApprovalsSync:
             return None
 
         try:
-            return json.loads(show.stdout)
+            request = json.loads(show.stdout)
         except json.JSONDecodeError as e:
             logger.error(f"Remote approval request is not valid JSON: {e}")
             return None
+
+        if not self._authenticate_request(request):
+            return None
+        return request
+
+    def _authenticate_request(self, request: Dict[str, Any]) -> bool:
+        """Enforce HMAC signing policy on a fetched mail-drop request.
+
+        Policy:
+          * If a key is configured (``NA0S_AGENT_APPROVAL_HMAC_KEY`` set) the
+            request MUST carry a valid ``signature`` or it is rejected — a
+            SECURITY warning is logged and the request is dropped (never
+            materialized or notified).
+          * If NO key is configured the mail-drop runs in backward-compatible
+            unsigned mode: a loud one-time WARNING is logged and the request is
+            accepted, so the live flow is not broken before the shared secret is
+            deployed to both the cloud producer and this daemon.
+
+        Returns:
+            True if the request may proceed; False if it must be rejected.
+        """
+        global _unsigned_mode_warned
+        key = _approval_key()
+        if key is None:
+            if not _unsigned_mode_warned:
+                logger.warning(
+                    "SECURITY: mail-drop request signing is DISABLED — %s is "
+                    "not set, so unsigned approval requests are accepted. Set "
+                    "the shared HMAC secret on the cloud producer AND this "
+                    "daemon to enforce request authenticity.",
+                    HMAC_KEY_ENV,
+                )
+                _unsigned_mode_warned = True
+            return True
+
+        if not verify_request(request, key):
+            reason = (
+                "missing signature"
+                if not request.get("signature")
+                else "signature mismatch"
+            )
+            logger.warning(
+                "SECURITY: rejecting mail-drop approval request (%s); a forged "
+                "or tampered pending_deploy.json will not be materialized or "
+                "notified.",
+                reason,
+            )
+            return False
+        return True
 
     def sync_pending(self) -> Optional[Dict[str, Any]]:
         """Pull a *new* pending request from the cloud into the local queue.
