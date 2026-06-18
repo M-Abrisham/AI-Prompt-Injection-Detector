@@ -102,3 +102,20 @@ jobs:
           name: regression-report-${{ github.run_id }}
           path: data/evaluation/regression_history.jsonl
         if: always()
+
+      # Single source of truth for per-technique recall + benign FPR.
+      # Non-blocking for now: the gate legitimately fails on known coverage
+      # gaps (e.g. E2 recon ~0%). Ratchet the floors in `make recall-gate`
+      # as those gaps close, then drop continue-on-error to make it blocking.
+      - name: Recall harness (single source of truth)
+        if: matrix.python-version == '3.12'
+        continue-on-error: true
+        run: make recall-gate
+
+      - name: Upload recall harness artifact
+        if: always() && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: recall-harness-${{ github.run_id }}
+          path: benchmarks/results/technique_analysis.json
+          retention-days: 30

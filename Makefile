@@ -1,4 +1,4 @@
-.PHONY: install test lint bench bench-fast build clean publish help test-fast format evaluate-buffs dashboard docker-build docker-test docker-eval garak pyrit rainbow
+.PHONY: install test lint bench bench-fast build clean publish help test-fast format evaluate-buffs dashboard docker-build docker-test docker-eval garak pyrit rainbow recall-harness recall-gate
 
 PYTHON ?= python3
 PYTEST_ARGS ?= -v
@@ -22,6 +22,16 @@ bench:  ## Run full benchmark suite
 
 bench-fast:  ## Run single-dataset quick benchmark
 	$(PYTHON) scripts/benchmark.py --dataset data/benchmark/deepset_pi.jsonl --max-samples 500
+
+# Recall harness — the single source of truth for per-technique recall + benign FPR.
+RECALL_FLOOR ?= 0.40
+FPR_CEILING ?= 0.10
+
+recall-harness:  ## Run the recall + benign-FPR harness (report mode)
+	$(PYTHON) scripts/technique_analysis.py
+
+recall-gate:  ## Run the recall harness as a CI gate (override RECALL_FLOOR / FPR_CEILING)
+	$(PYTHON) scripts/technique_analysis.py --gate --recall-floor $(RECALL_FLOOR) --fpr-ceiling $(FPR_CEILING)
 
 build:  ## Build wheel and sdist
 	$(PYTHON) -m build

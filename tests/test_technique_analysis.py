@@ -380,5 +380,169 @@ class TestOutputFormat(unittest.TestCase):
         self.assertIn("threshold", summary)
 
 
+class TestWilsonCI(unittest.TestCase):
+    """Test the Wilson score confidence-interval helper."""
+
+    def test_zero_n_returns_zero_interval(self):
+        self.assertEqual(ta.wilson_ci(0, 0), (0.0, 0.0))
+
+    def test_bounds_clamped_to_unit_interval(self):
+        lo, hi = ta.wilson_ci(10, 10)
+        self.assertGreaterEqual(lo, 0.0)
+        self.assertLessEqual(hi, 1.0)
+        self.assertEqual(hi, 1.0)          # all successes -> upper bound 1.0
+        self.assertGreater(lo, 0.6)        # but lower bound well below 1.0
+
+    def test_brackets_point_estimate(self):
+        lo, hi = ta.wilson_ci(5, 10)       # p_hat = 0.5
+        self.assertLess(lo, 0.5)
+        self.assertGreater(hi, 0.5)
+
+    def test_interval_narrows_with_n(self):
+        _, hi_small = ta.wilson_ci(9, 10)
+        _, hi_large = ta.wilson_ci(90, 100)
+        self.assertLess(hi_large - 0.9, hi_small - 0.9)  # larger n -> tighter
+
+
+class TestAnalyzeBenign(unittest.TestCase):
+    """Test analyze_benign false-positive accounting."""
+
+    def test_no_false_positives(self):
+        samples = [
+            {"text": "benign 1", "category": "S1", "label": 0},
+            {"text": "benign 2", "category": "S1", "label": 0},
+        ]
+        scan_fn = _make_scan_fn([
+            MockScanResult(is_malicious=False, risk_score=0.1),
+            MockScanResult(is_malicious=False, risk_score=0.2),
+        ])
+        results = ta.analyze_benign(samples, scan_fn, threshold=0.55)
+        self.assertEqual(results["S1"]["false_positives"], 0)
+        self.assertEqual(results["S1"]["false_positive_rate"], 0.0)
+        self.assertEqual(results["S1"]["true_negatives"], 2)
+        self.assertIn("fpr_ci", results["S1"])
+
+    def test_counts_false_positives(self):
+        samples = [
+            {"text": "b1", "category": "S2", "label": 0},
+            {"text": "b2", "category": "S2", "label": 0},
+            {"text": "b3", "category": "S2", "label": 0},
+            {"text": "b4", "category": "S2", "label": 0},
+        ]
+        scan_fn = _make_scan_fn([
+            MockScanResult(is_malicious=True, risk_score=0.9),   # false positive
+            MockScanResult(is_malicious=False, risk_score=0.2),
+            MockScanResult(is_malicious=True, risk_score=0.8),   # false positive
+            MockScanResult(is_malicious=False, risk_score=0.1),
+        ])
+        results = ta.analyze_benign(samples, scan_fn, threshold=0.55)
+        self.assertEqual(results["S2"]["false_positives"], 2)
+        self.assertEqual(results["S2"]["false_positive_rate"], 0.5)
+        self.assertEqual(results["S2"]["true_negatives"], 2)
+        self.assertEqual(len(results["S2"]["false_positive_preview"]), 2)
+
+    def test_empty_dataset(self):
+        self.assertEqual(ta.analyze_benign([], _make_scan_fn([]), threshold=0.55), {})
+
+
+class TestCategoryResultHasCI(unittest.TestCase):
+    """New schema: per-category results carry n and a recall CI."""
+
+    def test_recall_ci_and_n_present(self):
+        samples = [{"text": "a", "category": "D6", "label": 1}]
+        scan_fn = _make_scan_fn([
+            MockScanResult(is_malicious=True, risk_score=0.9, technique_tags=["D6"]),
+        ])
+        results = ta.analyze_by_category(samples, scan_fn, threshold=0.55)
+        self.assertIn("D6", results)              # D6 is now a first-class slice
+        self.assertEqual(results["D6"]["n"], 1)
+        self.assertIn("recall_ci", results["D6"])
+        lo, hi = results["D6"]["recall_ci"]
+        self.assertTrue(0.0 <= lo <= hi <= 1.0)
+
+
+class TestEvaluateGate(unittest.TestCase):
+    """Test the two-sided CI gate."""
+
+    def _category(self, recall_results):
+        scan_fn = _make_scan_fn([
+            MockScanResult(is_malicious=det, risk_score=0.9 if det else 0.1)
+            for det in recall_results
+        ])
+        samples = [{"text": f"s{i}", "category": "D1", "label": 1}
+                   for i in range(len(recall_results))]
+        return ta.analyze_by_category(samples, scan_fn, threshold=0.55)
+
+    def _benign(self, fp_flags):
+        scan_fn = _make_scan_fn([
+            MockScanResult(is_malicious=fp, risk_score=0.9 if fp else 0.1)
+            for fp in fp_flags
+        ])
+        samples = [{"text": f"b{i}", "category": "S1", "label": 0}
+                   for i in range(len(fp_flags))]
+        return ta.analyze_benign(samples, scan_fn, threshold=0.55)
+
+    def test_pass_when_recall_high_and_no_fp(self):
+        cat = self._category([True] * 10)            # recall 1.0, CI-low high
+        benign = self._benign([False] * 10)          # 0 FP
+        gate = ta.evaluate_gate(cat, benign, recall_floor=0.5,
+                                fpr_ceiling=0.30, min_slice=5)
+        self.assertTrue(gate["passed"], gate["failures"])
+
+    def test_fail_on_low_recall(self):
+        cat = self._category([True] + [False] * 9)   # recall 0.1
+        benign = self._benign([False] * 10)
+        gate = ta.evaluate_gate(cat, benign, recall_floor=0.5,
+                                fpr_ceiling=0.30, min_slice=5)
+        self.assertFalse(gate["passed"])
+        self.assertTrue(any(f["kind"] == "recall" for f in gate["failures"]))
+
+    def test_fail_on_high_pooled_fpr(self):
+        cat = self._category([True] * 10)
+        benign = self._benign([True] * 4 + [False] * 6)  # 40% FPR
+        gate = ta.evaluate_gate(cat, benign, recall_floor=0.5,
+                                fpr_ceiling=0.10, min_slice=5)
+        self.assertFalse(gate["passed"])
+        fpr_failures = [f for f in gate["failures"] if f["kind"] == "fpr"]
+        self.assertEqual(len(fpr_failures), 1)
+        self.assertEqual(fpr_failures[0]["slice"], "OVERALL_BENIGN")
+
+    def test_small_recall_slice_skipped(self):
+        cat = self._category([False] * 3)            # n=3 < min_slice
+        benign = self._benign([False] * 10)
+        gate = ta.evaluate_gate(cat, benign, recall_floor=0.5,
+                                fpr_ceiling=0.30, min_slice=5)
+        # n=3 skipped for recall, but coverage guard fails: no slice >= min_slice
+        self.assertFalse(gate["passed"])
+        self.assertTrue(any(f["kind"] == "coverage" for f in gate["failures"]))
+        self.assertTrue(any(s["kind"] == "recall" for s in gate["skipped_small_slices"]))
+
+    def test_fail_closed_on_empty_inputs(self):
+        """A gate with nothing to evaluate must FAIL, not vacuously pass."""
+        gate = ta.evaluate_gate({}, {}, recall_floor=0.5, fpr_ceiling=0.10, min_slice=5)
+        self.assertFalse(gate["passed"])
+        self.assertTrue(any(f["kind"] == "coverage" for f in gate["failures"]))
+
+    def test_fail_closed_when_recall_unassessable(self):
+        """All malicious slices below min_slice -> recall not assessable -> FAIL."""
+        cat = self._category([True] * 2)             # n=2 < min_slice
+        benign = self._benign([False] * 10)
+        gate = ta.evaluate_gate(cat, benign, recall_floor=0.5,
+                                fpr_ceiling=0.30, min_slice=5)
+        self.assertFalse(gate["passed"])
+        cov = [f for f in gate["failures"] if f["kind"] == "coverage"]
+        self.assertTrue(any("recall not assessable" in f["detail"] for f in cov))
+
+    def test_fail_closed_when_benign_too_small(self):
+        """Benign pooled n below min_slice -> FPR not assessable -> FAIL."""
+        cat = self._category([True] * 10)
+        benign = self._benign([False] * 2)           # benign n=2 < min_slice
+        gate = ta.evaluate_gate(cat, benign, recall_floor=0.5,
+                                fpr_ceiling=0.30, min_slice=5)
+        self.assertFalse(gate["passed"])
+        cov = [f for f in gate["failures"] if f["kind"] == "coverage"]
+        self.assertTrue(any("FPR not assessable" in f["detail"] for f in cov))
+
+
 if __name__ == "__main__":
     unittest.main()
