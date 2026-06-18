@@ -7,6 +7,7 @@ for intelligent root cause analysis and fix recommendations.
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -14,6 +15,29 @@ from datetime import datetime
 from na0s.agents.claude_gate_analyzer import ClaudeGateAnalyzer, GateCacheManager
 
 logger = logging.getLogger(__name__)
+
+# Imperative approve/deploy-like tokens that, if echoed by the model into the
+# iMessage, could be misread by the human as an authorization. The Claude
+# analysis is advisory only; these are defanged so model output can never look
+# like an approval instruction. The deploy itself is gated by the nonce
+# challenge regardless, but the human-facing text must not suggest "approve".
+_APPROVE_LIKE_RE = re.compile(
+    r"\b(approve|approved|authorize|authorized|deploy now|ship it|lgtm|"
+    r"go ahead|proceed)\b",
+    re.IGNORECASE,
+)
+
+
+def _neutralize_advisory(text: Any) -> str:
+    """Defang approve-like imperatives in untrusted AI analysis text.
+
+    Claude's ``root_cause``/``fix_specificity`` is model output and must not be
+    able to inject an approval suggestion into the human's iMessage. Approve-like
+    tokens are replaced with a bracketed, inert marker.
+    """
+    if not text:
+        return ""
+    return _APPROVE_LIKE_RE.sub(lambda m: f"[{m.group(0)}]", str(text))
 
 
 class GateAnalyzer:
@@ -303,10 +327,35 @@ class GateAnalyzer:
             logger.error(f"Error writing report: {e}")
             return None
 
+    @staticmethod
+    def _append_advisory(
+        lines: List[str], results: Dict[str, Any], gate_type: str
+    ) -> None:
+        """Append Claude's analysis for a gate, labeled advisory and neutralized.
+
+        The analysis is model output: it is clearly marked as advisory (never an
+        authorization) and any approve-like imperative is defanged so it cannot
+        be misread by the human as an approval suggestion.
+        """
+        analysis = results.get("claude_analysis", {}).get(gate_type)
+        if not analysis:
+            return
+        root_cause = analysis.get("root_cause")
+        fix = analysis.get("fix_specificity")
+        if not (root_cause or fix):
+            return
+        lines.append("  AI analysis (advisory — NOT an authorization):")
+        if root_cause:
+            lines.append(f"    Root Cause: {_neutralize_advisory(root_cause)}")
+        if fix:
+            lines.append(f"    Fix: {_neutralize_advisory(fix)}")
+
     def format_message(self) -> str:
         """Format gate analysis results for iMessage.
 
         Includes Claude's root cause analysis and fix specificity when available.
+        Claude's analysis is surfaced as advisory only and approve-like tokens in
+        it are neutralized — it can never read as a deploy authorization.
 
         Returns:
             Human-readable message for user approval or retry decision
@@ -320,23 +369,13 @@ class GateAnalyzer:
                 for err in results["canary"]["errors"]:
                     technique = err.get("technique", "?")
                     lines.append(f"  • {technique}: misclassified")
-                # Include Claude analysis if available
-                if "canary" in results.get("claude_analysis", {}):
-                    analysis = results["claude_analysis"]["canary"]
-                    if analysis.get("root_cause"):
-                        lines.append(f"  Root Cause: {analysis['root_cause']}")
-                    if analysis.get("fix_specificity"):
-                        lines.append(f"  Fix: {analysis['fix_specificity']}")
+                # Include Claude analysis (advisory — NOT an authorization)
+                self._append_advisory(lines, results, "canary")
 
         if results["shadow"]:
             lines.append(f"Shadow: {results['shadow']['verdict']}")
-            # Include Claude analysis if available
-            if "shadow" in results.get("claude_analysis", {}):
-                analysis = results["claude_analysis"]["shadow"]
-                if analysis.get("root_cause"):
-                    lines.append(f"  Root Cause: {analysis['root_cause']}")
-                if analysis.get("fix_specificity"):
-                    lines.append(f"  Fix: {analysis['fix_specificity']}")
+            # Include Claude analysis (advisory — NOT an authorization)
+            self._append_advisory(lines, results, "shadow")
 
         if results["f14"]:
             lines.append(f"F14: {results['f14']['verdict']}")
@@ -344,13 +383,8 @@ class GateAnalyzer:
                 cat = reg.get("category", "?")
                 delta = reg.get("delta", 0)
                 lines.append(f"  • {cat}: TPR {delta:+.1%}")
-            # Include Claude analysis if available
-            if "f14" in results.get("claude_analysis", {}):
-                analysis = results["claude_analysis"]["f14"]
-                if analysis.get("root_cause"):
-                    lines.append(f"  Root Cause: {analysis['root_cause']}")
-                if analysis.get("fix_specificity"):
-                    lines.append(f"  Fix: {analysis['fix_specificity']}")
+            # Include Claude analysis (advisory — NOT an authorization)
+            self._append_advisory(lines, results, "f14")
 
         if results["overall_verdict"] == "ALL_PASSED":
             return "✅ All gates passed. Ready for deployment approval."

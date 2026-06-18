@@ -17,6 +17,7 @@ request and never re-prompts for a request that was already approved/rejected.
 import hashlib
 import json
 import logging
+import secrets
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -107,20 +108,35 @@ class ApprovalsSync:
         blob = json.dumps(basis, sort_keys=True, default=str)
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
+    @staticmethod
+    def content_hash(request: Dict[str, Any]) -> str:
+        """SHA-256 of the canonical (non-volatile) request content.
+
+        Used to pin the artifact at notify time so a TOCTOU mutation of
+        ``pending_deploy.json`` between notification and execution is detected.
+        Volatile status keys are excluded so a legitimate status update (e.g.
+        marking ``approved``) does not look like tampering, while any change to
+        the substantive payload (candidate path, gates, command, …) does.
+        """
+        basis = {k: v for k, v in request.items() if k not in _VOLATILE_KEYS}
+        blob = json.dumps(basis, sort_keys=True, default=str)
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
     # ---------------------------------------------------------------- state --
 
-    def _load_state(self) -> Dict[str, List[str]]:
+    def _load_state(self) -> Dict[str, Any]:
         if self.state_path.exists():
             try:
                 data = json.loads(self.state_path.read_text())
                 data.setdefault("notified", [])
                 data.setdefault("finalized", [])
+                data.setdefault("challenges", {})
                 return data
             except Exception as e:
                 logger.warning(f"Could not read approvals state, resetting: {e}")
-        return {"notified": [], "finalized": []}
+        return {"notified": [], "finalized": [], "challenges": {}}
 
-    def _save_state(self, state: Dict[str, List[str]]) -> None:
+    def _save_state(self, state: Dict[str, Any]) -> None:
         try:
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
             self.state_path.write_text(json.dumps(state, indent=2))
@@ -145,6 +161,51 @@ class ApprovalsSync:
         rid = self.request_id(request)
         if rid not in state["finalized"]:
             state["finalized"].append(rid)
+        # A finalized request can never be approved again: drop its nonce so a
+        # leaked/replayed code is useless even before the file is cleaned up.
+        state.get("challenges", {}).pop(rid, None)
+        self._save_state(state)
+
+    # ----------------------------------------------------------- challenge --
+
+    def issue_challenge(self, request: Dict[str, Any]) -> Dict[str, str]:
+        """Mint (or return the existing) per-request approval challenge.
+
+        At notify time we bind a fresh secret ``nonce`` and a ``content_hash``
+        of the request to its ``request_id`` and persist them in the state
+        file. Only a reply carrying this exact nonce authorizes the deploy, and
+        the artifact must still hash to ``content_hash`` when execution runs
+        (TOCTOU guard). The nonce is the secret delivered ONLY to the approver's
+        device, so a forged/bare ``approve`` on the gateway cannot satisfy it.
+
+        Idempotent: re-notifying the same request returns the same challenge so
+        the code the user already holds stays valid.
+        """
+        state = self._load_state()
+        challenges = state.setdefault("challenges", {})
+        rid = self.request_id(request)
+        existing = challenges.get(rid)
+        if existing and existing.get("nonce") and existing.get("content_hash"):
+            return existing
+        challenge = {
+            "nonce": secrets.token_hex(16),
+            "content_hash": self.content_hash(request),
+        }
+        challenges[rid] = challenge
+        self._save_state(state)
+        return challenge
+
+    def get_challenge(self, request: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Return the persisted ``{nonce, content_hash}`` for a request, if any."""
+        challenge = self._load_state().get("challenges", {}).get(self.request_id(request))
+        if challenge and challenge.get("nonce") and challenge.get("content_hash"):
+            return challenge
+        return None
+
+    def consume_challenge(self, request: Dict[str, Any]) -> None:
+        """Invalidate a request's nonce so it is strictly single-use."""
+        state = self._load_state()
+        if state.get("challenges", {}).pop(self.request_id(request), None) is not None:
             self._save_state(state)
 
     # ----------------------------------------------------------------- sync --

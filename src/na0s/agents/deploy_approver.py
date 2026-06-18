@@ -14,8 +14,10 @@ Phase 7: Approval History
 - Tracks execution results, timing, and errors
 """
 
+import hmac
 import json
 import logging
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -23,8 +25,14 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 
 from .approval_history import ApprovalHistoryManager
+from .approvals_sync import ApprovalsSync
 
 logger = logging.getLogger(__name__)
+
+# Matches an authorize reply: the literal word "approve" followed by the secret
+# nonce. Case-insensitive on the verb; the token must be present (a bare
+# "approve" does NOT match group 1 to anything, so it is rejected upstream).
+_APPROVE_RE = re.compile(r"^approve\s+(\S+)\s*$", re.IGNORECASE)
 
 
 class DeployApprover:
@@ -57,11 +65,24 @@ class DeployApprover:
             logger.error(f"Error reading pending_deploy.json: {e}")
             return None
 
-    def format_approval_message(self, deployment: Dict[str, Any]) -> str:
+    def _deploy_command(self) -> str:
+        """Return the literal command ``execute_deploy`` will run (for display)."""
+        repo_root = self.data_dir.resolve().parent
+        deploy_script = repo_root / "scripts" / "deploy_model.py"
+        return f"{sys.executable} {deploy_script}"
+
+    def format_approval_message(
+        self, deployment: Dict[str, Any], nonce: Optional[str] = None
+    ) -> str:
         """Format deployment summary for approval iMessage.
 
         Args:
             deployment: Pending deployment dict
+            nonce: Per-request secret challenge. When supplied, the message
+                instructs the user to reply ``approve <nonce>`` and warns that a
+                bare/incorrect code is rejected. The nonce is the only thing
+                that authorizes the deploy, so it must travel ONLY to the
+                approver's device (never logged to the gateway).
 
         Returns:
             Human-readable summary for user approval
@@ -70,6 +91,19 @@ class DeployApprover:
         summary = deployment.get("summary", "")
 
         lines = ["✅ All gates passed. Ready to deploy new model.\n"]
+
+        # Bind the approval to THIS request: short id + the model/candidate
+        # identity so the user can confirm what they are authorizing.
+        rid = ApprovalsSync.request_id(deployment)
+        candidate = (
+            deployment.get("candidate_path")
+            or deployment.get("model")
+            or deployment.get("candidate")
+            or "unknown candidate"
+        )
+        lines.append(f"Request: {rid}")
+        lines.append(f"Candidate: {candidate}")
+        lines.append(f"Command: {self._deploy_command()}")
 
         # Gate summary
         if gates.get("canary"):
@@ -99,16 +133,37 @@ class DeployApprover:
         if summary:
             lines.append(f"\nNotes: {summary}")
 
-        lines.append("\nDeploy now? Reply: approve | reject")
+        if nonce:
+            lines.append(
+                f"\nTo AUTHORIZE, reply EXACTLY `approve {nonce}`. "
+                "A missing or incorrect code is REJECTED. Reply `reject` to cancel."
+            )
+        else:
+            # No challenge available (e.g. legacy/standalone call) — never imply
+            # a bare "approve" authorizes; require the code.
+            lines.append(
+                "\nTo AUTHORIZE, reply `approve <code>` using the code from this "
+                "request. A missing or incorrect code is REJECTED. "
+                "Reply `reject` to cancel."
+            )
         return "\n".join(lines)
 
-    def execute_deploy(self, retry_on_failure: bool = True) -> tuple[bool, Dict[str, Any]]:
+    def execute_deploy(
+        self,
+        retry_on_failure: bool = True,
+        expected_content_hash: Optional[str] = None,
+    ) -> tuple[bool, Dict[str, Any]]:
         """Run deploy_model.py to copy candidate to production.
 
         Executes the deployment script and captures output. On failure, retries once.
 
         Args:
             retry_on_failure: Whether to retry once on failure (default True)
+            expected_content_hash: TOCTOU guard. If provided, ``pending_deploy.json``
+                is re-read and re-hashed immediately before the subprocess; if it
+                no longer matches the hash captured at notify time, the deploy is
+                ABORTED (no subprocess) — the artifact was mutated after the user
+                authorized it.
 
         Returns:
             Tuple of (success: bool, result_dict: dict) where result_dict contains:
@@ -129,6 +184,21 @@ class DeployApprover:
             "execution_time": 0,
             "retry_count": 0,
         }
+
+        # TOCTOU re-verify: the artifact must be byte-identical (modulo volatile
+        # status keys) to what the user saw at notify time. Abort BEFORE any
+        # subprocess runs if it changed, so a swapped candidate cannot ride an
+        # already-granted approval.
+        if expected_content_hash is not None:
+            current = self.get_pending_deployment()
+            if current is None or ApprovalsSync.content_hash(current) != expected_content_hash:
+                msg = (
+                    "Deploy ABORTED: pending_deploy.json changed after approval "
+                    "(content hash mismatch); refusing to run with a mutated artifact."
+                )
+                logger.error(msg)
+                result_dict["error_message"] = msg
+                return False, result_dict
 
         max_retries = 2 if retry_on_failure else 1
         start_time = time.time()
@@ -244,25 +314,75 @@ class DeployApprover:
             logger.error(f"Error updating status: {e}")
             return False
 
-    def handle_approval(self, user_response: str) -> tuple[bool, str]:
+    def handle_approval(
+        self,
+        user_response: str,
+        expected_nonce: Optional[str] = None,
+        content_hash: Optional[str] = None,
+    ) -> tuple[bool, str]:
         """Process user approval response and execute deployment if approved.
 
-        When user approves: executes deploy_model.py, captures output, updates status.
-        When user rejects: marks deployment as rejected.
-        On execution failure: logs error, retries once, notifies user with error message.
+        Authorization requires the reply to parse as ``approve <token>`` AND the
+        token to match ``expected_nonce`` under a constant-time compare. A bare
+        ``approve``, a wrong/stale/empty token, or any other text is REJECTED and
+        NEVER triggers a deploy — this is what defeats a forged/replayed
+        ``approve`` injected at the gateway, which carries no secret nonce.
+
+        When authorized: re-verifies the artifact against ``content_hash``
+        (TOCTOU) and, if unchanged, executes deploy_model.py and updates status.
+        When ``reject``: marks the deployment rejected.
 
         Args:
-            user_response: "approve" or "reject" from user
+            user_response: Raw reply text from the user.
+            expected_nonce: The per-request secret minted at notify time. Required
+                to authorize; ``None`` means no challenge is on file and authorize
+                is impossible.
+            content_hash: Artifact hash captured at notify time, forwarded to
+                ``execute_deploy`` as the TOCTOU guard.
 
         Returns:
             Tuple of (success: bool, message: str) where message is iMessage notification
         """
-        response_lower = user_response.lower().strip()
+        response = (user_response or "").strip()
+        response_lower = response.lower()
 
-        if response_lower == "approve":
-            logger.info("User approved deployment. Executing...")
+        match = _APPROVE_RE.match(response)
+        # An "approve-shaped" reply is anything starting with the approve verb,
+        # including a bare/token-less "approve". All of these are authorization
+        # ATTEMPTS and must be routed through the nonce check — never to the
+        # generic "unexpected response" path — so a forged bare "approve" is
+        # explicitly REJECTED rather than ambiguously handled.
+        is_approve_attempt = response_lower == "approve" or response_lower.startswith(
+            "approve "
+        ) or response_lower.startswith("approve\t")
 
-            success, exec_result = self.execute_deploy(retry_on_failure=True)
+        if match or is_approve_attempt:
+            token = match.group(1) if match else ""
+            # Constant-time compare; reject if there is no challenge on file or
+            # the token does not match the CURRENT request's nonce. A bare
+            # "approve" has an empty token and never matches a real nonce.
+            authorized = bool(expected_nonce) and bool(token) and hmac.compare_digest(
+                token, expected_nonce
+            )
+            if not authorized:
+                logger.warning("Approval reply carried a missing/incorrect nonce; REJECTED")
+                self.history.record_action(
+                    action_type="deploy",
+                    status="rejected",
+                    approved_by="user",
+                    reason="Approval reply had an invalid or stale authorization code",
+                    execution_result="skipped",
+                )
+                return False, (
+                    "⛔ Not approved: the authorization code was missing or incorrect. "
+                    "Reply EXACTLY `approve <code>` using the code from the request."
+                )
+
+            logger.info("User approved deployment with valid nonce. Executing...")
+
+            success, exec_result = self.execute_deploy(
+                retry_on_failure=True, expected_content_hash=content_hash
+            )
 
             if success:
                 self.update_status("approved", "User approved and deployed", exec_result)
