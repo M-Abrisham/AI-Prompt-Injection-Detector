@@ -13,8 +13,14 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 from na0s.agents.claude_gate_analyzer import ClaudeGateAnalyzer, GateCacheManager
+from na0s.agents.input_guard import scan_untrusted
 
 logger = logging.getLogger(__name__)
+
+# Free-text fields inside a canary ``error`` record that originate from the
+# (adversarial) sample text and are therefore untrusted. These are the strings
+# Na0S dogfoods its own detector on before they reach the Claude prompt.
+_UNTRUSTED_ERROR_FIELDS = ("text_preview", "text", "prompt", "technique", "note")
 
 # Imperative approve/deploy-like tokens that, if echoed by the model into the
 # iMessage, could be misread by the human as an authorization. The Claude
@@ -226,6 +232,40 @@ class GateAnalyzer:
 
         return self.claude_analyzer.analyze_gate(gate_type, failure_data)
 
+    @staticmethod
+    def _guard_canary_errors(errors: List[Any]) -> List[Dict[str, Any]]:
+        """Dogfood Na0S's detector on canary error free-text before Claude sees it.
+
+        Each canary ``error`` record carries free-text fields derived from the
+        (adversarial-by-design) sample. Before that text is serialized into the
+        Claude analysis prompt, run it through Na0S's own ``predict()``; when the
+        detector flags it, replace the field with the annotated ``safe_text`` so
+        the verdict travels with the data into the prompt (behind the existing
+        ``<UNTRUSTED_CI_DATA>`` fence). Returns a list of flagged-input summaries
+        for the failure report. Fail-safe: never raises.
+        """
+        flagged_inputs: List[Dict[str, Any]] = []
+        for error in errors:
+            if not isinstance(error, dict):
+                continue
+            for field_name in _UNTRUSTED_ERROR_FIELDS:
+                value = error.get(field_name)
+                if not isinstance(value, str) or not value.strip():
+                    continue
+                guard = scan_untrusted(value, source=f"canary_error.{field_name}")
+                if guard.flagged:
+                    # Replace in place so the annotation reaches the prompt.
+                    error[field_name] = guard.safe_text
+                    flagged_inputs.append(
+                        {
+                            "field": field_name,
+                            "label": guard.label,
+                            "risk_score": round(guard.risk_score, 4),
+                            "technique_ids": guard.technique_ids,
+                        }
+                    )
+        return flagged_inputs
+
     def diagnose_failures(self) -> Dict[str, Any]:
         """Run all gate checks and compile failure report.
 
@@ -240,7 +280,21 @@ class GateAnalyzer:
             "shadow": self.check_shadow(),
             "f14": self.check_f14(),
             "claude_analysis": {},
+            "flagged_inputs": {},
         }
+
+        # Dogfood our own injection detector on the untrusted canary error text
+        # BEFORE it is handed to the Claude analyzer. Flagged strings are
+        # replaced in place with an annotated safe_text and summarized here.
+        if results["canary"] and results["canary"].get("errors"):
+            flagged = self._guard_canary_errors(results["canary"]["errors"])
+            if flagged:
+                results["flagged_inputs"]["canary"] = flagged
+                logger.warning(
+                    "na0s dogfood flagged %d untrusted canary error field(s) "
+                    "as likely injection before Claude analysis",
+                    len(flagged),
+                )
 
         # Determine which gate(s) failed
         failed_gates = []
