@@ -130,10 +130,14 @@ _INSTRUCTION_LIKE = safe_compile(
 )
 
 # Many-shot jailbreaking patterns: fake Q&A pairs with bypass content.
+# The inter-clause gap MUST NOT span another User/Human/Question marker,
+# otherwise adjacent pairs collapse into one match under re.DOTALL and a
+# blatant N-pair block is undercounted as ~N/2 — diluting the boost below
+# the decision threshold (the D8.2 many-shot+flood regression).
 _MANY_SHOT_PATTERN = safe_compile(
     r"(?:User|Human|Question)\s*:\s*.{0,80}(?:bypass|hack|jailbreak|security"
     r"|ignore|override|exploit|crack|break)"
-    r".{0,200}?"
+    r"(?:(?!(?:User|Human|Question)\s*:).){0,200}?"
     r"(?:Assistant|AI|Answer)\s*:\s*.{0,80}(?:sure|of\s+course|here|yes|absolutely)",
     re.IGNORECASE | re.DOTALL,
     check_safety=True,
