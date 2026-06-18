@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
 
+from na0s import config
+
 from .approval_history import ApprovalHistoryManager
 from .approvals_sync import ApprovalsSync
 
@@ -319,14 +321,28 @@ class DeployApprover:
         user_response: str,
         expected_nonce: Optional[str] = None,
         content_hash: Optional[str] = None,
+        sender: Optional[str] = None,
     ) -> tuple[bool, str]:
         """Process user approval response and execute deployment if approved.
+
+        Gate order (each must pass before the next runs):
+
+            1. sender allowlist  (defense-in-depth; skipped when unconfigured)
+            2. nonce             (the PRIMARY authorization — ``approve <nonce>``)
+            3. TOCTOU hash       (artifact unchanged since notify time)
+            4. execute           (run deploy_model.py)
 
         Authorization requires the reply to parse as ``approve <token>`` AND the
         token to match ``expected_nonce`` under a constant-time compare. A bare
         ``approve``, a wrong/stale/empty token, or any other text is REJECTED and
         NEVER triggers a deploy — this is what defeats a forged/replayed
         ``approve`` injected at the gateway, which carries no secret nonce.
+
+        The sender allowlist is SECONDARY and never bypasses the nonce: it runs
+        FIRST and fail-closed (a missing or non-listed sender is rejected before
+        the nonce check), but a passing sender still has to clear the nonce. A
+        spoofed-but-allowlisted sender therefore cannot deploy without the
+        secret. When the allowlist is unset, this gate is skipped (no regression).
 
         When authorized: re-verifies the artifact against ``content_hash``
         (TOCTOU) and, if unchanged, executes deploy_model.py and updates status.
@@ -339,10 +355,41 @@ class DeployApprover:
                 is impossible.
             content_hash: Artifact hash captured at notify time, forwarded to
                 ``execute_deploy`` as the TOCTOU guard.
+            sender: The iMessage handle that sent ``user_response``. Checked
+                against ``config.NA0S_AGENT_APPROVAL_ALLOWED_SENDERS`` when that
+                allowlist is non-empty; ``None``/unlisted is rejected fail-closed.
+                Ignored when the allowlist is empty.
 
         Returns:
             Tuple of (success: bool, message: str) where message is iMessage notification
         """
+        # GATE 1 (defense-in-depth, SECONDARY to the nonce): when an allowlist is
+        # configured, the reply's iMessage sender must be present AND listed.
+        # Fail closed — a missing/unlisted sender is rejected here, BEFORE the
+        # nonce check, but a passing sender does NOT short-circuit the nonce: a
+        # valid nonce is still required below. When the allowlist is empty this
+        # gate is skipped, preserving the prior (nonce-only) behavior.
+        allowed = config.NA0S_AGENT_APPROVAL_ALLOWED_SENDERS
+        if allowed:
+            normalized = sender.strip().casefold() if sender else None
+            allowed_norm = {a.strip().casefold() for a in allowed}
+            if normalized is None or normalized not in allowed_norm:
+                logger.warning(
+                    "Approval reply from a missing/unlisted sender (%r); REJECTED",
+                    sender,
+                )
+                self.history.record_action(
+                    action_type="deploy",
+                    status="rejected",
+                    approved_by="user",
+                    reason="Approval reply came from a sender not on the allowlist",
+                    execution_result="skipped",
+                )
+                return False, (
+                    "⛔ Not approved: this reply came from a sender that is not on "
+                    "the approval allowlist."
+                )
+
         response = (user_response or "").strip()
         response_lower = response.lower()
 

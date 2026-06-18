@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 import pytest
 
+from na0s import config
 from na0s.agents.approvals_sync import ApprovalsSync
 from na0s.agents.claude_gate_analyzer import ClaudeGateAnalyzer, GateCacheManager
 from na0s.agents.deploy_approver import DeployApprover
@@ -185,6 +186,143 @@ class TestNonceAuthentication:
             (Path(temp_data_dir) / "approval_queue" / "pending_deploy.json").read_text()
         )
         assert on_disk["status"] == "rejected"
+
+
+# ============================================================================
+# FIX 3 — sender allowlist (defense-in-depth, SECONDARY to the nonce)
+# ============================================================================
+
+
+# A correct ``approve <nonce>`` for every test below, so the nonce gate always
+# PASSES and we isolate the sender gate's behavior (except the one case that
+# deliberately uses a bad nonce to prove sender-pass never bypasses it).
+_GOOD_NONCE = "f00dcafef00dcafe"
+_ALLOWED = ("+15551234567", "user@icloud.com")
+
+
+def _allowlist(senders):
+    """Patch the config allowlist for the duration of a test."""
+    return patch.object(config, "NA0S_AGENT_APPROVAL_ALLOWED_SENDERS", tuple(senders))
+
+
+def _mock_deploy_ok(mock_run):
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = "Deploy completed"
+    mock_run.return_value.stderr = ""
+
+
+class TestSenderAllowlist:
+    def test_allowed_sender_with_valid_nonce_deploys(self, temp_data_dir):
+        """(1) Allowlist set + sender ON the list + valid nonce -> deploy runs."""
+        _write_pending(temp_data_dir)
+        approver = DeployApprover(data_dir=temp_data_dir)
+
+        with _allowlist(_ALLOWED), patch("subprocess.run") as mock_run:
+            _mock_deploy_ok(mock_run)
+            success, message = approver.handle_approval(
+                f"approve {_GOOD_NONCE}",
+                expected_nonce=_GOOD_NONCE,
+                content_hash=_content_hash(),
+                sender="+15551234567",
+            )
+
+        assert success is True
+        assert "deployed successfully" in message.lower()
+        mock_run.assert_called_once()
+
+    def test_unlisted_sender_is_rejected_no_deploy(self, temp_data_dir):
+        """(2) Sender NOT on the list -> REJECTED, no deploy (even w/ valid nonce)."""
+        _write_pending(temp_data_dir)
+        approver = DeployApprover(data_dir=temp_data_dir)
+
+        with _allowlist(_ALLOWED), patch("subprocess.run") as mock_run:
+            success, message = approver.handle_approval(
+                f"approve {_GOOD_NONCE}",
+                expected_nonce=_GOOD_NONCE,
+                content_hash=_content_hash(),
+                sender="+19998887777",  # not on the list
+            )
+
+        assert success is False
+        assert "allowlist" in message.lower()
+        mock_run.assert_not_called()
+
+    def test_missing_sender_is_rejected_fail_closed(self, temp_data_dir):
+        """(3) sender=None while allowlist set -> REJECTED (fail-closed). KEY case."""
+        _write_pending(temp_data_dir)
+        approver = DeployApprover(data_dir=temp_data_dir)
+
+        with _allowlist(_ALLOWED), patch("subprocess.run") as mock_run:
+            success, message = approver.handle_approval(
+                f"approve {_GOOD_NONCE}",
+                expected_nonce=_GOOD_NONCE,
+                content_hash=_content_hash(),
+                sender=None,
+            )
+
+        assert success is False
+        assert "allowlist" in message.lower()
+        mock_run.assert_not_called()
+
+    def test_empty_allowlist_allows_no_sender_no_regression(self, temp_data_dir):
+        """(4) Allowlist EMPTY + sender None -> deploys (today's behavior intact)."""
+        _write_pending(temp_data_dir)
+        approver = DeployApprover(data_dir=temp_data_dir)
+
+        with _allowlist(()), patch("subprocess.run") as mock_run:
+            _mock_deploy_ok(mock_run)
+            success, message = approver.handle_approval(
+                f"approve {_GOOD_NONCE}",
+                expected_nonce=_GOOD_NONCE,
+                content_hash=_content_hash(),
+                sender=None,
+            )
+
+        assert success is True
+        assert "deployed successfully" in message.lower()
+        mock_run.assert_called_once()
+
+    def test_allowed_sender_but_bad_nonce_still_rejected(self, temp_data_dir):
+        """(5) Sender ON the list but BAD nonce -> still REJECTED.
+
+        Proves a passing sender never bypasses the nonce: the allowlist is a gate
+        IN FRONT of the nonce, not a substitute for it.
+        """
+        _write_pending(temp_data_dir)
+        approver = DeployApprover(data_dir=temp_data_dir)
+
+        with _allowlist(_ALLOWED), patch("subprocess.run") as mock_run:
+            success, message = approver.handle_approval(
+                "approve WRONG_NONCE",
+                expected_nonce=_GOOD_NONCE,
+                content_hash=_content_hash(),
+                sender="+15551234567",  # allowlisted, but the nonce is wrong
+            )
+
+        assert success is False
+        assert "code was missing or incorrect" in message.lower()
+        mock_run.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "sender",
+        ["  +15551234567  ", "USER@ICLOUD.COM", "  User@iCloud.com\t"],
+    )
+    def test_case_and_whitespace_insensitive_match(self, temp_data_dir, sender):
+        """(6) Match is case/whitespace-insensitive (.strip().casefold())."""
+        _write_pending(temp_data_dir)
+        approver = DeployApprover(data_dir=temp_data_dir)
+
+        with _allowlist(_ALLOWED), patch("subprocess.run") as mock_run:
+            _mock_deploy_ok(mock_run)
+            success, _ = approver.handle_approval(
+                f"approve {_GOOD_NONCE}",
+                expected_nonce=_GOOD_NONCE,
+                content_hash=_content_hash(),
+                sender=sender,
+            )
+
+        assert success is True
+        mock_run.assert_called_once()
 
 
 # ============================================================================

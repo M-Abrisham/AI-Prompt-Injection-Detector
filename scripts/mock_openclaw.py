@@ -8,12 +8,19 @@ dry-run exercises the real send -> poll -> reply loop:
     POST /send             -> prints the iMessage, returns success
     GET  /replies          -> {"replies": [...]} and CONSUMES the queue
     POST /replies          -> seed a reply: body {"reply": "approve"}
+                              or {"reply": "approve", "sender": "+1555..."}
                               or {"replies": ["approve", ...]}
 
 The bridge polls GET /replies expecting {"replies": [...]}; earlier versions
 of this mock only served POST /poll_replies, so every poll 404'd. Both are
 supported now. Replies are served from an in-memory queue instead of a
 hardcoded "approve", so reject/timeout paths can be exercised too.
+
+A queued reply may be a bare string (legacy / no sender) OR a dict carrying a
+``sender`` ({"reply": "approve", "sender": "+1555..."}); iMessage intrinsically
+identifies who replied, so the dict shape lets the deploy path enforce a sender
+allowlist. GET /replies serves whatever shape is queued — the bridge normalizes
+it (see openclaw_bridge._parse_reply).
 
   # always auto-approve (handy for a quick end-to-end smoke test)
   python scripts/mock_openclaw.py --auto-reply approve
@@ -44,6 +51,7 @@ class MockOpenClawHandler(BaseHTTPRequestHandler):
 
     reply_queue: list = []
     auto_reply: str | None = None
+    auto_reply_sender: str | None = None
 
     def _json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode()
@@ -68,7 +76,13 @@ class MockOpenClawHandler(BaseHTTPRequestHandler):
         elif self.path == "/replies":
             # Serve and consume queued replies (the bridge reads replies[0]).
             if self.auto_reply is not None:
-                self._json(200, {"replies": [self.auto_reply]})
+                # Attach the configured sender (dict shape) when one is set, so
+                # an auto-reply can exercise the allowlist gate end-to-end.
+                if self.auto_reply_sender is not None:
+                    item = {"reply": self.auto_reply, "sender": self.auto_reply_sender}
+                else:
+                    item = self.auto_reply
+                self._json(200, {"replies": [item]})
             elif MockOpenClawHandler.reply_queue:
                 reply = MockOpenClawHandler.reply_queue.pop(0)
                 self._json(200, {"replies": [reply]})
@@ -86,12 +100,20 @@ class MockOpenClawHandler(BaseHTTPRequestHandler):
             self._json(200, {"success": True, "message_id": "mock-123"})
 
         elif self.path == "/replies":
-            # Seed a reply (or replies) for a subsequent GET /replies.
+            # Seed a reply (or replies) for a subsequent GET /replies. A reply
+            # may be a bare string OR carry a sender; when ``sender`` is present
+            # we queue a dict so the deploy path can enforce the allowlist. Bare
+            # strings and the {"replies": [...]} batch shape still work.
             data = self._read_body()
             if "replies" in data and isinstance(data["replies"], list):
                 MockOpenClawHandler.reply_queue.extend(data["replies"])
             elif "reply" in data:
-                MockOpenClawHandler.reply_queue.append(data["reply"])
+                if data.get("sender"):
+                    MockOpenClawHandler.reply_queue.append(
+                        {"reply": data["reply"], "sender": data["sender"]}
+                    )
+                else:
+                    MockOpenClawHandler.reply_queue.append(data["reply"])
             self._json(200, {"success": True, "queued": len(MockOpenClawHandler.reply_queue)})
 
         elif self.path == "/poll_replies":
@@ -116,14 +138,20 @@ class MockOpenClawHandler(BaseHTTPRequestHandler):
         pass
 
 
-def run_mock_openclaw(port: int = 3000, auto_reply: str | None = None) -> None:
+def run_mock_openclaw(
+    port: int = 3000,
+    auto_reply: str | None = None,
+    auto_reply_sender: str | None = None,
+) -> None:
     """Run mock OpenClaw server."""
     MockOpenClawHandler.auto_reply = auto_reply
+    MockOpenClawHandler.auto_reply_sender = auto_reply_sender
     MockOpenClawHandler.reply_queue = []
     server = HTTPServer(("127.0.0.1", port), MockOpenClawHandler)
     print(f"🔌 Mock OpenClaw running at http://127.0.0.1:{port}")
     if auto_reply:
-        print(f"   auto-reply mode: every poll returns '{auto_reply}'")
+        sender_note = f" from '{auto_reply_sender}'" if auto_reply_sender else ""
+        print(f"   auto-reply mode: every poll returns '{auto_reply}'{sender_note}")
     print("Press Ctrl+C to stop")
     try:
         server.serve_forever()
@@ -140,5 +168,11 @@ if __name__ == "__main__":
         default=None,
         help="If set, every poll returns this reply (e.g. 'approve' or 'reject')",
     )
+    parser.add_argument(
+        "--auto-reply-sender",
+        default=None,
+        help="If set with --auto-reply, attach this sender to every auto-reply "
+        "(e.g. '+15551234567') to exercise the sender allowlist",
+    )
     args = parser.parse_args()
-    run_mock_openclaw(args.port, args.auto_reply)
+    run_mock_openclaw(args.port, args.auto_reply, args.auto_reply_sender)

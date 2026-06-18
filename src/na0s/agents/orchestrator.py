@@ -193,10 +193,12 @@ class PipelineOrchestrator:
 
         logger.info("Waiting for user deployment approval...")
 
-        # Poll for user response. No reply -> leave un-finalized so the next
-        # monitoring cycle keeps waiting (it won't re-notify, see above).
-        response = self.openclaw.poll_replies(timeout=600)  # 10 minute timeout
-        if not response:
+        # Poll for user response, preserving the iMessage sender so the deploy
+        # path can enforce the sender allowlist (defense-in-depth). No reply ->
+        # leave un-finalized so the next monitoring cycle keeps waiting (it
+        # won't re-notify, see above).
+        reply = self.openclaw.poll_replies_with_sender(timeout=600)  # 10 min timeout
+        if reply is None:
             logger.warning("No deployment approval response received")
             return False
 
@@ -204,11 +206,13 @@ class PipelineOrchestrator:
         # the user and use the boolean to detect failure (was previously
         # treated as a single truthy value, so failures looked like successes).
         # Authorization requires the reply to carry the secret nonce, and the
-        # artifact must still match content_hash at execution time (TOCTOU).
+        # artifact must still match content_hash at execution time (TOCTOU). The
+        # sender is a SECONDARY allowlist gate and never bypasses the nonce.
         success, result_message = self.deploy_approver.handle_approval(
-            response,
+            reply.text,
             expected_nonce=challenge["nonce"],
             content_hash=challenge["content_hash"],
+            sender=reply.sender,
         )
         self.openclaw.send_message(result_message)
         # Burn the nonce: single-use regardless of outcome.
