@@ -59,6 +59,13 @@ class ScanResult:
     multi_turn_recommendation: str = ""  # "" | continue_monitoring | flag | block
     cumulative_risk: float = 0.0         # EMA session risk that drove the verdict
 
+    # GAP-12: low-margin / signal-disagreement abstain band.  `abstained` marks a
+    # borderline verdict (risk near the threshold, or the detectors disagree) that
+    # the embedding application SHOULD escalate (human review / LLM judge) rather
+    # than trust the coin-flip.  `uncertainty` in [0,1] quantifies how borderline.
+    abstained: bool = False
+    uncertainty: float = 0.0
+
     def __post_init__(self):
         # GAP-07: enforce the public [0,1] risk-score contract at the single
         # output boundary.  Internal scoring can transiently go negative (e.g.
@@ -70,6 +77,7 @@ class ScanResult:
         # out-of-range score that add_turn() would reject.
         self.risk_score = _clamp_unit(self.risk_score)
         self.cumulative_risk = _clamp_unit(self.cumulative_risk)
+        self.uncertainty = _clamp_unit(self.uncertainty)
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)

@@ -96,6 +96,7 @@ from .fusion.voting import (
     RULE_SEVERITY as _VOTING_RULE_SEVERITY,
     RULE_TECHNIQUE_IDS as _VOTING_RULE_TECHNIQUE_IDS,
 )
+from .fusion.uncertainty import assess_uncertainty as _assess_uncertainty
 
 # FP Reduction: Obfuscation flags that are not L1 rules — now in _voting.py.
 _FP_EXEMPT_HITS = FP_EXEMPT_HITS
@@ -1959,6 +1960,23 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         model_version=_get_model_version(),
         perplexity_score=round(perplexity_score, 4),
     )
+
+    # GAP-12: mark a borderline / signal-disagreement verdict as `abstained` so
+    # the embedding application can escalate (judge / human review) instead of
+    # trusting the near-coin-flip at the threshold.  This does NOT change the
+    # verdict — the abstain default is an eval-tunable policy left to the caller.
+    try:
+        _ml_prob_mal = prob if "MALICIOUS" in label else (1.0 - prob)
+        _emb = embedding_info.get("score", 0.0)
+        # embedding_score is capped at 0.20 in the composite; normalize to a
+        # [0,1] prob-like value, and treat absent (0.0) as "no info" (None).
+        _emb_prob = min(_emb / 0.20, 1.0) if _emb > 0 else None
+        result.abstained, result.uncertainty = _assess_uncertainty(
+            result.risk_score, threshold, [_ml_prob_mal, _emb_prob],
+        )
+    except Exception:
+        logger.debug("uncertainty assessment failed", exc_info=True)
+
     # LAYER16: Multi-turn detection (optional, only when session_id provided)
     # FIX: Use singleton monitor so session state persists across scan() calls.
     # Without this, every call creates a fresh monitor with no memory of previous

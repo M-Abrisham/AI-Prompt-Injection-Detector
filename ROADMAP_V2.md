@@ -142,7 +142,16 @@ Fix order (clear bugs/cleanup → decontaminate+calibrate → one calibrated fus
 - [ ] **GAP-06** [M] — remove all threshold±0.01 clustering ops (borderline non-determinism).
 - [ ] **GAP-08** [M] — eliminate the cap-then-raise ordering hazard.
 - [ ] **GAP-09** [M] — fold cascade's post-clamp PromptGuard/embedding/RAG re-adds into the single fusion vector (scan/cascade parity).
-- [ ] **GAP-12** [M] — two-threshold abstain/disagreement band → judge escalation.
+- [x] **GAP-12** (FPR-safe core) — added a low-margin / signal-disagreement abstain band.
+  Root cause: the verdict is `composite >= threshold` at one line (`voting.py:418`); the
+  default `predict.scan()` had NO band at all (only cascade had a judge band, which dies
+  silently when no API key is set). New `fusion/uncertainty.py` `assess_uncertainty()`
+  marks borderline verdicts `abstained` with an `uncertainty` score (disagreement WIDENS
+  the band near the threshold but never makes a confident verdict abstain); wired into BOTH
+  `scan()` and cascade; new `ScanResult.abstained`/`.uncertainty` fields. Does NOT change
+  the verdict — the abstain DEFAULT (block-on-uncertainty) and band width are eval-tunable
+  config (`NA0S_ABSTAIN_BAND`/`NA0S_DISAGREEMENT_WIDEN`), and the active judge escalation
+  is the existing cascade band. New `tests/test_uncertainty_band.py`.
 - [ ] **GAP-14** [L] — persist+version a calibrator; ECE/Brier CI gate; production score-drift monitoring.
 
 ---

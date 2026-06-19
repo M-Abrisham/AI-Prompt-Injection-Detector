@@ -39,6 +39,7 @@ from .scan_result import ScanResult
 from .models import get_model_path
 from .fusion.signal_boost import calculate_boost
 from .fusion.voting import weighted_decision as _voting_weighted_decision
+from .fusion.uncertainty import assess_uncertainty as _assess_uncertainty
 from .fusion.complexity_router import (
     assess_complexity, get_pipeline_stages, is_adaptive_routing_enabled,
 )
@@ -1213,7 +1214,7 @@ class CascadeClassifier:
         if stage_tag not in technique_tags:
             technique_tags.append(stage_tag)
 
-        return ScanResult(
+        result = ScanResult(
             sanitized_text=l0.sanitized_text if l0 else "",
             is_malicious=is_mal,
             risk_score=round(confidence, 4),
@@ -1227,6 +1228,17 @@ class CascadeClassifier:
             model_version=_get_model_version(),
             judge_reasoning=judge_reasoning,
         )
+        # GAP-12: surface the abstain band for parity with predict.scan().  (The
+        # cascade path also ACTIVELY escalates uncertain verdicts to the judge
+        # band above; this flag marks residual borderline cases for the caller.)
+        try:
+            _p_mal = confidence if is_mal else (1.0 - confidence)
+            result.abstained, result.uncertainty = _assess_uncertainty(
+                _p_mal, self.threshold, [],
+            )
+        except Exception:
+            _logger.debug("uncertainty assessment failed", exc_info=True)
+        return result
 
     # ------------------------------------------------------------------
     # Layer 9: Output scanner — scan LLM output (post-processing)

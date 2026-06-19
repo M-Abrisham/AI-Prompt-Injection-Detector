@@ -50,6 +50,8 @@ class TestScanResultToDict:
             "multi_turn_threat_level",
             "multi_turn_recommendation",
             "cumulative_risk",
+            "abstained",
+            "uncertainty",
         }
         assert set(d.keys()) == expected_keys
 
