@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from na0s.agents.openclaw_bridge import Reply
 from na0s.agents.orchestrator import PipelineOrchestrator
 
 
@@ -108,7 +109,7 @@ class TestDeploymentApproval:
 
     def test_success_path(self, orch):
         self._pending(orch)
-        orch.openclaw.poll_replies.return_value = "approve"
+        orch.openclaw.poll_replies_with_sender.return_value = Reply("approve", None)
         orch.deploy_approver.handle_approval.return_value = (True, "✅ deployed")
 
         assert orch.run_deployment_approval() is True
@@ -118,7 +119,7 @@ class TestDeploymentApproval:
     def test_failure_is_detected(self, orch):
         # The old bug: a (False, msg) tuple read as truthy -> failure looked OK.
         self._pending(orch)
-        orch.openclaw.poll_replies.return_value = "approve"
+        orch.openclaw.poll_replies_with_sender.return_value = Reply("approve", None)
         orch.deploy_approver.handle_approval.return_value = (False, "❌ deploy failed")
 
         assert orch.run_deployment_approval() is False
@@ -128,22 +129,42 @@ class TestDeploymentApproval:
         orch.approvals_sync.sync_pending.return_value = None
         orch.deploy_approver.get_pending_deployment.return_value = None
         assert orch.run_deployment_approval() is True
-        orch.openclaw.poll_replies.assert_not_called()
+        orch.openclaw.poll_replies_with_sender.assert_not_called()
 
     def test_no_reply_returns_false(self, orch):
         self._pending(orch)
-        orch.openclaw.poll_replies.return_value = None
+        orch.openclaw.poll_replies_with_sender.return_value = None
         assert orch.run_deployment_approval() is False
 
     def test_does_not_renotify(self, orch):
         self._pending(orch)
         orch.approvals_sync.already_notified.return_value = True
-        orch.openclaw.poll_replies.return_value = "approve"
+        orch.openclaw.poll_replies_with_sender.return_value = Reply("approve", None)
         orch.deploy_approver.handle_approval.return_value = (True, "✅ deployed")
 
         assert orch.run_deployment_approval() is True
         # Already notified -> no fresh approval prompt sent (only the result).
         orch.deploy_approver.format_approval_message.assert_not_called()
+
+    def test_forwards_sender_into_handle_approval(self, orch):
+        """The sender from the polled Reply must be forwarded to handle_approval
+        so the allowlist gate can act on it."""
+        self._pending(orch)
+        orch.openclaw.poll_replies_with_sender.return_value = Reply(
+            "approve nonce123", "+15551234567"
+        )
+        orch.deploy_approver.handle_approval.return_value = (True, "✅ deployed")
+        orch.approvals_sync.issue_challenge.return_value = {
+            "nonce": "nonce123",
+            "content_hash": "h",
+        }
+
+        assert orch.run_deployment_approval() is True
+        _, kwargs = orch.deploy_approver.handle_approval.call_args
+        assert kwargs["sender"] == "+15551234567"
+        # And the reply text (not the Reply object) is passed positionally.
+        args, _ = orch.deploy_approver.handle_approval.call_args
+        assert args[0] == "approve nonce123"
 
 
 # ----------------------------------------- synthetic handle_user_response --

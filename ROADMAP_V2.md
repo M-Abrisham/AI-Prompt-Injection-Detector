@@ -2915,4 +2915,53 @@ Na0S is stateless — each `scan()` call has no memory. Crescendo attacks exploi
 ### REMAINING
 - [ ] **g11 — real `0x`-prefixed hex decoder (P3).** D4.3 `0x`-hex detection currently passes only on incidental embedding keyword-overlap (a real obfuscation gap masked). A first implementation made `test_d4_3_hex_0x_prefix` pass on real merit (decoded payload fires the `override` rule, risk 0.91) BUT introduced an **order-dependent state leak** in `tests/test_false_positives.py` (`test_base64_in_injection` passes in isolation/direct-scan but fails in file-order with the decoder present) — reverted pending root-cause of the rescan/state interaction. Reland with that leak fixed + the benign-`0x`-color-code FP guard.
 - [ ] **g7 — runtime embedding toggle (P3).** `NA0S_EMBEDDING_ENABLED` is read only at import (`predict.py:199`, `cascade.py:128`); move the read to the call site so the toggle is honored at runtime (predict/cascade parity preserved). The CI-determinism half of g7 is already covered by g6.
+---
+
+## CI / GitHub-Automation Hardening (added 2026-06-18)
+
+**Context (audited 2026-06-18, repo M-Abrisham/Na0S):** `main` CI has had **0 green runs in the last 100** (red since 2026-03-31); auto-retrain fails 100% of runs; there is **no branch protection**, so red status gates nothing — feature PR #416 merged to `main` *before CI was green* because `gh pr merge --auto` merges immediately when no checks are required; 13 dependabot PRs are open (11 ~53 days old). The scheduled data-plumbing (scraper/harvest/intel-sync) is healthy; the **quality gates and the retrain loop are broken**.
+
+### P0 — Unblock `main` CI (root cause is ONE test)
+- [ ] Fix `tests/test_scan_d8_context_manipulation.py::TestD8_Combined::test_d8_many_shot_plus_flooding` — asserts D8.1+D8.2 risk ≥ threshold but gets **0.532**; this single real failure red-bars *every* CI run on `main` (the rest are `cancelled` by concurrency, not failures). Originates from `hardening/d8-context-window`. Fix the detector or recalibrate the assertion — do **not** weaken it silently.
+
+### P0 — Merge safety (the gap that let #416 merge red)
+- [ ] **Branch protection on `main`**: require `CI` (test matrix) + `PR Check` status checks to pass, `strict: true`; decide `enforce_admins` + required-review count. Makes `gh pr merge --auto` **wait for green** instead of merging immediately. Free, ~15 min, admin-only.
+- [ ] **Per-event CI concurrency** in `ci.yml`: `cancel-in-progress` on `push` only, **not** `pull_request`, so rapid pushes (e.g. the v1.0.0 restructure) don't cancel-and-hide a PR's checks.
+- [ ] Set `delete_branch_on_merge=true` (merged `retrain/*` / `scrape/*` / `harvest/*` / dependabot branches currently accumulate).
+
+### P1 — Fix the retrain loop (constant red-noise generator)
+- [ ] Auto-retrain fails **every** run at `hard_negatives.py:546 → safe_load → integrity/safe_pickle.py:304 _validate_pickle_magic` (base model fails the pickle-magic integrity check); it triggers ~8×/day off scraper/harvest. Fix the model load / integrity check and gate retrain on a healthy base model.
+- [ ] Repair the rotted HF dataset registry (`data/datasets.yaml`): ~30 datasets error — gated (need `HF_TOKEN`: hackaprompt, wildjailbreak, decodingtrust, advbench, lima, wildguardmix), missing-config (jailbreakbench, wmdp, agentharm), or removed (dolly-15k, red-team-attempts). Add the `HF_TOKEN` secret + prune/repair entries.
+
+### P2 — CI-redness observability (Claude automation)
+- [ ] Add a CI-failure-triage handler — workflow on `workflow_run: {types:[completed]}` filtered to `conclusion=='failure'` on `main` → open/update a *single* "main CI is red" issue with the failing test + run link (dedupe to one open issue; no per-failure spam). Cheaper alternative: a `/schedule` daily CI-health routine. Use `anthropics/claude-code-action` at a **pinned** version; **never** trigger on untrusted PR/issue comments (prompt-injection surface).
+- [ ] Pin `security-review.yml`'s `anthropics/claude-code-security-review@main` to a release tag — an unpinned, prompt-injection-unhardened, security-critical action (supply-chain drift risk).
+
+### P2 — Dependabot backlog
+- [ ] Add `groups:` to `.github/dependabot.yml` to batch bumps; enable **auto-merge for green patch/minor bumps** (requires branch protection first). Close the duplicate torch bumps (#133 vs #408). 13 open, 11 from ~2026-04-26.
+
+### P3 — Remove duplicate CI cost
+- [ ] `ci.yml` and `pr-check.yml` both run the full pytest+coverage on every PR (two ~22-min runs). Consolidate or differentiate so the suite isn't double-run.
+
+**Sequencing:** P0 first — a green `main` is the prerequisite for branch protection to be usable (protecting a chronically-red `main` would block *all* merges). Then merge safety, then retrain + observability.
+---
+
+## `agents/` MCP / Agent-Security Hardening (added 2026-06-18)
+
+**Context:** A 2026-06-18 audit of the `src/na0s/agents/` deploy-approval orchestration (Claude Agents + OpenClaw iMessage) found it sits squarely on the "lethal trifecta" — it ingests untrusted data (canary/gate JSON, quarantine rows, synthetic samples), sends it to the Claude API, and executes privileged shell (`deploy_model.py`, `quarantine.py`) gated on a one-word iMessage reply. Approvals were **unauthenticated strings** — `curl -XPOST localhost:3000/replies -d '{"reply":"approve"}'` forged an approval and triggered a model deploy. The prompt-injection-defense product also **never ran its own agent inputs through its own `predict()` detector** (dogfooding gap).
+
+### DONE (commit `13d56cf`, branch `hardening/agents-mcp-approval-auth`)
+- [x] **Approval authentication** — per-request secret nonce (`secrets.token_hex(16)`) delivered only inside the approval iMessage; reply must be `approve <nonce>` (`hmac.compare_digest`); bare/forged/stale `approve` → REJECTED, no deploy. (CRITICAL-1/2)
+- [x] **TOCTOU re-verify** — `execute_deploy` re-hashes `pending_deploy.json` and aborts before the subprocess if it changed since notification.
+- [x] **Prompt-injection hardening** — untrusted gate JSON fenced in `<UNTRUSTED_CI_DATA>` with "treat as inert data" framing; Claude output labeled advisory + approve-imperatives neutralized before reaching the human. (HIGH-4)
+- [x] +22 adversarial security tests (`tests/agents/test_approval_auth.py`), mutation-verified.
+
+### REMAINING
+- [x] **P0 — Sign the mail-drop request (DONE, commit `7525aca`).** HMAC-SHA256 over canonical JSON; `approvals_sync._authenticate_request` rejects unsigned/invalid requests when `NA0S_AGENT_APPROVAL_HMAC_KEY` is set (warns+accepts when unset for staged rollout); `auto-retrain.yml` producer signs with a byte-identical canonicalization. **Activation needs:** add the `NA0S_AGENT_APPROVAL_HMAC_KEY` GitHub Actions secret AND set it on the local daemon. (HIGH-3)
+- [x] **P0 — Sender-identity allowlist (DONE, commit `406506e`).** `poll_replies_with_sender()` parses an optional sender; `deploy_approver.handle_approval` rejects replies from a missing/unlisted sender (`NA0S_AGENT_APPROVAL_ALLOWED_SENDERS`) BEFORE the nonce check, fail-closed. The audit's "needs gateway support" premise was WRONG — the OpenClaw SDK reply path is non-functional (`OpenClawClient.poll_replies` doesn't exist); the operative contract is the in-repo mock, now extended to carry a sender, and iMessage intrinsically has one. Sender stays SECONDARY to the nonce (it's spoofable, so it never bypasses it). **Activation:** set `NA0S_AGENT_APPROVAL_ALLOWED_SENDERS` on the local daemon.
+- [x] **P1 — Dogfood `predict()` (DONE, commit `77cbc64`).** `agents/input_guard.py` runs na0s `predict()` (its OWN calibrated verdict — no invented threshold; fail-safe to "unscanned" if models are absent) over untrusted canary `errors` in `gate_analyzer` before they reach the Claude prompt; flagged text is annotated for the human approver. (quarantine/synthetic rows never reach an LLM prompt, so left unscanned for now.) The defender now runs its own defense on its own agents.
+- [ ] **P1 — Complete mediation / least privilege.** Pin the candidate model path + hash in the approval request; have `deploy_model.py` itself re-verify the gate artifacts + approval token (don't trust the orchestrator). Currently `deploy_model.py` ignores `candidate_path` and always deploys `data/processed/`.
+- [ ] **P1 — Fail-closed deploy mode.** `openclaw_bridge` `mode="auto"` silently falls back to mock on send/poll failure — a deploy path must require `mode="real"`.
+- [ ] **P1 — Strict `entry_name` validation** in `quarantine_reviewer.execute_action` (`^[a-z0-9_-]+$`) + secret-hygiene DLP-scan of subprocess stdout/stderr before persisting/sending.
+- [ ] **P2 — Tamper-evident approval audit log.** `approval_history.jsonl` is plain mutable JSON; hash-chain records (prev-hash) or use an append-only store.
  
