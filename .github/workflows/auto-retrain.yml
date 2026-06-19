@@ -81,6 +81,13 @@ jobs:
       - name: Train model
         run: python -m scripts.model
 
+      - name: Calibrate decision threshold (GAP-03)
+        # Re-fit the decision threshold on the (decontaminated) data after every
+        # retrain and ship data/processed/optimal_threshold.json, so the runtime
+        # never silently falls back to the uncalibrated 0.55.  NA0S_TARGET_FPR
+        # anchors the operating point to the deployment false-positive budget.
+        run: NA0S_TARGET_FPR=0.012 python scripts/optimize_threshold.py
+
       - name: Run canary evaluation
         id: canary
         continue-on-error: true

@@ -123,6 +123,14 @@ def main():
     best_r95_fpr = 1.0
     best_r95_tpr = 1.0
 
+    # GAP-03: FPR-anchored operating point — the highest-recall threshold whose
+    # FPR stays within the deployment false-positive budget (Na0S is an embedded
+    # defensive SDK; a fixed FP budget matters more than a fixed recall floor).
+    target_fpr = float(os.environ.get("NA0S_TARGET_FPR", "0.012"))
+    best_fpr_thresh = None
+    best_fpr_tpr = -1.0
+    best_fpr_fpr = 1.0
+
     for t in thresholds:
         preds = (probs >= t).astype(int)
 
@@ -159,6 +167,12 @@ def main():
             best_r95_thresh = round(t, 2)
             best_r95_tpr = tpr
 
+        # Track FPR-anchored threshold: highest recall with fpr <= target_fpr.
+        if fpr <= target_fpr and tpr > best_fpr_tpr:
+            best_fpr_tpr = tpr
+            best_fpr_thresh = round(t, 2)
+            best_fpr_fpr = fpr
+
     metrics_df = pd.DataFrame(records)
 
     # Default (0.5) metrics
@@ -171,6 +185,11 @@ def main():
           f"FPR={best_youden_fpr:.4f})")
     print(f"      95%-recall threshold:     {best_r95_thresh}  "
           f"(TPR={best_r95_tpr:.4f}, FPR={best_r95_fpr:.4f})")
+    if best_fpr_thresh is not None:
+        print(f"      target-FPR (<= {target_fpr:.3f}) threshold: {best_fpr_thresh}  "
+              f"(TPR={best_fpr_tpr:.4f}, FPR={best_fpr_fpr:.4f})")
+    else:
+        print(f"      target-FPR (<= {target_fpr:.3f}): NO threshold meets the FPR budget")
 
     # ------------------------------------------------------------------
     # 5. Plot ROC and PR curves
@@ -299,7 +318,16 @@ def main():
         'default_threshold': 0.5,
         'default_tpr': round(default_tpr, 6),
         'default_fpr': round(default_fpr, 6),
+        # GAP-03: FPR-anchored operating point preferred by the runtime
+        # (na0s.fusion.voting.get_decision_threshold reads target_fpr_threshold
+        # first, recall95_threshold second).  Only emitted when a threshold
+        # actually meets the budget, so the runtime cleanly falls back otherwise.
+        'target_fpr': target_fpr,
     }
+    if best_fpr_thresh is not None:
+        result['target_fpr_threshold'] = best_fpr_thresh
+        result['target_fpr_tpr'] = round(best_fpr_tpr, 6)
+        result['target_fpr_fpr'] = round(best_fpr_fpr, 6)
 
     with open(THRESHOLD_JSON_PATH, 'w') as f:
         json.dump(result, f, indent=2)

@@ -116,8 +116,25 @@ Fix order (clear bugs/cleanup → decontaminate+calibrate → one calibrated fus
   scaffolding RESERVED for GAP-02 (kept). All top-level↔`fusion/` files are pure shims
   (kept for test back-compat). Documented the strategy landscape in voting.py. Zero
   default-path behavior change (196 tests pass).
-- [ ] **PREREQUISITE** — land the eval-leakage decontamination fix (`process_data` excludes holdout/benchmark) on main; required before honest calibration.
-- [ ] **GAP-03** [M] — re-run `optimize_threshold.py` on the decontaminated split at a target FPR; ship `optimal_threshold.json`; remove the silent 0.55 fallback.
+- [x] **PREREQUISITE** — decontaminated the training merge: `process_data.py` now
+  iterates `TRAINING_JSONL_DIRS = [AGGREGATED, HARVEST]` and EXCLUDES holdout/benchmark
+  (the eval sets). Guarded by `tests/test_no_holdout_leakage.py`. (The actual
+  `combined_data.csv` regeneration + model retrain runs in the training pipeline.)
+- [x] **GAP-03** (code-now portion) — threshold calibration plumbing fixed at the root:
+  - **Hidden path bug:** `optimal_threshold.json` resolved to `src/data/processed/`
+    (2 `os.pardir` — correct only before the `_voting.py -> fusion/voting.py` move),
+    so the artifact was NEVER loaded even when present → always fell back. Fixed (3 levels up).
+  - **Silent -> loud:** the absent-artifact path logged at DEBUG; now a WARNING, plus a
+    `NA0S_REQUIRE_THRESHOLD_ARTIFACT=1` strict mode that RAISES (for CI) instead of shipping
+    the uncalibrated 0.55.
+  - **Target-FPR operating point:** `optimize_threshold.py` now also selects the highest-recall
+    threshold within `NA0S_TARGET_FPR` (default 0.012) and emits `target_fpr_threshold`, which
+    the runtime PREFERS over `recall95_threshold`.
+  - **CI wiring:** added a "Calibrate decision threshold" step to `auto-retrain.yml` after model
+    training, so a retrain regenerates the artifact.
+  - New tests: `test_threshold_resolution.py` (path, loud fallback, strict, FPR-key preference).
+  - **Pipeline-later (needs DVC data):** the actual re-fit (`optimize_threshold.py` needs
+    `model.pkl` + the clean split + `dvc pull`) runs in the training environment, not the dev tree.
 - [ ] **GAP-01** [L] — `CalibratedClassifierCV` + per-signal calibrators so every fusion input is a true probability.
 - [ ] **GAP-02** [CRITICAL, L] — replace the additive sum with calibrated log-odds / stacking fusion (promote the dead `StackingMetaLearner`), FPR-gated A/B.
 - [ ] **GAP-04** [M] — remove agreement/technique-family double-counting boosts.

@@ -58,9 +58,13 @@ _logger = logging.getLogger(__name__)
 _FALLBACK_THRESHOLD = config.FALLBACK_THRESHOLD
 
 #: Path to the threshold JSON produced by scripts/optimize_threshold.py.
+#: GAP-03: voting.py lives at src/na0s/fusion/, so the repo root is THREE levels
+#: up (fusion -> na0s -> src -> root).  The old 2-level path (correct only when
+#: this module was src/na0s/_voting.py) resolved to src/data/processed, so the
+#: artifact was never found even when present — the threshold always fell back.
 _THRESHOLD_JSON_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    os.pardir, os.pardir,
+    os.pardir, os.pardir, os.pardir,
     "data", "processed", "optimal_threshold.json",
 )
 
@@ -73,8 +77,14 @@ def get_decision_threshold():
 
     Resolution order:
         1. ``DECISION_THRESHOLD`` environment variable  (float)
-        2. ``recall95_threshold`` from ``data/processed/optimal_threshold.json``
-        3. Hardcoded fallback ``0.55``
+        2. ``target_fpr_threshold`` (preferred — FPR-anchored operating point)
+           or ``recall95_threshold`` from ``data/processed/optimal_threshold.json``
+        3. Hardcoded fallback (``config.DEFAULT_THRESHOLD`` = 0.55).
+
+    GAP-03: the fallback is the UNCALIBRATED default — when it is used because
+    the artifact is absent, this now logs at WARNING (it was DEBUG-silent, so
+    the calibration gap was invisible).  Set ``NA0S_REQUIRE_THRESHOLD_ARTIFACT=1``
+    (CI/production) to RAISE instead of silently shipping the fallback.
     """
     global _cached_threshold
     if _cached_threshold is not None:
@@ -101,7 +111,10 @@ def get_decision_threshold():
         try:
             with open(json_path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
-            _cached_threshold = float(data["recall95_threshold"])
+            # Prefer the FPR-anchored operating point (GAP-03); fall back to the
+            # legacy recall-95 key for artifacts produced before the FPR change.
+            val = data.get("target_fpr_threshold", data.get("recall95_threshold"))
+            _cached_threshold = float(val)
             _logger.info(
                 "Decision threshold loaded from %s: %.4f",
                 json_path, _cached_threshold,
@@ -113,9 +126,22 @@ def get_decision_threshold():
                 json_path, exc,
             )
 
-    # 3. Fallback
+    # 3. Fallback — UNCALIBRATED.  Make the calibration gap LOUD (was DEBUG).
+    _strict = os.environ.get("NA0S_REQUIRE_THRESHOLD_ARTIFACT", "").strip().lower()
+    if _strict in ("1", "true", "yes"):
+        raise RuntimeError(
+            "optimal_threshold.json not found at {} and "
+            "NA0S_REQUIRE_THRESHOLD_ARTIFACT is set — refusing to ship the "
+            "uncalibrated fallback threshold. Run scripts/optimize_threshold.py "
+            "on the decontaminated split first.".format(json_path)
+        )
     _cached_threshold = _FALLBACK_THRESHOLD
-    _logger.debug("Decision threshold using fallback: %.4f", _cached_threshold)
+    _logger.warning(
+        "optimal_threshold.json not found at %s; using UNCALIBRATED fallback "
+        "%.4f. Run scripts/optimize_threshold.py to calibrate "
+        "(set NA0S_REQUIRE_THRESHOLD_ARTIFACT=1 in CI to fail hard instead).",
+        json_path, _cached_threshold,
+    )
     return _cached_threshold
 
 
