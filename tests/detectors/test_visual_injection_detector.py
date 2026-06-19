@@ -30,6 +30,16 @@ from na0s.visual_injection_detector import (
     MAX_IMAGE_BYTES,
 )
 
+# Real-PIL gate: tests that mock.patch(...Image) require the module-level
+# ``Image`` symbol to be bound, which only happens when Pillow is installed.
+# Without it, mock.patch raises AttributeError. The _HAS_PIL=False
+# graceful-degradation tests below do NOT mock Image and must keep running.
+from na0s.detectors.visual_injection import _HAS_PIL
+
+_requires_pil = pytest.mark.skipif(
+    not _HAS_PIL, reason="requires Pillow (pip install 'na0s[ocr]')"
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers: mock OCR/metadata results
@@ -265,6 +275,7 @@ class TestDetectTinyFont:
         score, indicators, tids = _detect_tiny_font_text("", b"")
         assert score == 0.0
 
+    @_requires_pil
     @mock.patch("na0s.detectors.visual_injection._HAS_PIL", True)
     def test_high_density_text(self):
         """Very dense text relative to image size should trigger."""
@@ -281,6 +292,7 @@ class TestDetectTinyFont:
             assert any(i.indicator_type == "tiny_font_heuristic" for i in indicators)
             assert "M1.3" in tids
 
+    @_requires_pil
     @mock.patch("na0s.detectors.visual_injection._HAS_PIL", True)
     def test_normal_density_text(self):
         """Normal text density should not trigger."""
@@ -311,6 +323,7 @@ class TestDetectLowContrast:
         score, indicators, tids = _detect_low_contrast_text(b"data")
         assert score == 0.0
 
+    @_requires_pil
     @mock.patch("na0s.detectors.visual_injection._HAS_PIL", True)
     def test_uniform_image(self):
         """Image with nearly uniform pixel values should trigger."""
@@ -326,6 +339,7 @@ class TestDetectLowContrast:
             assert any(i.indicator_type == "low_contrast_text" for i in indicators)
             assert "M1.3" in tids
 
+    @_requires_pil
     @mock.patch("na0s.detectors.visual_injection._HAS_PIL", True)
     def test_high_contrast_image(self):
         """Image with high variance should not trigger."""
@@ -371,6 +385,7 @@ class TestScanImage:
             # Should not raise, should have warnings
             assert isinstance(result, VisualInjectionResult)
 
+    @_requires_pil
     @mock.patch("na0s.detectors.visual_injection._HAS_PIL", True)
     @mock.patch("na0s.layer0.ocr_extractor.extract_image_metadata")
     @mock.patch("na0s.layer0.ocr_extractor.extract_text_from_image")

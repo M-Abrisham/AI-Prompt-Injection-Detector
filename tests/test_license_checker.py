@@ -11,7 +11,10 @@ import tempfile
 import unittest
 from unittest import mock
 
+import pytest
 import yaml
+
+from scripts.license_checker import HF_HUB_AVAILABLE
 
 
 def _write_registry(tmpdir, sources):
@@ -207,6 +210,13 @@ class TestParseDatasets(unittest.TestCase):
         self.assertIn("org2/dataset2", repos)
 
 
+@pytest.mark.skipif(
+    not HF_HUB_AVAILABLE,
+    reason=(
+        "huggingface_hub not installed: scripts.license_checker.hf_dataset_info "
+        "is unbound on the ImportError path, so mock.patch of it would AttributeError"
+    ),
+)
 class TestFetchLicenseFromHub(unittest.TestCase):
     """Test HF Hub API fetching with mocked responses."""
 
