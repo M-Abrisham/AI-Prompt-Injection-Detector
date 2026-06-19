@@ -1049,7 +1049,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
             and composite < threshold
             and _ml_prob_malicious >= 0.85):
         composite = max(composite, _anchor_floor)
-        if label in ("SAFE", "safe", "benign"):
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
             label = "MALICIOUS"
 
     # --- Indirect extraction detection (E1) ---
@@ -1289,7 +1289,8 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     if _has_critical_e1 and embedding_technique_matches and "E1" in embedding_technique_matches:
         if composite < _anchor_floor:
             composite = max(composite, _anchor_floor)
-            label = "MALICIOUS"
+            if composite >= threshold:
+                label = "MALICIOUS"
     elif _has_critical_e1 and composite < _anchor_floor:
         # g8: Degrade-aware Path-A.  The embedding-confirmed branch above
         # silently voids when the embedding signal is degraded (env-disabled
@@ -1323,7 +1324,8 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                 "corroboration)."
             )
             composite = max(composite, _anchor_floor)
-            label = "MALICIOUS"
+            if composite >= threshold:
+                label = "MALICIOUS"
 
     # --- E1 high-severity + FingerprintStore floor ---
     if "SAFE" in label and composite < threshold:
@@ -1344,7 +1346,8 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                     break
             if _has_high_e1:
                 composite = max(composite, _anchor_floor)
-                label = "MALICIOUS"
+                if composite >= threshold:
+                    label = "MALICIOUS"
 
     # --- E2 reconnaissance floor ---
     # A reconnaissance probe (tool/source/config enumeration, filter recon,
@@ -1367,7 +1370,8 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         )
         if _has_recon_probe:
             composite = max(composite, _anchor_floor)
-            label = "MALICIOUS"
+            if composite >= threshold:
+                label = "MALICIOUS"
 
     # --- D5 Unicode obfuscation signal ---
     _UNICODE_OBFUSCATION_FLAGS = frozenset({
