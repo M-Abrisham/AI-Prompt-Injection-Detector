@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 
-from na0s.worm_detector import WormSignatureDetector
+from na0s.worm.detector import WormSignatureDetector
 
 logger = logging.getLogger(__name__)
 

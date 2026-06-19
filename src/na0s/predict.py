@@ -217,6 +217,30 @@ try:
 except ImportError:
     _HAS_PERPLEXITY = False
 
+# Worm self-replication signal — optional import.
+# Cheap, fail-safe embedding/lexical check for self-propagating ("worm") intent
+# on the INPUT path.  Previously the worm detector was reachable only on the
+# OUTPUT side (PropagationScanner, env-gated off), so a worm arriving as input
+# was never embedding-scored.  Opt out with NA0S_WORM_INPUT_SCAN=0.
+try:
+    from .worm.detector import worm_embedding_signal
+    _HAS_WORM = True
+except ImportError:
+    _HAS_WORM = False
+
+# Worm-signal contribution bounds.  The PRIMARY false-positive control is the
+# signal's own conservative gate inside worm_embedding_signal() — the lexical
+# fallback fires only on genuine propagation structure (action + payload/target
+# + imperative) and the embedding head needs a positive worm-vs-benign margin —
+# so benign text that never trips the gate is untouched.  The weight cap then
+# bounds how far a gated hit can move the composite, so a borderline prompt is
+# nudged rather than slammed over the threshold.  Empirically benign "forward /
+# send / include" phrasings score 0.0 and are unaffected.
+# NOTE: starting operating point — calibrate against a labeled corpus (G3).
+_WORM_INPUT_THRESHOLD = 0.55       # min worm-signal score before it contributes
+_WORM_INPUT_HIGH_SEVERITY = 0.75   # score at/above which the hit is tagged "high"
+_WORM_INPUT_MAX_WEIGHT = 0.30      # max additive contribution to the composite score
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 CHAR_VECTORIZER_PATH = get_model_path("char_tfidf_vectorizer.pkl")
@@ -1079,6 +1103,32 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                     label = "MALICIOUS"
         except Exception:
             pass  # PromptGuard failure is non-fatal
+
+    # --- Worm self-replication signal (input-side) ---
+    # Score the sanitized input for self-propagating ("worm") intent using the
+    # embedding head when a model is cached, transparently degrading to the
+    # dependency-free lexical classifier otherwise.  Fail-safe (never raises) and
+    # bounded (see _WORM_INPUT_* above — the gate is the FP control, the cap
+    # bounds the nudge).  Opt out via NA0S_WORM_INPUT_SCAN=0.
+    if _HAS_WORM and os.environ.get(
+        "NA0S_WORM_INPUT_SCAN", "1"
+    ).strip().lower() not in ("0", "false", "no"):
+        try:
+            _worm_sig = worm_embedding_signal(clean)
+            _worm_score = float(_worm_sig.get("score", 0.0))
+            if _worm_score >= _WORM_INPUT_THRESHOLD:
+                _worm_weight = _WORM_INPUT_MAX_WEIGHT * _worm_score
+                composite = min(composite + _worm_weight, 1.0)
+                _wsev = "high" if _worm_score >= _WORM_INPUT_HIGH_SEVERITY else "medium"
+                _whit = "worm_embedding:" + _wsev
+                if _whit not in hit_names_seen:
+                    hits.append(_whit)
+                    hit_names_seen.add(_whit)
+                    _local_severities[_whit] = _wsev
+                if composite >= threshold and "SAFE" in label:
+                    label = "MALICIOUS"
+        except Exception:
+            pass  # worm signal failure is non-fatal
 
     # --- Layer 2 extra boost (ascii art / whitespace stego) ---
     # Applied after _weighted_decision so it doesn't interfere with the
