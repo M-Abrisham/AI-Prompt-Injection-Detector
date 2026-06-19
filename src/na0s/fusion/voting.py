@@ -21,6 +21,13 @@ similarity into a composite score that determines the SAFE/MALICIOUS verdict.
 Both ``predict.py`` and ``cascade.py`` delegate to this module.  No other
 file should implement weighted voting logic.
 
+Fusion-strategy landscape (GAP-10): ``weighted_decision`` here is the ONLY
+combiner on the default path.  ``fusion/rrf.py`` (env ``NA0S_USE_RRF=1``) and
+``fusion/ensemble.py`` (``enable_ensemble=True`` + the ``embedding`` stage) are
+opt-in alternatives, off by default.  The Bayesian combiner was deleted as dead
+code.  ``ml/stacking_classifier.StackingMetaLearner`` is untrained scaffolding
+reserved for the GAP-02 calibrated-fusion work (not yet wired).
+
 History:
     2026-03-12 — Extracted from predict.py to eliminate duplication with
     cascade.py (Issue #2).  predict.py had the complete implementation;
@@ -36,6 +43,7 @@ import logging
 import math
 import os
 
+from .. import config
 from ..rules import RULES, SEVERITY_WEIGHTS
 from ..detectors.multilingual_intent import HEURISTIC_HITS as _HEURISTIC_HITS
 from .signal_boost import calculate_boost_from_names
@@ -43,14 +51,21 @@ from .signal_boost import calculate_boost_from_names
 _logger = logging.getLogger(__name__)
 
 # ── Constants (exported for tests and downstream consumers) ──────────────
+# GAP-13: these are sourced from config.py — the single source of truth — so
+# this scorer (the live composite for BOTH predict.scan() and cascade) can no
+# longer drift from config.  Names stay module-level for backward-compat imports.
 
 #: Hardcoded fallback when optimal_threshold.json is absent.
-_FALLBACK_THRESHOLD = 0.55
+_FALLBACK_THRESHOLD = config.FALLBACK_THRESHOLD
 
 #: Path to the threshold JSON produced by scripts/optimize_threshold.py.
+#: GAP-03: voting.py lives at src/na0s/fusion/, so the repo root is THREE levels
+#: up (fusion -> na0s -> src -> root).  The old 2-level path (correct only when
+#: this module was src/na0s/_voting.py) resolved to src/data/processed, so the
+#: artifact was never found even when present — the threshold always fell back.
 _THRESHOLD_JSON_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    os.pardir, os.pardir,
+    os.pardir, os.pardir, os.pardir,
     "data", "processed", "optimal_threshold.json",
 )
 
@@ -81,8 +96,14 @@ def get_decision_threshold():
 
     Resolution order:
         1. ``DECISION_THRESHOLD`` environment variable  (float)
-        2. ``recall95_threshold`` from ``data/processed/optimal_threshold.json``
-        3. Hardcoded fallback ``0.55``
+        2. ``target_fpr_threshold`` (preferred — FPR-anchored operating point)
+           or ``recall95_threshold`` from ``data/processed/optimal_threshold.json``
+        3. Hardcoded fallback (``config.DEFAULT_THRESHOLD`` = 0.55).
+
+    GAP-03: the fallback is the UNCALIBRATED default — when it is used because
+    the artifact is absent, this now logs at WARNING (it was DEBUG-silent, so
+    the calibration gap was invisible).  Set ``NA0S_REQUIRE_THRESHOLD_ARTIFACT=1``
+    (CI/production) to RAISE instead of silently shipping the fallback.
     """
     global _cached_threshold
     if _cached_threshold is not None:
@@ -110,11 +131,16 @@ def get_decision_threshold():
         try:
             with open(json_path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
-            valid = _valid_threshold(data["recall95_threshold"])
+            # Prefer the FPR-anchored operating point (GAP-03); fall back to the
+            # legacy recall-95 key for artifacts produced before the FPR change.
+            raw = data.get("target_fpr_threshold", data.get("recall95_threshold"))
+            # Fail-closed validation (#420): reject NaN/inf/out-of-range so a
+            # bad artifact can't silently disable detection (score >= nan is
+            # always False -> everything SAFE). Fall through to the fallback.
+            valid = _valid_threshold(raw)
             if valid is None:
                 raise ValueError(
-                    f"recall95_threshold not finite in (0,1]: "
-                    f"{data.get('recall95_threshold')!r}"
+                    f"threshold not finite in (0,1]: {raw!r}"
                 )
             _cached_threshold = valid
             _logger.info(
@@ -128,9 +154,22 @@ def get_decision_threshold():
                 json_path, exc,
             )
 
-    # 3. Fallback
+    # 3. Fallback — UNCALIBRATED.  Make the calibration gap LOUD (was DEBUG).
+    _strict = os.environ.get("NA0S_REQUIRE_THRESHOLD_ARTIFACT", "").strip().lower()
+    if _strict in ("1", "true", "yes"):
+        raise RuntimeError(
+            "optimal_threshold.json not found at {} and "
+            "NA0S_REQUIRE_THRESHOLD_ARTIFACT is set — refusing to ship the "
+            "uncalibrated fallback threshold. Run scripts/optimize_threshold.py "
+            "on the decontaminated split first.".format(json_path)
+        )
     _cached_threshold = _FALLBACK_THRESHOLD
-    _logger.debug("Decision threshold using fallback: %.4f", _cached_threshold)
+    _logger.warning(
+        "optimal_threshold.json not found at %s; using UNCALIBRATED fallback "
+        "%.4f. Run scripts/optimize_threshold.py to calibrate "
+        "(set NA0S_REQUIRE_THRESHOLD_ARTIFACT=1 in CI to fail hard instead).",
+        json_path, _cached_threshold,
+    )
     return _cached_threshold
 
 
@@ -144,11 +183,11 @@ def _reset_threshold_cache():
 DECISION_THRESHOLD = get_decision_threshold()
 
 #: ML model weight in the composite formula.
-ML_WEIGHT = 0.6
+ML_WEIGHT = config.ML_WEIGHT
 
 #: Obfuscation weight per flag and cap.
-OBFUSCATION_WEIGHT_PER_FLAG = 0.15
-OBFUSCATION_WEIGHT_CAP = 0.3
+OBFUSCATION_WEIGHT_PER_FLAG = config.OBFUSCATION_WEIGHT_PER_FLAG
+OBFUSCATION_WEIGHT_CAP = config.OBFUSCATION_WEIGHT_CAP
 
 #: Hit names that are obfuscation flags, not L1 rules.
 #: Used by the ML uncertain-zone cap to determine if any real L1 rule fired.
@@ -174,15 +213,10 @@ RULE_TECHNIQUE_IDS.update({
 })
 
 #: Structural feature weights (Layer 3 binary signals).
-STRUCTURAL_SIGNAL_WEIGHTS = {
-    "imperative_start": 0.05,
-    "role_assignment": 0.10,
-    "instruction_boundary": 0.10,
-    "negation_command": 0.08,
-}
+STRUCTURAL_SIGNAL_WEIGHTS = config.STRUCTURAL_SIGNAL_WEIGHTS
 
 #: Multi-layer agreement boost values by number of agreeing layers.
-AGREEMENT_BOOST = {2: 0.10, 3: 0.12, 4: 0.15}
+AGREEMENT_BOOST = config.AGREEMENT_BOOST
 
 
 # ── Shared Composite Helper (Phase A) ───────────────────────────────────

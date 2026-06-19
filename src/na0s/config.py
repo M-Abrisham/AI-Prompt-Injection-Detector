@@ -65,11 +65,15 @@ class ThresholdConfig:
 # Singleton — import this, not the class
 THRESHOLDS = ThresholdConfig()
 
-# -- Weighted Voting (Layer 6) -- flat constants for backward compat
-ML_WEIGHT = 0.6
-OBFUSCATION_WEIGHT_PER_FLAG = 0.15
-OBFUSCATION_WEIGHT_CAP = 0.3
-FALLBACK_THRESHOLD = 0.55
+# -- Weighted Voting (Layer 6) --
+# Single source of truth: these DERIVE from the THRESHOLDS dataclass so config
+# itself never carries two copies of the same value (GAP-13).  fusion/voting.py
+# (the actual composite scorer for both predict.scan() and cascade) imports
+# these instead of re-declaring its own copies.
+ML_WEIGHT = THRESHOLDS.ML_WEIGHT
+OBFUSCATION_WEIGHT_PER_FLAG = THRESHOLDS.OBFUSCATION_WEIGHT_PER_FLAG
+OBFUSCATION_WEIGHT_CAP = THRESHOLDS.OBFUSCATION_WEIGHT_CAP
+FALLBACK_THRESHOLD = THRESHOLDS.DEFAULT_THRESHOLD
 STRUCTURAL_SIGNAL_WEIGHTS = {
     "imperative_start": 0.05,
     "role_assignment": 0.10,
@@ -79,6 +83,12 @@ STRUCTURAL_SIGNAL_WEIGHTS = {
 AGREEMENT_BOOST = {2: 0.10, 3: 0.12, 4: 0.15}
 ML_UNCERTAIN_ZONE_LOWER = 0.35
 ML_UNCERTAIN_ZONE_UPPER = 0.80
+
+# -- PromptGuard (N5) transformer signal -- shared by predict.py AND cascade.py
+# (was an inline 0.35/0.5/0.2 drift-pair duplicated across both entry points).
+PROMPTGUARD_WEIGHT = 0.35          # blend weight for the PromptGuard score
+PROMPTGUARD_HIGH_THRESHOLD = 0.5   # score above this -> "promptguard:high" hit
+PROMPTGUARD_MED_THRESHOLD = 0.2    # score above this -> "promptguard:medium" hit
 
 # -- Output Scanner (Layer 9) --
 SENSITIVITY_WEIGHTS = {"low": 0.5, "medium": 1.0, "high": 1.5}

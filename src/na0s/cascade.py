@@ -24,7 +24,14 @@ from .predict import (
     _chunk_text, _head_tail_extract, _CHUNK_WORD_THRESHOLD, MAX_CHUNKS,
 )
 from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
-from .config import THRESHOLDS, MAX_INPUT_LENGTH
+from .config import (
+    THRESHOLDS, MAX_INPUT_LENGTH,
+    PROMPTGUARD_WEIGHT as _PG_WEIGHT,
+    PROMPTGUARD_HIGH_THRESHOLD as _PG_HIGH,
+    PROMPTGUARD_MED_THRESHOLD as _PG_MED,
+    WHITELIST_CONFIDENCE as _WL_CONF,
+    WHITELIST_RISK_SCORE as _WL_RISK,
+)
 from .obfuscation import obfuscation_scan
 from .input import layer0_sanitize
 from .input.safe_regex import safe_search, safe_compile, RegexTimeoutError
@@ -32,6 +39,7 @@ from .scan_result import ScanResult
 from .models import get_model_path
 from .fusion.signal_boost import calculate_boost
 from .fusion.voting import weighted_decision as _voting_weighted_decision
+from .fusion.uncertainty import assess_uncertainty as _assess_uncertainty
 from .fusion.complexity_router import (
     assess_complexity, get_pipeline_stages, is_adaptive_routing_enabled,
 )
@@ -79,9 +87,8 @@ VALID_STAGES = [
 #: Default stage list (current behavior).
 DEFAULT_STAGES = ["whitelist", "weighted", "judge"]
 
-# Paranoid-mode uncertain zone boundaries.
-_PARANOID_LOWER = 0.35
-_PARANOID_UPPER = 0.65
+# Paranoid-mode uncertain zone boundaries (single source: config — GAP-13).
+from .config import PARANOID_LOWER as _PARANOID_LOWER, PARANOID_UPPER as _PARANOID_UPPER
 
 # Layer 3: Structural features — optional import
 try:
@@ -552,11 +559,11 @@ class WeightedClassifier:
                 _pg_score = _get_pg_classifier_score(text)
                 _pg_failure_state["consecutive"] = 0  # reset on success
                 if _pg_score > 0:
-                    _pg_weight = 0.35 * _pg_score
+                    _pg_weight = _PG_WEIGHT * _pg_score
                     composite = min(composite + _pg_weight, 1.0)
-                    if _pg_score > 0.5:
+                    if _pg_score > _PG_HIGH:
                         hit_names.append("promptguard:high")
-                    elif _pg_score > 0.2:
+                    elif _pg_score > _PG_MED:
                         hit_names.append("promptguard:medium")
                     if composite >= self.threshold and label == "SAFE":
                         label = "MALICIOUS"
@@ -913,7 +920,7 @@ class CascadeClassifier:
             if is_safe:
                 with self._stats_lock:
                     self._whitelisted += 1
-                return "SAFE", 0.99, [], "whitelist", l0, "", []
+                return "SAFE", _WL_CONF, [], "whitelist", l0, "", []
 
         # Stage 2: weighted classifier (operates on sanitized text)
         # FIX-5: Pass raw text so rules also run on pre-normalization input
@@ -1230,7 +1237,7 @@ class CascadeClassifier:
         if stage_tag not in technique_tags:
             technique_tags.append(stage_tag)
 
-        return ScanResult(
+        result = ScanResult(
             sanitized_text=l0.sanitized_text if l0 else "",
             is_malicious=is_mal,
             risk_score=round(confidence, 4),
@@ -1244,6 +1251,17 @@ class CascadeClassifier:
             model_version=_get_model_version(),
             judge_reasoning=judge_reasoning,
         )
+        # GAP-12: surface the abstain band for parity with predict.scan().  (The
+        # cascade path also ACTIVELY escalates uncertain verdicts to the judge
+        # band above; this flag marks residual borderline cases for the caller.)
+        try:
+            _p_mal = confidence if is_mal else (1.0 - confidence)
+            result.abstained, result.uncertainty = _assess_uncertainty(
+                _p_mal, self.threshold, [],
+            )
+        except Exception:
+            _logger.debug("uncertainty assessment failed", exc_info=True)
+        return result
 
     # ------------------------------------------------------------------
     # Layer 9: Output scanner — scan LLM output (post-processing)
@@ -1458,10 +1476,10 @@ class CascadeClassifier:
                 results[i] = ScanResult(
                     sanitized_text=l0.sanitized_text,
                     is_malicious=False,
-                    risk_score=0.01,
+                    risk_score=_WL_RISK,
                     label="safe",
                     technique_tags=["cascade:whitelist"],
-                    ml_confidence=0.99,
+                    ml_confidence=_WL_CONF,
                     ml_label="safe",
                     cascade_stage="whitelist",
                     model_version=_get_model_version(),

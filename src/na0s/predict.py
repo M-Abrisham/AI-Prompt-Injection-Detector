@@ -79,7 +79,12 @@ from .rules.context import _is_legitimate_roleplay, _has_contextual_framing
 from .obfuscation import obfuscation_scan
 from .rules import rule_score_detailed, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
-from .config import MAX_INPUT_LENGTH
+from .config import (
+    MAX_INPUT_LENGTH,
+    PROMPTGUARD_WEIGHT as _PG_WEIGHT,
+    PROMPTGUARD_HIGH_THRESHOLD as _PG_HIGH,
+    PROMPTGUARD_MED_THRESHOLD as _PG_MED,
+)
 from .integrity.safe_pickle import safe_load
 from .models import get_model_path, KNOWN_HASHES
 from .integrity.safe_content import calculate_safe_content_score
@@ -91,6 +96,7 @@ from .fusion.voting import (
     RULE_SEVERITY as _VOTING_RULE_SEVERITY,
     RULE_TECHNIQUE_IDS as _VOTING_RULE_TECHNIQUE_IDS,
 )
+from .fusion.uncertainty import assess_uncertainty as _assess_uncertainty
 
 # FP Reduction: Obfuscation flags that are not L1 rules — now in _voting.py.
 _FP_EXEMPT_HITS = FP_EXEMPT_HITS
@@ -1167,12 +1173,12 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         try:
             _pg_score = _get_pg_classifier_score(clean)
             if _pg_score > 0:
-                _pg_weight = 0.35 * _pg_score
+                _pg_weight = _PG_WEIGHT * _pg_score
                 composite = min(composite + _pg_weight, 1.0)
-                if _pg_score > 0.5:
+                if _pg_score > _PG_HIGH:
                     hits.append("promptguard:high")
                     hit_names_seen.add("promptguard:high")
-                elif _pg_score > 0.2:
+                elif _pg_score > _PG_MED:
                     hits.append("promptguard:medium")
                     hit_names_seen.add("promptguard:medium")
                 if composite >= threshold and "SAFE" in label:
@@ -1312,7 +1318,10 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         text, unsuppressed_count,
     )
     if safe_score > 0:
-        composite = composite - safe_score
+        # GAP-07: clamp at 0 — safe-content is a deduction (up to 0.30) and a
+        # near-zero composite would otherwise go negative, leaking an
+        # out-of-[0,1] score and crashing the Layer-16 add_turn() guard.
+        composite = max(0.0, composite - safe_score)
         if composite < threshold:
             label = "SAFE"
 
@@ -1951,6 +1960,23 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         model_version=_get_model_version(),
         perplexity_score=round(perplexity_score, 4),
     )
+
+    # GAP-12: mark a borderline / signal-disagreement verdict as `abstained` so
+    # the embedding application can escalate (judge / human review) instead of
+    # trusting the near-coin-flip at the threshold.  This does NOT change the
+    # verdict — the abstain default is an eval-tunable policy left to the caller.
+    try:
+        _ml_prob_mal = prob if "MALICIOUS" in label else (1.0 - prob)
+        _emb = embedding_info.get("score", 0.0)
+        # embedding_score is capped at 0.20 in the composite; normalize to a
+        # [0,1] prob-like value, and treat absent (0.0) as "no info" (None).
+        _emb_prob = min(_emb / 0.20, 1.0) if _emb > 0 else None
+        result.abstained, result.uncertainty = _assess_uncertainty(
+            result.risk_score, threshold, [_ml_prob_mal, _emb_prob],
+        )
+    except Exception:
+        logger.debug("uncertainty assessment failed", exc_info=True)
+
     # LAYER16: Multi-turn detection (optional, only when session_id provided)
     # FIX: Use singleton monitor so session state persists across scan() calls.
     # Without this, every call creates a fresh monitor with no memory of previous

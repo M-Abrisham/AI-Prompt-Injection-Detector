@@ -54,16 +54,21 @@ class TestProcessDataFixes(unittest.TestCase):
             process_data._text_hash("ABC prompt"),
         )
 
-    def test_merge_datasets_unicode_dedup_stable_order_and_generated_dirs(self):
+    def test_merge_datasets_unicode_dedup_stable_order_and_training_dirs(self):
+        """merge_datasets() must NFKC-dedup, sort idempotently, ingest the
+        training JSONL dirs (AGGREGATED/HARVEST) + staging, and — critically —
+        EXCLUDE the holdout/benchmark eval sets (anti-leakage; see
+        TRAINING_JSONL_DIRS and tests/test_no_holdout_leakage.py)."""
         with tempfile.TemporaryDirectory() as tmp:
             raw = os.path.join(tmp, "data", "raw")
             aggregated = os.path.join(tmp, "data", "aggregated")
             harvest = os.path.join(tmp, "data", "harvest")
             holdout = os.path.join(tmp, "data", "holdout")
             benchmark = os.path.join(tmp, "data", "benchmark")
+            staging = os.path.join(tmp, "data", "staging")
             processed = os.path.join(tmp, "data", "processed")
             out_csv = os.path.join(processed, "combined_data.csv")
-            for d in (raw, aggregated, harvest, holdout, benchmark, processed):
+            for d in (raw, aggregated, harvest, holdout, benchmark, staging, processed):
                 os.makedirs(d, exist_ok=True)
 
             # Raw CSV includes Unicode-equivalent duplicates + hard negatives.
@@ -79,7 +84,19 @@ class TestProcessDataFixes(unittest.TestCase):
                 [{"text": "Benign hard negative sample", "label": 0}],
             )
 
-            # Generated synthetic outputs (BUG-L13-7) must be ingested.
+            # Training JSONL dirs (AGGREGATED/HARVEST) MUST be ingested.
+            self._write_jsonl(
+                os.path.join(aggregated, "aggregated.jsonl"),
+                [{"text": "aggregated training sample", "label": 1}],
+            )
+            self._write_jsonl(
+                os.path.join(harvest, "harvest.jsonl"),
+                [{"text": "harvest training sample", "label": 1}],
+            )
+
+            # Holdout / benchmark are the out-of-sample EVAL sets. Folding them
+            # into the training CSV is direct eval leakage; merge_datasets()
+            # deliberately excludes them, so they must NOT appear.
             self._write_jsonl(
                 os.path.join(holdout, "malicious_holdout.jsonl"),
                 [{"text": "holdout sample", "label": 1}],
@@ -97,6 +114,13 @@ class TestProcessDataFixes(unittest.TestCase):
                 HARVEST_DIR=harvest,
                 HOLDOUT_DIR=holdout,
                 BENCHMARK_DIR=benchmark,
+                # TRAINING_JSONL_DIRS is computed at import time from the real
+                # repo paths; repin it to the temp training dirs or merge_datasets
+                # would read the real data/aggregated + data/harvest.
+                TRAINING_JSONL_DIRS=[aggregated, harvest],
+                # STAGING_DIR likewise defaults to the real repo data/staging;
+                # repin to an (empty) temp dir for a hermetic run.
+                STAGING_DIR=staging,
                 OUTPUT_PATH=out_csv,
             ):
                 first = process_data.merge_datasets()
@@ -109,9 +133,14 @@ class TestProcessDataFixes(unittest.TestCase):
             out = pd.read_csv(out_csv)
             texts = out["text"].astype(str).tolist()
 
+            # Raw + training-dir + hard-negative rows are all ingested.
             self.assertIn("Benign hard negative sample", texts)
-            self.assertIn("holdout sample", texts)
-            self.assertIn("benchmark sample", texts)
+            self.assertIn("aggregated training sample", texts)
+            self.assertIn("harvest training sample", texts)
+
+            # Anti-leakage: holdout/benchmark eval rows must NEVER enter training.
+            self.assertNotIn("holdout sample", texts)
+            self.assertNotIn("benchmark sample", texts)
 
             # Unicode-equivalent duplicates should collapse to a single row.
             canon_count = sum(t in ("ＡＢＣ prompt", "ABC prompt") for t in texts)

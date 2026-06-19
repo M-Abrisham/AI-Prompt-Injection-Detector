@@ -274,82 +274,11 @@ class TestEvidenceGradingIntegration:
 
 
 # ---------------------------------------------------------------------------
-# Item 4: Bayesian decision fusion
+# Item 4: Bayesian decision fusion — REMOVED (GAP-10)
+# BayesianFusion was dead code (zero src callers; its advertised
+# NA0S_BAYESIAN_FUSION env var was read by no code). Deleted to consolidate the
+# fusion strategies; the canonical combiner is fusion/voting.weighted_decision.
 # ---------------------------------------------------------------------------
-
-from na0s.bayesian_fusion import BayesianFusion, DEFAULT_LIKELIHOOD_RATIOS
-
-
-class TestBayesianFusion:
-    """Tests for Bayesian evidence fusion."""
-
-    def test_prior_is_initial_posterior(self):
-        bf = BayesianFusion(prior=0.1)
-        assert bf.get_posterior() == pytest.approx(0.1)
-
-    def test_update_increases_posterior(self):
-        bf = BayesianFusion(prior=0.1)
-        bf.update("ml_high_confidence", 10.0)
-        assert bf.get_posterior() > 0.1
-
-    def test_update_with_lr_below_1_decreases_posterior(self):
-        bf = BayesianFusion(prior=0.5)
-        bf.update("safe_signal", 0.1)
-        assert bf.get_posterior() < 0.5
-
-    def test_multi_evidence_accumulation(self):
-        bf = BayesianFusion(prior=0.1)
-        bf.update("ml_high_confidence", 10.0)
-        p1 = bf.get_posterior()
-        bf.update("rule_critical", 8.0)
-        p2 = bf.get_posterior()
-        assert p2 > p1  # more evidence -> higher posterior
-
-    def test_posterior_in_valid_range(self):
-        bf = BayesianFusion(prior=0.1)
-        # Pile on lots of evidence
-        for _ in range(20):
-            bf.update("strong_signal", 10.0)
-        p = bf.get_posterior()
-        assert 0.0 < p <= 1.0
-
-    def test_decide_malicious(self):
-        bf = BayesianFusion(prior=0.1)
-        bf.update("ml_high_confidence", 10.0)
-        bf.update("rule_critical", 8.0)
-        label, confidence = bf.decide(threshold=0.55)
-        assert label == "MALICIOUS"
-        assert confidence > 0.55
-
-    def test_decide_safe(self):
-        bf = BayesianFusion(prior=0.1)
-        # No evidence -> stays near prior (0.1)
-        label, confidence = bf.decide(threshold=0.55)
-        assert label == "SAFE"
-        assert confidence > 0.0
-
-    def test_reset(self):
-        bf = BayesianFusion(prior=0.1)
-        bf.update("signal", 10.0)
-        bf.reset()
-        assert bf.get_posterior() == pytest.approx(0.1)
-        assert bf.evidence == []
-
-    def test_invalid_prior_raises(self):
-        with pytest.raises(ValueError):
-            BayesianFusion(prior=0.0)
-        with pytest.raises(ValueError):
-            BayesianFusion(prior=1.0)
-
-    def test_invalid_lr_raises(self):
-        bf = BayesianFusion(prior=0.1)
-        with pytest.raises(ValueError):
-            bf.update("bad", -1.0)
-
-    def test_default_likelihood_ratios(self):
-        assert "ml_high_confidence" in DEFAULT_LIKELIHOOD_RATIOS
-        assert "rule_critical" in DEFAULT_LIKELIHOOD_RATIOS
-        assert all(v > 0 for v in DEFAULT_LIKELIHOOD_RATIOS.values())
 
 
 # ---------------------------------------------------------------------------

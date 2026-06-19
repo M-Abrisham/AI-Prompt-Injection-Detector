@@ -65,6 +65,97 @@ than `scan()`. Status (commit SHA to be filled on push):
 
 ---
 
+## Scoring / Fusion Recipe Hardening — 2026-06-18 (branch `fix/scoring-recipe-hardening`)
+
+A scoring-recipe audit (15 verified gaps) found the default verdict path
+(`scan` → `_voting.weighted_decision`) is an UNCALIBRATED additive sum of
+hand-set magic weights wrapped in ~25 sequential floors/caps/boosts, with no
+probability calibration anywhere; the 0.55 threshold is a hardcoded fallback
+(`optimal_threshold.json` absent) that was tuned on the eval-leaked training
+data. Symptoms: borderline non-determinism and an out-of-[0,1] risk_score.
+Fix order (clear bugs/cleanup → decontaminate+calibrate → one calibrated fusion
+→ dissolve the patches → safety nets):
+
+- [x] **GAP-07** — `risk_score` could go NEGATIVE (−0.0408 on benign inputs:
+  safe-content is subtracted with no lower clamp, `predict.py:1315`) and leaked
+  a raw `np.float64`; it also crashed the Layer-16 `add_turn()` guard (silent
+  multi-turn coverage loss). Fixed at the single output boundary:
+  `ScanResult.__post_init__` clamps + NaN/inf-guards + normalizes to `float`
+  (covers all 11 construction sites), plus a belt-and-suspenders clamp at the
+  subtraction site. New `tests/test_scan_result_invariant.py`.
+- [x] **GAP-13** — centralized the durable scoring constants in `config.py` (single source).
+  ROOT CAUSE: `fusion/voting.py` (the actual composite scorer for BOTH entry
+  points) re-declared its own `ML_WEIGHT`/obf/threshold/structural/agreement
+  copies and ignored config, so editing config never changed the real scorer.
+  Now voting imports them from config; config's flat constants derive from the
+  `THRESHOLDS` dataclass (no internal dup); the PromptGuard 0.35/0.5/0.2
+  drift-pair (duplicated in predict.py AND cascade.py) + cascade's `_PARANOID_*`
+  and whitelist 0.99/0.01 all read from config. All values identical → zero
+  behavior change (394 + 118 tests pass). The transient threshold±0.01 / floor /
+  family-boost literals were intentionally NOT centralized — GAP-05/06/04/02
+  delete them.
+- [x] **GAP-11** — RRF scorer was magnitude-INVARIANT: `Σ 1/(k+rank)` depends only
+  on the signal COUNT (ranks are always {1..n}), so 3 signals of value 0.01 scored
+  the same (0.984 = MALICIOUS) as 0.9 — RRF misapplied to a single value vector.
+  Fixed: made it VALUE-WEIGHTED (`Σ value·/(k+rank)` / max) so magnitude drives the
+  score; corrected 4 tests that codified the bug (incl. `test_rrf_is_rank_invariant`)
+  + added GUARD test that weak signals cannot flag MALICIOUS. (env-gated path; GAP-10
+  decides keep-vs-remove.)
+- [x] **GAP-15** — `evidence_grading.filter_graded_hits(ambiguous_weight=0.4)` was
+  dead (the docstring itself said "unused"); ambiguous hits (quote/academic context)
+  were kept at FULL weight, so the module's advertised "ambiguous hits are
+  down-weighted" was a lie. Removed the dead param + corrected the false docstrings
+  (only `cascade.py` calls it, without the param — safe). Real ambiguous
+  down-weighting deferred to the calibrated per-signal fusion (GAP-01/02), not an
+  arbitrary 0.4 multiplier.
+- [x] **GAP-10** — consolidated. Finding: `fusion/voting.weighted_decision` is ALREADY
+  the single canonical combiner for both default paths (no promotion needed). RRF +
+  Ensemble are opt-in env/flag-gated alternatives (kept). The Bayesian combiner was
+  genuinely DEAD (zero src callers; its advertised `NA0S_BAYESIAN_FUSION` env var read
+  by no code) → DELETED (source + shim + its test class). Stacking is untrained
+  scaffolding RESERVED for GAP-02 (kept). All top-level↔`fusion/` files are pure shims
+  (kept for test back-compat). Documented the strategy landscape in voting.py. Zero
+  default-path behavior change (196 tests pass).
+- [x] **PREREQUISITE** — decontaminated the training merge: `process_data.py` now
+  iterates `TRAINING_JSONL_DIRS = [AGGREGATED, HARVEST]` and EXCLUDES holdout/benchmark
+  (the eval sets). Guarded by `tests/test_no_holdout_leakage.py`. (The actual
+  `combined_data.csv` regeneration + model retrain runs in the training pipeline.)
+- [x] **GAP-03** (code-now portion) — threshold calibration plumbing fixed at the root:
+  - **Hidden path bug:** `optimal_threshold.json` resolved to `src/data/processed/`
+    (2 `os.pardir` — correct only before the `_voting.py -> fusion/voting.py` move),
+    so the artifact was NEVER loaded even when present → always fell back. Fixed (3 levels up).
+  - **Silent -> loud:** the absent-artifact path logged at DEBUG; now a WARNING, plus a
+    `NA0S_REQUIRE_THRESHOLD_ARTIFACT=1` strict mode that RAISES (for CI) instead of shipping
+    the uncalibrated 0.55.
+  - **Target-FPR operating point:** `optimize_threshold.py` now also selects the highest-recall
+    threshold within `NA0S_TARGET_FPR` (default 0.012) and emits `target_fpr_threshold`, which
+    the runtime PREFERS over `recall95_threshold`.
+  - **CI wiring:** added a "Calibrate decision threshold" step to `auto-retrain.yml` after model
+    training, so a retrain regenerates the artifact.
+  - New tests: `test_threshold_resolution.py` (path, loud fallback, strict, FPR-key preference).
+  - **Pipeline-later (needs DVC data):** the actual re-fit (`optimize_threshold.py` needs
+    `model.pkl` + the clean split + `dvc pull`) runs in the training environment, not the dev tree.
+- [ ] **GAP-01** [L] — `CalibratedClassifierCV` + per-signal calibrators so every fusion input is a true probability.
+- [ ] **GAP-02** [CRITICAL, L] — replace the additive sum with calibrated log-odds / stacking fusion (promote the dead `StackingMetaLearner`), FPR-gated A/B.
+- [ ] **GAP-04** [M] — remove agreement/technique-family double-counting boosts.
+- [ ] **GAP-05** [M] — delete the `critical_content`/E1 floors (0.60/1.0/0.56) contrary evidence can't move.
+- [ ] **GAP-06** [M] — remove all threshold±0.01 clustering ops (borderline non-determinism).
+- [ ] **GAP-08** [M] — eliminate the cap-then-raise ordering hazard.
+- [ ] **GAP-09** [M] — fold cascade's post-clamp PromptGuard/embedding/RAG re-adds into the single fusion vector (scan/cascade parity).
+- [x] **GAP-12** (FPR-safe core) — added a low-margin / signal-disagreement abstain band.
+  Root cause: the verdict is `composite >= threshold` at one line (`voting.py:418`); the
+  default `predict.scan()` had NO band at all (only cascade had a judge band, which dies
+  silently when no API key is set). New `fusion/uncertainty.py` `assess_uncertainty()`
+  marks borderline verdicts `abstained` with an `uncertainty` score (disagreement WIDENS
+  the band near the threshold but never makes a confident verdict abstain); wired into BOTH
+  `scan()` and cascade; new `ScanResult.abstained`/`.uncertainty` fields. Does NOT change
+  the verdict — the abstain DEFAULT (block-on-uncertainty) and band width are eval-tunable
+  config (`NA0S_ABSTAIN_BAND`/`NA0S_DISAGREEMENT_WIDEN`), and the active judge escalation
+  is the existing cascade band. New `tests/test_uncertainty_band.py`.
+- [ ] **GAP-14** [L] — persist+version a calibrator; ECE/Brier CI gate; production score-drift monitoring.
+
+---
+
 ## Progress Overview
 
 | Layer  | Progress               | Done/Total | Status   |
