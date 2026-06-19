@@ -101,7 +101,13 @@ Fix order (clear bugs/cleanup → decontaminate+calibrate → one calibrated fus
   score; corrected 4 tests that codified the bug (incl. `test_rrf_is_rank_invariant`)
   + added GUARD test that weak signals cannot flag MALICIOUS. (env-gated path; GAP-10
   decides keep-vs-remove.)
-- [ ] **GAP-15** [S] — `evidence_grading` `ambiguous_weight=0.4` is a documented no-op; wire or remove.
+- [x] **GAP-15** — `evidence_grading.filter_graded_hits(ambiguous_weight=0.4)` was
+  dead (the docstring itself said "unused"); ambiguous hits (quote/academic context)
+  were kept at FULL weight, so the module's advertised "ambiguous hits are
+  down-weighted" was a lie. Removed the dead param + corrected the false docstrings
+  (only `cascade.py` calls it, without the param — safe). Real ambiguous
+  down-weighting deferred to the calibrated per-signal fusion (GAP-01/02), not an
+  arbitrary 0.4 multiplier.
 - [ ] **GAP-10** [L] — 5 fusion strategies, 2 fully dead (Bayesian, Stacking); consolidate to one canonical combiner + retire the duplicate `fusion/` package.
 - [ ] **PREREQUISITE** — land the eval-leakage decontamination fix (`process_data` excludes holdout/benchmark) on main; required before honest calibration.
 - [ ] **GAP-03** [M] — re-run `optimize_threshold.py` on the decontaminated split at a target FPR; ship `optimal_threshold.json`; remove the silent 0.55 fallback.

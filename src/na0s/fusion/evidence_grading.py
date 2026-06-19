@@ -1,8 +1,15 @@
 """CRAG-inspired evidence grading for rule hits.
 
 After Stage 2 rule evaluation, each hit is graded as "correct", "ambiguous",
-or "incorrect" based on contextual heuristics.  "incorrect" hits are removed
-and "ambiguous" hits are down-weighted before the voting step.
+or "incorrect" based on contextual heuristics.  "incorrect" hits (e.g. a rule
+firing literally inside a code block) are REMOVED before voting.
+
+NOTE (GAP-15): "ambiguous" hits (quoted / academic / documentation context)
+are currently KEPT at full weight — the advertised down-weighting never
+happened (the old `ambiguous_weight=0.4` parameter was unused dead code, now
+removed).  Proper soft down-weighting of ambiguous evidence belongs in the
+calibrated per-signal fusion work (GAP-01/GAP-02), where it can be fit and
+FPR-validated rather than applied as an arbitrary 0.4 multiplier.
 """
 
 from __future__ import annotations
@@ -92,12 +99,12 @@ def grade_evidence(rule_hit: str, text: str) -> str:
 def filter_graded_hits(
     hits: list[str],
     text: str,
-    ambiguous_weight: float = 0.4,
 ) -> list[str]:
     """Remove "incorrect" hits and return the surviving list.
 
-    "ambiguous" hits are kept (for downstream reporting) but callers can
-    use the returned ``grades`` dict to down-weight them in scoring.
+    "incorrect" hits (the hit text appears inside a code block) are dropped;
+    "correct" and "ambiguous" hits are kept.  Callers that want the per-hit
+    grades (e.g. to down-weight "ambiguous" hits) should use ``grade_all``.
 
     Parameters
     ----------
@@ -105,9 +112,6 @@ def filter_graded_hits(
         Rule hit names.
     text : str
         The full input text.
-    ambiguous_weight : float
-        Multiplicative weight applied to ambiguous hits (unused in the
-        returned list but stored in ``grades``).
 
     Returns
     -------
