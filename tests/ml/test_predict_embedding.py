@@ -53,8 +53,19 @@ _mock_st_module = MagicMock()
 _MockSentenceTransformer = MagicMock()
 _mock_st_module.SentenceTransformer = _MockSentenceTransformer
 
-# Only inject the mock if the real package isn't available
-if "sentence_transformers" not in sys.modules:
+# Only inject the mock if the real package is genuinely NOT installed.
+# NOTE: an earlier ``"sentence_transformers" not in sys.modules`` check was a
+# latent process-pollution bug: in CI the real package IS installed but has not
+# been imported yet at collection time, so that check passed and the MagicMock
+# *shadowed the real package* for the rest of the run — poisoning
+# ``embedding_classifier.SentenceTransformer`` (-> 0.0 embedding scores) and
+# flipping ``benchmark_embeddings._HAS_SENTENCE_TRANSFORMERS``. ``find_spec``
+# inspects installation, not the import cache, so we never shadow a real dep.
+import importlib.util as _ilu
+
+# Order matters: short-circuit on sys.modules FIRST so we never call find_spec()
+# on an already-injected MagicMock (its mocked ``__spec__`` makes find_spec raise).
+if "sentence_transformers" not in sys.modules and _ilu.find_spec("sentence_transformers") is None:
     sys.modules["sentence_transformers"] = _mock_st_module
 
 # Now we can safely import the module under test
