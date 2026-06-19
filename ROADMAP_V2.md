@@ -56,6 +56,47 @@ than `scan()`. Status (commit SHA to be filled on push):
 - [x] **D8-G12/G13** — New `tests/test_scan_d8_context_window_hardening.py` (14
   scan-level tests) covering D8.4/D8.5/D8.6, token-budget, multi-turn fusion,
   cascade parity, RAG position + neutral-anchor FP guards.
+
+### RAG-Poison detector wiring (I1.x / IM.x — `rag/poison_detector.py`)
+- [x] **RAG-W1** — Wire `rag_poison_weight` into `predict.scan()`'s composite
+  (`get_rag_poison_weight`, capped 0.12). It was computed then **discarded** —
+  the I1.x/IM.x score contribution never reached the decision (only the raw
+  `rag_poison:` hits flowed via the rules-severity path). Mirrors the
+  multilingual/extraction/privacy detectors.
+- [x] **RAG-W2** — Cascade parity: `CascadeClassifier` now runs
+  `detect_rag_poisoning` (was predict-only; the cascade path had zero RAG-poison
+  coverage). Imports the canonical `na0s.rag.poison_detector` (was the deprecated
+  `na0s.rag_poison_detector` shim).
+- [x] **RAG-W3** — FP-hardened two over-broad regexes: `repeated_terms_with_payload`
+  now requires an adjacent injection token (was firing on benign repetition);
+  `yaml_hidden_field` now requires an imperative value (was firing on benign
+  `command: npm run build`). Added benign FP-guard tests.
+- [x] **RAG-W4** — New edge-case patterns (each with paired benign counter-example
+  test): soft-paraphrase disregard + soft refusal-hijack, citation/source
+  spoofing + tool-output directive, and a new **E3.1 exfil-channel**
+  category (markdown image/link data-exfiltration). Integration tests at
+  `tests/rag/test_rag_poison_integration.py` (scan() + cascade parity).
+- [x] **RAG-W4b** — Reconciled the detector's `technique_ids` with the formal
+  taxonomy (they previously collided: detector emitted I1.1/I1.3/I1.4/IM.1 which
+  mean different things in `data/taxonomy.yaml`). Now each category maps to its
+  true node — parent **I1** where the source channel is unknown, **I1.2**
+  (Document-injection) for boundary/hidden-structured, **I1.5** (Vector DB
+  poisoning) for relevance — and the exfil channel is registered as new taxonomy
+  node **E3.1** (Markdown image/link exfiltration) + **E3.2** (HTML/CSS) under the
+  E Exfiltration family.
+- [ ] **RAG-W5** — Thread an optional `query`/retrieved-context split through
+  `scan()`/`classify_prompt()` and forward it to `detect_rag_poisoning(query=…)`.
+  Today the production call passes no query, so `_compute_query_alignment`
+  (relevance-misalignment + consistency) is **unreachable** at runtime.
+  Requires caller cooperation (callers must separate user query from context).
+- [ ] **RAG-W6** — Cross-chunk / payload-split re-scan: `position_weighted_scan`
+  scores each chunk alone, so a boundary-straddling payload (each half benign)
+  is missed. Re-run the regex over adjacent chunk-pairs joined.
+- [ ] **RAG-W7** — base64/hex decode-and-rescan inside RAG context (reuse L2
+  obfuscation decoder). (The new exfil technique id is already registered as
+  **E3.1** in `data/taxonomy.yaml` — see RAG-W4b.) Escalations to L18/L17 owners:
+  embedding-space adversarial passages (PoisonedRAG/BadRAG), numeric/factual
+  poisoning, visual/OCR RAG poison.
 - [ ] **D8-G12 (follow-up)** — Persist per-D8.x recall in `technique_analysis.json`
   and fix the mislabeled 100% D8 row in `BENCHMARK_RESULTS.md` (benchmark tooling).
 - [ ] **D8-G04 (follow-up)** — System-prompt-distance/anchor-offset metric (needs
@@ -2038,6 +2079,12 @@ Office parser suite shipped in PR #18 (2026-04-11): DOCX (19 surfaces — commen
 
 ### Description
 Layer 18 is a planned ingestion-side defense for Retrieval-Augmented Generation (RAG) pipelines — nothing in scope is implemented yet. Once built, it will scan documents before they reach the vector store, validate individual chunks, detect embedding anomalies, track cryptographic provenance from chunk back to source, monitor retrieval patterns for poison-probing behavior, and sanitize user queries before retrieval. The threat model is well-established: PoisonedRAG (USENIX Security 2025) demonstrates 90% attack success with only 5 malicious texts in a million-document corpus, OWASP LLM08:2025 flags embedding-space collision attacks that hijack nearest-neighbor retrieval, and indirect prompt injection via ingested documents is the canonical RAG escape route. The existing `src/na0s/rag/` sub-package now holds only the two ingestion-side modules (`poison_detector.py`, `position_scanner.py`); the L9 output-facing modules (`output_scanner.py`, `propagation.py`, `dual_scanner.py`, `streaming.py`, `attribution.py`) have already been migrated to the `output/` package. L18 claims the ingestion, chunking, embedding, and retrieval-monitoring half of the RAG surface, building on `poison_detector.py` and `position_scanner.py` as the pre-existing pieces that stay in `rag/`. Today `src/na0s/rag/__init__.py` is a one-line docstring with no exported API, so the package has no unified public interface to extend. None of the five NEW class names listed below (`IngestionValidator`, `ChunkValidator`, `EmbeddingIntegrityChecker`, `VectorDBSanitizer`, `Na0sRAGGuard`) appear anywhere in the source tree — confirmed by repo-wide grep.
+
+> **Runtime detector status (already shipped, distinct from the L18 ingestion plan).** The *post-retrieval* RAG-poison detector `rag/poison_detector.py` (`detect_rag_poisoning` — taxonomy I1 "Data Source Poisoning", incl. I1.2/I1.5, plus the E3.1 exfil channel) **is** wired into the live decision path — `predict.scan()` and (as of RAG-W2) `CascadeClassifier` both fold its bounded weight into the composite. This is text/content-level detection on the concatenated context, **not** the vector-store-side ingestion validation L18 describes; the two are complementary. See the **RAG-Poison detector wiring (RAG-W1…W7)** block under the D8 hardening section for its status. The items below cover the eval/training/harvest gaps for that runtime detector:
+> - [ ] **RAG-EVAL-1** — Promote I1.x / E3.1 scenarios into the F14 eval library (`data/eval/scenarios/`, currently **zero** I1/IM scenarios) with paired benign siblings, then add I1 to the recall holdout. `COVERAGE_MATRIX.md` flags INJ-0008 (I1) as unmeasured and the "highest-risk overstatement" / top measurement priority, but no task carried it until now. Benign halves already exist in `scripts/taxonomy/data_source_poisoning.py` (`I1.x_benign`).
+> - [ ] **RAG-EVAL-2** — Make the weekly harvester (`scripts/weekly_harvest.py`) RAG-poison-aware: it is a dataset-discovery crawler whose query list has **no** RAG/poison/retrieval terms, so RAG-poison datasets are captured only incidentally and never taxonomy-tagged. Add queries (`PoisonedRAG`, `corpus poisoning`, `retrieval augmented generation attack`, `vector database poisoning`) + I1/IG taxonomy tagging.
+> - [ ] **RAG-EVAL-3** — Emit a training-data lineage manifest (per-category counts + corpus hashes) at train time. The shipped `model.pkl` was trained on the 1,278 I1/IG/IM probe samples as binary label=1 (it learns "injection", cannot *attribute* I1.x), but there is no manifest pinning that corpus — "was the model trained on I1?" is currently answerable only by inferring the pipeline wiring.
+> - [ ] **RAG-CAL-1** — Calibrate `get_rag_poison_weight`'s cap (`0.12`) and scale (`0.20`) against the new I1 holdout. Now that RAG-W1 makes the weight **live**, these round-number constants actually affect verdicts (previously moot — the value was discarded). Also calibrate the `_SEVERITY_WEIGHTS` tiers (only `high`/`medium` are emitted today; `critical`/`low` are defined-but-unused).
 
 **Target directory structure** (v1.0.0 — ingestion-side `rag/` sub-package; output-side modules migrate out per L9):
 ```

@@ -157,6 +157,18 @@ try:
 except ImportError:
     _HAS_CANARY = False
 
+# RAG poisoning detector (I1 / E3 categories) — PARITY with predict.py scan() path.
+# predict.py folds a bounded (<=0.12) RAG-poison weight into its composite;
+# mirror it here so CascadeClassifier and scan() agree on the RAG-poison signal.
+try:
+    from .rag.poison_detector import (
+        detect_rag_poisoning as _detect_rag_poisoning,
+        get_rag_poison_weight as _get_rag_poison_weight,
+    )
+    _HAS_RAG_POISON = True
+except ImportError:
+    _HAS_RAG_POISON = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 
@@ -572,6 +584,27 @@ class WeightedClassifier:
                         label = "MALICIOUS"
             except Exception:
                 _logger.debug("Centroid embedding (Layer 5) failed", exc_info=True)
+
+        # --- RAG poisoning detector (I1 / E3 categories) — parity with scan() ---
+        # predict.py folds a bounded (<=0.12) RAG-poison weight into its
+        # composite (detect_rag_poisoning + get_rag_poison_weight).  Mirror it
+        # here so the cascade path does not silently skip RAG-poison coverage.
+        if _HAS_RAG_POISON:
+            try:
+                _rag_result = _detect_rag_poisoning(text)
+                if _rag_result.poison_indicators:
+                    _rag_weight = _get_rag_poison_weight(_rag_result)
+                    if _rag_weight > 0.0:
+                        composite = min(composite + _rag_weight, 1.0)
+                    for _ind in _rag_result.poison_indicators:
+                        _rag_hit = "rag_poison:" + _ind
+                        if _rag_hit not in hit_names_seen:
+                            hit_names.append(_rag_hit)
+                            hit_names_seen.add(_rag_hit)
+                    if composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("RAG poisoning (parity) failed", exc_info=True)
 
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.

@@ -154,9 +154,9 @@ try:
 except ImportError:
     _HAS_INTENT_GUARD = False
 
-# RAG poisoning detector (I1.x / IM.x) — optional import
+# RAG poisoning detector (I1 / E3 categories) — optional import
 try:
-    from .rag_poison_detector import detect_rag_poisoning, get_rag_poison_weight
+    from .rag.poison_detector import detect_rag_poisoning, get_rag_poison_weight
     _HAS_RAG_POISON = True
 except ImportError:
     _HAS_RAG_POISON = False
@@ -1079,7 +1079,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         except Exception:
             pass  # Harmful intent detection failure is non-fatal
 
-    # --- RAG poisoning detection (I1.x / IM.x) ---
+    # --- RAG poisoning detection (I1 / E3 categories) ---
     # Detect poisoned RAG context: instruction injection in retrieved docs,
     # fake document boundaries, authority spoofing, relevance manipulation,
     # consistency anomalies, and hidden instructions in structured data.
@@ -1098,7 +1098,17 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                         _sev = "high" if rag_result.details.get("category_count", 0) >= 2 else "medium"
                         _local_severities[hit_name] = _sev
         except Exception:
-            pass  # RAG poisoning detection failure is non-fatal
+            logger.debug("RAG poisoning detection failed", exc_info=True)
+
+    # Wire RAG poisoning signal into composite scoring.  (Previously the weight
+    # was computed by get_rag_poison_weight() and then discarded -- the I1/E3
+    # detector's bounded score contribution never reached the decision, leaving
+    # most categories inert except via the rules-severity path.  The weight is
+    # capped at 0.12, mirroring the multilingual/extraction/privacy detectors.)
+    if rag_poison_weight > 0.0:
+        composite = min(composite + rag_poison_weight, 1.0)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
 
     # --- Position-weighted RAG context scan (D8.3/D8.4) ---
     # When the input looks like concatenated retrieved context (multiple

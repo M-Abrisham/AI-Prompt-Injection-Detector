@@ -246,6 +246,10 @@ categories:
       E2.3: { name: "Configuration-probing", severity: medium }
       E2.4: { name: "Capability-mapping", severity: low }
       E2.5: { name: "Context-inventory", severity: medium }
+      # E3 — Rendered-output exfiltration channels: the model is induced to emit
+      # markup that ships data to an attacker host when the client renders it.
+      E3.1: { name: "Markdown image/link exfiltration", severity: high }
+      E3.2: { name: "HTML/CSS rendered exfiltration", severity: high }
 
   # ════════════════════════════════════════════════════════════════
   # Category A — Adversarial ML Attacks
