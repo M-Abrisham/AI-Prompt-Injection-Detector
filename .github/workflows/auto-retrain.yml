@@ -183,11 +183,32 @@ jobs:
             "status": "pending"
           }
 
+          # Sign the request with HMAC-SHA256 over its canonical JSON (excluding
+          # the signature field) IF the shared secret is configured. This mirrors
+          # na0s.agents.approvals_sync.sign_request exactly. No-op when the secret
+          # is absent, so the workflow stays green before the secret is deployed;
+          # the local daemon then runs in backward-compatible unsigned mode.
+          import hmac, hashlib, os
+          _key = os.environ.get("NA0S_AGENT_APPROVAL_HMAC_KEY")
+          if _key:
+            _canon = json.dumps(
+              {k: v for k, v in approval_queue.items() if k != "signature"},
+              sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")
+            approval_queue["signature"] = hmac.new(
+              _key.encode("utf-8"), _canon, hashlib.sha256
+            ).hexdigest()
+            print("Approval request signed (HMAC-SHA256).")
+          else:
+            print("NA0S_AGENT_APPROVAL_HMAC_KEY not set; writing UNSIGNED request.")
+
           with open("data/approval_queue/pending_deploy.json", "w") as f:
             json.dump(approval_queue, f, indent=2)
 
           print("Approval request written to data/approval_queue/pending_deploy.json")
           EOF
+        env:
+          NA0S_AGENT_APPROVAL_HMAC_KEY: ${{ secrets.NA0S_AGENT_APPROVAL_HMAC_KEY }}
 
       - name: Publish approval request to mail-drop branch
         id: maildrop
