@@ -1,7 +1,7 @@
 """Comprehensive tests for the safe-text holdout corpus.
 
 Validates that data/holdout/safe_holdout.jsonl meets all requirements
-specified in BENCHMARK_SPRINT.md:
+specified for the holdout corpus:
   - Valid JSONL format
   - At least 500 samples
   - All labels are 0 (benign)

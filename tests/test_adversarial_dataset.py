@@ -2,7 +2,7 @@
 Tests for the adversarial evasion benchmark dataset.
 
 Validates that data/benchmark/adversarial_evasion.jsonl meets all
-requirements from BENCHMARK_SPRINT.md:
+requirements:
   - File exists, valid JSONL, >= 500 samples
   - All labels are 1
   - All required fields present (text, label, source, evasion_type, original)
