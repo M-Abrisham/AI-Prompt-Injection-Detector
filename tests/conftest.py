@@ -25,26 +25,41 @@ artifacts, not accumulating state, and reloading them per test would be wasteful
 with no correctness effect.
 """
 
+import warnings
+
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def _reset_pipeline_global_state():
-    """Clear cross-test detection state before each test (see module docstring)."""
+    """Clear cross-test detection state before each test (see module docstring).
+
+    Only ``ImportError`` is tolerated (and warned about, never silently
+    swallowed) — if the canonical module path is renamed out from under this
+    fixture, the reset would otherwise become a no-op and the order-dependent
+    flakiness it exists to kill would silently return.  A missing attribute or
+    a failing reset propagates loudly so a rename is caught, not masked.
+    """
     # Fingerprint store: drop the singleton so the next access rebuilds it empty.
     try:
         import na0s.input.tokenization as _tok
-
+    except ImportError as exc:  # pragma: no cover - path-rename guard
+        warnings.warn(
+            f"test isolation: fingerprint store not reset ({exc!r})",
+            stacklevel=2,
+        )
+    else:
         _tok._default_store = None
-    except Exception:
-        pass
 
     # Conversation monitor: cleanup + drop the singleton.
     try:
-        import na0s.predict as _predict
-
-        _predict._reset_conversation_monitor()
-    except Exception:
-        pass
+        from na0s.predict import _reset_conversation_monitor
+    except ImportError as exc:  # pragma: no cover - path-rename guard
+        warnings.warn(
+            f"test isolation: conversation monitor not reset ({exc!r})",
+            stacklevel=2,
+        )
+    else:
+        _reset_conversation_monitor()
 
     yield
