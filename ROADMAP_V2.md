@@ -108,7 +108,14 @@ Fix order (clear bugs/cleanup → decontaminate+calibrate → one calibrated fus
   (only `cascade.py` calls it, without the param — safe). Real ambiguous
   down-weighting deferred to the calibrated per-signal fusion (GAP-01/02), not an
   arbitrary 0.4 multiplier.
-- [ ] **GAP-10** [L] — 5 fusion strategies, 2 fully dead (Bayesian, Stacking); consolidate to one canonical combiner + retire the duplicate `fusion/` package.
+- [x] **GAP-10** — consolidated. Finding: `fusion/voting.weighted_decision` is ALREADY
+  the single canonical combiner for both default paths (no promotion needed). RRF +
+  Ensemble are opt-in env/flag-gated alternatives (kept). The Bayesian combiner was
+  genuinely DEAD (zero src callers; its advertised `NA0S_BAYESIAN_FUSION` env var read
+  by no code) → DELETED (source + shim + its test class). Stacking is untrained
+  scaffolding RESERVED for GAP-02 (kept). All top-level↔`fusion/` files are pure shims
+  (kept for test back-compat). Documented the strategy landscape in voting.py. Zero
+  default-path behavior change (196 tests pass).
 - [ ] **PREREQUISITE** — land the eval-leakage decontamination fix (`process_data` excludes holdout/benchmark) on main; required before honest calibration.
 - [ ] **GAP-03** [M] — re-run `optimize_threshold.py` on the decontaminated split at a target FPR; ship `optimal_threshold.json`; remove the silent 0.55 fallback.
 - [ ] **GAP-01** [L] — `CalibratedClassifierCV` + per-signal calibrators so every fusion input is a true probability.

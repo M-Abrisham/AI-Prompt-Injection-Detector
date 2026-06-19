@@ -21,6 +21,13 @@ similarity into a composite score that determines the SAFE/MALICIOUS verdict.
 Both ``predict.py`` and ``cascade.py`` delegate to this module.  No other
 file should implement weighted voting logic.
 
+Fusion-strategy landscape (GAP-10): ``weighted_decision`` here is the ONLY
+combiner on the default path.  ``fusion/rrf.py`` (env ``NA0S_USE_RRF=1``) and
+``fusion/ensemble.py`` (``enable_ensemble=True`` + the ``embedding`` stage) are
+opt-in alternatives, off by default.  The Bayesian combiner was deleted as dead
+code.  ``ml/stacking_classifier.StackingMetaLearner`` is untrained scaffolding
+reserved for the GAP-02 calibrated-fusion work (not yet wired).
+
 History:
     2026-03-12 — Extracted from predict.py to eliminate duplication with
     cascade.py (Issue #2).  predict.py had the complete implementation;
