@@ -22,6 +22,7 @@ import re
 from typing import List, Optional, Tuple
 
 from ..config import (
+    ASSEMBLY_BORDERLINE_RISK_FLOOR,
     ASSEMBLY_CONFIDENCE_MIN,
     ASSEMBLY_MAX_CANDIDATES,
     ASSEMBLY_RISK_GAP_THRESHOLD,
@@ -354,23 +355,39 @@ class PayloadSplittingDetector(MultiTurnDetector):
             for candidate_text, label in candidates:
                 result = rescan_text(candidate_text)
 
-                if not result.is_malicious:
-                    continue
-
                 risk_gap = result.risk_score - max_individual_risk
+                has_assembly = any(
+                    _has_assembly_instructions(t) for t in turn_texts
+                )
 
-                if risk_gap < ASSEMBLY_RISK_GAP_THRESHOLD:
+                # Strong case: the reassembled fragment independently scans
+                # malicious AND jumps well above its individual turns.
+                strong = (
+                    result.is_malicious
+                    and risk_gap >= ASSEMBLY_RISK_GAP_THRESHOLD
+                )
+                # Borderline case: a fragmented payload can reassemble to a
+                # clearly-elevated risk that still sits just below the malicious
+                # line — the split defeats single-rule firing and embedding is
+                # confirmatory only (it no longer double-counts these over the
+                # line).  Flag it when the assembled risk clears the absolute
+                # borderline floor (far above any benign reassembly), shows a
+                # positive jump over the individual turns, and carries explicit
+                # assembly cues.
+                borderline = (
+                    result.risk_score >= ASSEMBLY_BORDERLINE_RISK_FLOOR
+                    and risk_gap > 0.0
+                    and has_assembly
+                )
+                if not (strong or borderline):
                     continue
 
                 # --------------------------------------------------
                 # Stage 3: Build alert with evidence
                 # --------------------------------------------------
-                has_assembly = any(
-                    _has_assembly_instructions(t) for t in turn_texts
-                )
                 confidence = min(
                     1.0,
-                    0.5 + risk_gap + (0.1 if has_assembly else 0.0),
+                    0.5 + max(risk_gap, 0.0) + (0.1 if has_assembly else 0.0),
                 )
                 if confidence < ASSEMBLY_CONFIDENCE_MIN:
                     continue

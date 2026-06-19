@@ -33,6 +33,16 @@ ASSEMBLY_RISK_THRESHOLD = 0.8
 ASSEMBLY_RISK_GAP_THRESHOLD = 0.3  # min gap between combined and individual risk
 ASSEMBLY_CONFIDENCE_MIN = 0.5  # min confidence to generate alert
 ASSEMBLY_MAX_CANDIDATES = 5  # cap on re-scan candidates per turn
+
+# Borderline payload-assembly path: a fragmented payload can reassemble to a
+# clearly-elevated risk that still sits just *below* the 0.55 malicious line
+# (the split defeats single-rule firing, and after the embedding-double-count
+# fix embedding is confirmatory only, so it no longer nudges these over). Such
+# an assembly is still flagged when it (a) clears this absolute floor — set far
+# above the benign-reassembly baseline (benign multi-turn scenarios reassemble
+# to <=0.06, see payload_split_rescan_benign fixtures), (b) shows a positive
+# risk jump over its individual turns, and (c) carries explicit assembly cues.
+ASSEMBLY_BORDERLINE_RISK_FLOOR = 0.45
 FRAGMENT_MARKERS = [
     "remember this", "add to", "continue from", "combine",
     "piece together", "concatenate", "merge", "join",
