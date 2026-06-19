@@ -1045,8 +1045,12 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     # model is CONFIDENTLY malicious (>= 0.85): benign academic questions
     # ("explain symmetric vs asymmetric encryption") score ML ~0.0, so this
     # cannot fire on them.  Frame-only with an uncertain/safe ML stays SAFE.
+    # Only lift toward the DEFAULT operating boundary: an operator who raises
+    # the threshold above DECISION_THRESHOLD is explicitly suppressing, so this
+    # confidence-boosting floor must yield to that intent.
     if (fictional_frame_fired
             and composite < threshold
+            and threshold <= DECISION_THRESHOLD
             and _ml_prob_malicious >= 0.85):
         composite = max(composite, _anchor_floor)
         if composite >= threshold and label in ("SAFE", "safe", "benign"):

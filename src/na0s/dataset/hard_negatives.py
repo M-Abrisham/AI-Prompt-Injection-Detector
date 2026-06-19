@@ -511,31 +511,29 @@ def phase4_merge(original_df, hard_neg_df):
 def _resolve_model_artifacts():
     """Return (model, vectorizer), or (None, None) on a cold start.
 
-    Prefers freshly-trained artifacts in ``data/processed/`` (the warm path
-    when training has already run). Falls back to the committed production
-    model bundled in ``na0s.models/`` — this is the case on a fresh CI runner,
-    where ``data/processed/`` is git-ignored and the auto-retrain pipeline runs
-    hard-negative mining BEFORE the model is trained. Returns ``(None, None)``
-    only when neither artifact pair is present, so the model-dependent
-    diagnostic phases can be skipped without aborting hard-negative generation.
-    """
-    from na0s.models import get_model_path
+    Uses the freshly-trained artifacts in ``data/processed/`` — the warm path,
+    when a previous training run has produced a model whose feature space
+    (pure TF-IDF from ``scripts/features.py``) matches what the diagnostic
+    phases below vectorize. Returns ``(None, None)`` when that pair is absent
+    (the fresh-CI-runner cold start: ``data/processed/`` is git-ignored and the
+    auto-retrain pipeline mines hard negatives BEFORE the model is trained), so
+    the model-dependent FP diagnostics are skipped without aborting
+    hard-negative generation.
 
-    candidates = (
-        (MODEL_PATH, VECTORIZER_PATH, "freshly-trained (data/processed/)"),
-        (get_model_path("model.pkl"),
-         get_model_path("tfidf_vectorizer.pkl"),
-         "bundled production (na0s.models/)"),
-    )
-    for model_p, vec_p, label in candidates:
-        if os.path.isfile(model_p) and os.path.isfile(vec_p):
-            print(f"Loading {label} model and vectorizer...")
-            return safe_load(model_p), safe_load(vec_p)
+    NOTE: the bundled ``na0s.models/`` production model is deliberately NOT a
+    fallback here — it is trained on TF-IDF + structural features (10029 dims),
+    so feeding it the TF-IDF-only matrix (10000 dims) that ``phase1`` builds
+    raises ``ValueError: X has 10000 features ... expecting 10029``. The only
+    feature-compatible model is one freshly trained in this same pipeline.
+    """
+    if os.path.isfile(MODEL_PATH) and os.path.isfile(VECTORIZER_PATH):
+        print("Loading freshly-trained (data/processed/) model and vectorizer...")
+        return safe_load(MODEL_PATH), safe_load(VECTORIZER_PATH)
 
     print(
-        "WARNING: no model/vectorizer found in data/processed/ or na0s.models/; "
-        "skipping model-dependent FP diagnostics (cold start). "
-        "Hard negatives will still be generated and merged."
+        "WARNING: no freshly-trained model in data/processed/; skipping "
+        "model-dependent FP diagnostics (cold start). Hard negatives will "
+        "still be generated and merged."
     )
     return None, None
 

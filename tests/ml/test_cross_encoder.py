@@ -33,7 +33,14 @@ _mock_st_module = MagicMock()
 _MockSentenceTransformer = MagicMock()
 _mock_st_module.SentenceTransformer = _MockSentenceTransformer
 
-if "sentence_transformers" not in sys.modules:
+# Only inject when the real package is genuinely absent. Checking sys.modules
+# alone shadows a real-but-not-yet-imported package in CI, poisoning the shared
+# embedding classifier for downstream detection tests (see tests/ml/conftest.py).
+import importlib.util as _ilu
+
+# Order matters: short-circuit on sys.modules FIRST so we never call find_spec()
+# on an already-injected MagicMock (its mocked ``__spec__`` makes find_spec raise).
+if "sentence_transformers" not in sys.modules and _ilu.find_spec("sentence_transformers") is None:
     sys.modules["sentence_transformers"] = _mock_st_module
 
 

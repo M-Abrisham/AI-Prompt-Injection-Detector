@@ -11,6 +11,7 @@ Supports three modes:
 
 import json
 import time
+from dataclasses import dataclass
 from typing import Optional, Callable, Dict, Any, Literal
 from datetime import datetime
 import requests
@@ -22,6 +23,41 @@ import subprocess
 from na0s import config
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Reply:
+    """A polled user reply plus the iMessage sender that produced it.
+
+    ``sender`` is the iMessage handle (phone/email) that sent the reply, or
+    ``None`` when the transport did not carry one (legacy bare-string replies).
+    The sender is NOT cryptographic — it is spoofable — so it is only ever a
+    secondary, defense-in-depth signal layered ON TOP of the per-request nonce,
+    never a substitute for it.
+    """
+
+    text: str
+    sender: Optional[str] = None
+
+
+def _parse_reply(item: Any) -> Reply:
+    """Normalize a raw reply item from the bridge into a :class:`Reply`.
+
+    Accepts the two shapes the transport produces:
+      * a bare string  -> ``Reply(text=item, sender=None)``
+      * a dict carrying the text under ``text``/``reply`` and the sender under
+        ``sender``/``from``/``handle`` -> ``Reply(text=..., sender=...)``
+
+    An absent/blank sender normalizes to ``None`` (back-compat with senderless
+    replies). Anything unexpected is stringified into the text with no sender.
+    """
+    if isinstance(item, dict):
+        text = item.get("text")
+        if text is None:
+            text = item.get("reply", "")
+        sender = item.get("sender") or item.get("from") or item.get("handle")
+        return Reply(text=str(text), sender=sender if sender else None)
+    return Reply(text=str(item), sender=None)
 
 
 class OpenClawBridge:
@@ -218,6 +254,51 @@ class OpenClawBridge:
             return self._poll_replies_real(timeout)
         else:
             return self._poll_replies_mock(timeout)
+
+    def poll_replies_with_sender(self, timeout: int = 300) -> Optional[Reply]:
+        """Poll for a user reply, preserving the iMessage sender.
+
+        Sibling of :meth:`poll_replies` for the deploy-approval path, which must
+        know WHO replied to enforce the sender allowlist. Uses the exact same
+        ``GET /replies`` HTTP polling, but returns a :class:`Reply` (text +
+        optional sender) instead of a bare string. ``poll_replies`` is left
+        unchanged for the quarantine/synthetic call sites.
+
+        Args:
+            timeout: Wait time in seconds (default 5 min).
+
+        Returns:
+            A :class:`Reply` for the first reply, or ``None`` on timeout. The
+            ``sender`` is ``None`` for legacy senderless (bare-string) replies.
+        """
+        deadline = time.time() + timeout
+        poll_interval = 2
+
+        while time.time() < deadline:
+            try:
+                resp = requests.get(
+                    f"{self.base_url}/replies",
+                    timeout=self.timeout,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                if data.get("replies"):
+                    reply = _parse_reply(data["replies"][0])
+                    logger.info(
+                        "User replied via OpenClaw: %s (sender=%s)",
+                        reply.text,
+                        reply.sender,
+                    )
+                    return reply
+
+                time.sleep(poll_interval)
+            except Exception as e:
+                logger.error(f"Error polling replies (with sender): {e}")
+                time.sleep(poll_interval)
+
+        logger.warning(f"No reply within {timeout}s")
+        return None
 
     def _poll_replies_real(self, timeout: int = 300) -> Optional[str]:
         """Poll for user reply via real OpenClaw service.

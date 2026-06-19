@@ -57,6 +57,54 @@ Coordinates all agents:
 - **Output**: Complete automation workflow
 - **Actions**: Runs agents in sequence or continuous loop
 
+## Security activation
+
+The deploy-approval path ships hardened but defaults to a permissive mode for
+backward compatibility. Turn on the two protections below on the **local
+daemon** (and, for signing, the cloud producer) before relying on it.
+
+The defenses are layered. The **per-request nonce** and the **mail-drop HMAC
+signature** are the PRIMARY gates that actually authorize a deploy. The **sender
+allowlist** is defense-in-depth only — an iMessage handle is spoofable, so it
+never bypasses the nonce; it just adds a fail-closed check in front of it.
+
+### Mail-drop request signing (primary)
+
+GitHub Actions (the cloud producer) signs each `pending_deploy.json` with an
+HMAC key; the local daemon verifies it. Until the key is set on BOTH ends,
+signing runs in **warn-and-accept** mode (a SECURITY warning is logged but the
+request is not dropped), so set it to actually enforce authenticity.
+
+```bash
+# 1. Generate a shared key (32 random bytes, hex).
+openssl rand -hex 32
+
+# 2. Cloud producer — store it as a GitHub Actions secret.
+gh secret set NA0S_AGENT_APPROVAL_HMAC_KEY
+
+# 3. Local daemon — export the SAME value where the daemon runs.
+export NA0S_AGENT_APPROVAL_HMAC_KEY="<the-same-hex-key>"
+```
+
+Both sides must hold the identical key. A mismatched or missing key means
+unsigned/unverifiable requests; once both are set, unsigned requests are
+dropped instead of accepted.
+
+### Sender allowlist (defense-in-depth)
+
+Restrict which iMessage handles may authorize a deploy. Set a comma-separated
+list of phone numbers / emails on the **local daemon**:
+
+```bash
+export NA0S_AGENT_APPROVAL_ALLOWED_SENDERS="+15551234567,user@icloud.com"
+```
+
+When set, a reply whose sender is missing or not on the list is **rejected
+fail-closed** before the nonce is even checked. An allowlisted sender still has
+to supply the correct `approve <nonce>` — the allowlist cannot substitute for
+the nonce. Leaving the variable empty (the default) disables this gate and
+preserves nonce-only behavior. Matching is case- and whitespace-insensitive.
+
 ## Installation
 
 1. Install dependencies:
