@@ -1312,7 +1312,10 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         text, unsuppressed_count,
     )
     if safe_score > 0:
-        composite = composite - safe_score
+        # GAP-07: clamp at 0 — safe-content is a deduction (up to 0.30) and a
+        # near-zero composite would otherwise go negative, leaking an
+        # out-of-[0,1] score and crashing the Layer-16 add_turn() guard.
+        composite = max(0.0, composite - safe_score)
         if composite < threshold:
             label = "SAFE"
 

@@ -65,6 +65,42 @@ than `scan()`. Status (commit SHA to be filled on push):
 
 ---
 
+## Scoring / Fusion Recipe Hardening — 2026-06-18 (branch `fix/scoring-recipe-hardening`)
+
+A scoring-recipe audit (15 verified gaps) found the default verdict path
+(`scan` → `_voting.weighted_decision`) is an UNCALIBRATED additive sum of
+hand-set magic weights wrapped in ~25 sequential floors/caps/boosts, with no
+probability calibration anywhere; the 0.55 threshold is a hardcoded fallback
+(`optimal_threshold.json` absent) that was tuned on the eval-leaked training
+data. Symptoms: borderline non-determinism and an out-of-[0,1] risk_score.
+Fix order (clear bugs/cleanup → decontaminate+calibrate → one calibrated fusion
+→ dissolve the patches → safety nets):
+
+- [x] **GAP-07** — `risk_score` could go NEGATIVE (−0.0408 on benign inputs:
+  safe-content is subtracted with no lower clamp, `predict.py:1315`) and leaked
+  a raw `np.float64`; it also crashed the Layer-16 `add_turn()` guard (silent
+  multi-turn coverage loss). Fixed at the single output boundary:
+  `ScanResult.__post_init__` clamps + NaN/inf-guards + normalizes to `float`
+  (covers all 11 construction sites), plus a belt-and-suspenders clamp at the
+  subtraction site. New `tests/test_scan_result_invariant.py`.
+- [ ] **GAP-13** [M] — centralize all weights + threshold in `config.py` (single source).
+- [ ] **GAP-11** [S] — RRF scorer is magnitude-invariant (flags on signal COUNT); fix/guard or remove.
+- [ ] **GAP-15** [S] — `evidence_grading` `ambiguous_weight=0.4` is a documented no-op; wire or remove.
+- [ ] **GAP-10** [L] — 5 fusion strategies, 2 fully dead (Bayesian, Stacking); consolidate to one canonical combiner + retire the duplicate `fusion/` package.
+- [ ] **PREREQUISITE** — land the eval-leakage decontamination fix (`process_data` excludes holdout/benchmark) on main; required before honest calibration.
+- [ ] **GAP-03** [M] — re-run `optimize_threshold.py` on the decontaminated split at a target FPR; ship `optimal_threshold.json`; remove the silent 0.55 fallback.
+- [ ] **GAP-01** [L] — `CalibratedClassifierCV` + per-signal calibrators so every fusion input is a true probability.
+- [ ] **GAP-02** [CRITICAL, L] — replace the additive sum with calibrated log-odds / stacking fusion (promote the dead `StackingMetaLearner`), FPR-gated A/B.
+- [ ] **GAP-04** [M] — remove agreement/technique-family double-counting boosts.
+- [ ] **GAP-05** [M] — delete the `critical_content`/E1 floors (0.60/1.0/0.56) contrary evidence can't move.
+- [ ] **GAP-06** [M] — remove all threshold±0.01 clustering ops (borderline non-determinism).
+- [ ] **GAP-08** [M] — eliminate the cap-then-raise ordering hazard.
+- [ ] **GAP-09** [M] — fold cascade's post-clamp PromptGuard/embedding/RAG re-adds into the single fusion vector (scan/cascade parity).
+- [ ] **GAP-12** [M] — two-threshold abstain/disagreement band → judge escalation.
+- [ ] **GAP-14** [L] — persist+version a calibrator; ECE/Brier CI gate; production score-drift monitoring.
+
+---
+
 ## Progress Overview
 
 | Layer  | Progress               | Done/Total | Status   |
