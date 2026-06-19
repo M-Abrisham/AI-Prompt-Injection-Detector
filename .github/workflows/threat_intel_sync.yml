@@ -9,7 +9,7 @@ on:
       dry_run:
         description: 'Dry run (report only, no changes)'
         required: false
-        default: 'false'
+        default: false
         type: boolean
       sources:
         description: 'Specific sources to sync (comma-separated, e.g. atlas,garak)'
