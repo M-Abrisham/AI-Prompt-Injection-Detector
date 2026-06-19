@@ -35,6 +35,7 @@ import json
 import logging
 import os
 
+from .. import config
 from ..rules import RULES, SEVERITY_WEIGHTS
 from ..detectors.multilingual_intent import HEURISTIC_HITS as _HEURISTIC_HITS
 from .signal_boost import calculate_boost_from_names
@@ -42,9 +43,12 @@ from .signal_boost import calculate_boost_from_names
 _logger = logging.getLogger(__name__)
 
 # ── Constants (exported for tests and downstream consumers) ──────────────
+# GAP-13: these are sourced from config.py — the single source of truth — so
+# this scorer (the live composite for BOTH predict.scan() and cascade) can no
+# longer drift from config.  Names stay module-level for backward-compat imports.
 
 #: Hardcoded fallback when optimal_threshold.json is absent.
-_FALLBACK_THRESHOLD = 0.55
+_FALLBACK_THRESHOLD = config.FALLBACK_THRESHOLD
 
 #: Path to the threshold JSON produced by scripts/optimize_threshold.py.
 _THRESHOLD_JSON_PATH = os.path.join(
@@ -118,11 +122,11 @@ def _reset_threshold_cache():
 DECISION_THRESHOLD = get_decision_threshold()
 
 #: ML model weight in the composite formula.
-ML_WEIGHT = 0.6
+ML_WEIGHT = config.ML_WEIGHT
 
 #: Obfuscation weight per flag and cap.
-OBFUSCATION_WEIGHT_PER_FLAG = 0.15
-OBFUSCATION_WEIGHT_CAP = 0.3
+OBFUSCATION_WEIGHT_PER_FLAG = config.OBFUSCATION_WEIGHT_PER_FLAG
+OBFUSCATION_WEIGHT_CAP = config.OBFUSCATION_WEIGHT_CAP
 
 #: Hit names that are obfuscation flags, not L1 rules.
 #: Used by the ML uncertain-zone cap to determine if any real L1 rule fired.
@@ -148,15 +152,10 @@ RULE_TECHNIQUE_IDS.update({
 })
 
 #: Structural feature weights (Layer 3 binary signals).
-STRUCTURAL_SIGNAL_WEIGHTS = {
-    "imperative_start": 0.05,
-    "role_assignment": 0.10,
-    "instruction_boundary": 0.10,
-    "negation_command": 0.08,
-}
+STRUCTURAL_SIGNAL_WEIGHTS = config.STRUCTURAL_SIGNAL_WEIGHTS
 
 #: Multi-layer agreement boost values by number of agreeing layers.
-AGREEMENT_BOOST = {2: 0.10, 3: 0.12, 4: 0.15}
+AGREEMENT_BOOST = config.AGREEMENT_BOOST
 
 
 # ── Shared Composite Helper (Phase A) ───────────────────────────────────

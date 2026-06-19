@@ -79,7 +79,12 @@ from .rules.context import _is_legitimate_roleplay, _has_contextual_framing
 from .obfuscation import obfuscation_scan
 from .rules import rule_score_detailed, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
-from .config import MAX_INPUT_LENGTH
+from .config import (
+    MAX_INPUT_LENGTH,
+    PROMPTGUARD_WEIGHT as _PG_WEIGHT,
+    PROMPTGUARD_HIGH_THRESHOLD as _PG_HIGH,
+    PROMPTGUARD_MED_THRESHOLD as _PG_MED,
+)
 from .integrity.safe_pickle import safe_load
 from .models import get_model_path, KNOWN_HASHES
 from .integrity.safe_content import calculate_safe_content_score
@@ -1167,12 +1172,12 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         try:
             _pg_score = _get_pg_classifier_score(clean)
             if _pg_score > 0:
-                _pg_weight = 0.35 * _pg_score
+                _pg_weight = _PG_WEIGHT * _pg_score
                 composite = min(composite + _pg_weight, 1.0)
-                if _pg_score > 0.5:
+                if _pg_score > _PG_HIGH:
                     hits.append("promptguard:high")
                     hit_names_seen.add("promptguard:high")
-                elif _pg_score > 0.2:
+                elif _pg_score > _PG_MED:
                     hits.append("promptguard:medium")
                     hit_names_seen.add("promptguard:medium")
                 if composite >= threshold and "SAFE" in label:

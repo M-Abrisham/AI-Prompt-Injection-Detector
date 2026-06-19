@@ -83,7 +83,17 @@ Fix order (clear bugs/cleanup → decontaminate+calibrate → one calibrated fus
   `ScanResult.__post_init__` clamps + NaN/inf-guards + normalizes to `float`
   (covers all 11 construction sites), plus a belt-and-suspenders clamp at the
   subtraction site. New `tests/test_scan_result_invariant.py`.
-- [ ] **GAP-13** [M] — centralize all weights + threshold in `config.py` (single source).
+- [x] **GAP-13** — centralized the durable scoring constants in `config.py` (single source).
+  ROOT CAUSE: `fusion/voting.py` (the actual composite scorer for BOTH entry
+  points) re-declared its own `ML_WEIGHT`/obf/threshold/structural/agreement
+  copies and ignored config, so editing config never changed the real scorer.
+  Now voting imports them from config; config's flat constants derive from the
+  `THRESHOLDS` dataclass (no internal dup); the PromptGuard 0.35/0.5/0.2
+  drift-pair (duplicated in predict.py AND cascade.py) + cascade's `_PARANOID_*`
+  and whitelist 0.99/0.01 all read from config. All values identical → zero
+  behavior change (394 + 118 tests pass). The transient threshold±0.01 / floor /
+  family-boost literals were intentionally NOT centralized — GAP-05/06/04/02
+  delete them.
 - [ ] **GAP-11** [S] — RRF scorer is magnitude-invariant (flags on signal COUNT); fix/guard or remove.
 - [ ] **GAP-15** [S] — `evidence_grading` `ambiguous_weight=0.4` is a documented no-op; wire or remove.
 - [ ] **GAP-10** [L] — 5 fusion strategies, 2 fully dead (Bayesian, Stacking); consolidate to one canonical combiner + retire the duplicate `fusion/` package.
