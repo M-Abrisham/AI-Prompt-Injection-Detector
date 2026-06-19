@@ -78,7 +78,7 @@ test_count:
   count: 9167
   collection_errors: 0
   pytest_exit_code: 0
-test_files: 290
+test_files: 293
 detection_signals_in_scan:
   filter_doc: Names matching prefixes (detect_, scan_, analyze_, extract_, score_,
     compute_, classify*, predict*, get_, sniff_) plus an exact-match allowlist for

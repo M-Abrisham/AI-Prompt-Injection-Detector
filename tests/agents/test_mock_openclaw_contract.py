@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from na0s.agents.openclaw_bridge import OpenClawBridge
+from na0s.agents.openclaw_bridge import OpenClawBridge, Reply
 
 # Load scripts/mock_openclaw.py by path (scripts/ is not a package).
 _MOCK_PATH = Path(__file__).parent.parent.parent / "scripts" / "mock_openclaw.py"
@@ -38,6 +38,7 @@ def mock_server():
     # Reset shared class state between tests.
     mock_openclaw.MockOpenClawHandler.reply_queue = []
     mock_openclaw.MockOpenClawHandler.auto_reply = None
+    mock_openclaw.MockOpenClawHandler.auto_reply_sender = None
 
     port = _free_port()
     server = HTTPServer(("127.0.0.1", port), mock_openclaw.MockOpenClawHandler)
@@ -94,3 +95,52 @@ class TestMockContract:
         assert bridge.send_message("Deploy now? approve | reject") is True
         mock_openclaw.MockOpenClawHandler.reply_queue.append("approve")
         assert bridge.poll_replies(timeout=5) == "approve"
+
+
+class TestSenderAwareContract:
+    """poll_replies_with_sender preserves the iMessage sender (defense-in-depth).
+
+    The mock now lets a queued reply optionally carry a sender (dict shape); the
+    sender-aware poll must surface it, while bare strings stay sender-less.
+    """
+
+    def _post_reply(self, base_url: str, body: dict) -> None:
+        """Seed a reply via the real POST /replies contract (not direct queue)."""
+        import requests
+
+        resp = requests.post(f"{base_url}/replies", json=body, timeout=5)
+        resp.raise_for_status()
+
+    def test_dict_reply_surfaces_sender(self, mock_server):
+        """A reply seeded with {"reply","sender"} -> Reply(text, sender)."""
+        bridge = _bridge(mock_server)
+        self._post_reply(mock_server, {"reply": "approve", "sender": "+15551234567"})
+
+        reply = bridge.poll_replies_with_sender(timeout=5)
+        assert isinstance(reply, Reply)
+        assert reply.text == "approve"
+        assert reply.sender == "+15551234567"
+
+    def test_bare_string_reply_has_no_sender(self, mock_server):
+        """Back-compat: a bare-string reply yields sender None."""
+        bridge = _bridge(mock_server)
+        mock_openclaw.MockOpenClawHandler.reply_queue.append("approve")
+
+        reply = bridge.poll_replies_with_sender(timeout=5)
+        assert isinstance(reply, Reply)
+        assert reply.text == "approve"
+        assert reply.sender is None
+
+    def test_timeout_returns_none(self, mock_server):
+        bridge = _bridge(mock_server)
+        assert bridge.poll_replies_with_sender(timeout=1) is None
+
+    def test_auto_reply_with_sender_flag(self, mock_server):
+        """The --auto-reply-sender server flag attaches a sender to auto replies."""
+        mock_openclaw.MockOpenClawHandler.auto_reply = "approve"
+        mock_openclaw.MockOpenClawHandler.auto_reply_sender = "user@icloud.com"
+        bridge = _bridge(mock_server)
+
+        reply = bridge.poll_replies_with_sender(timeout=5)
+        assert reply.text == "approve"
+        assert reply.sender == "user@icloud.com"
