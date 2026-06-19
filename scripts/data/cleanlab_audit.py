@@ -219,6 +219,37 @@ def audit_samples(
     return enriched, report
 
 
+def audit_quality(samples: list) -> list:
+    """Populate each ``Na0SSample.quality_score`` in [0.0, 1.0]; return same list.
+
+    Bridges a list of ``Na0SSample`` objects to :func:`audit_samples`, which
+    operates on plain dicts. Converts each sample to the minimal dict shape
+    ``audit_samples`` consumes ({"text", "label"} — passing ``label`` as the
+    string ``.value`` so the internal ``_label_to_int`` receives a string),
+    runs the audit, then copies the resulting ``quality_score`` back onto each
+    ``Na0SSample`` in place.
+
+    Single-class or tiny inputs do not raise: ``audit_samples`` short-circuits
+    to a neutral 0.5 score. For any missing/out-of-range score (e.g. the
+    passthrough rows beyond ``max_rows`` that ``audit_samples`` leaves as
+    ``None``) a deterministic in-range fallback of 1.0 is used so every sample
+    satisfies the schema's [0.0, 1.0] range invariant.
+    """
+    if not samples:
+        return samples
+
+    dicts = [{"text": s.text, "label": s.label.value} for s in samples]
+    enriched, _report = audit_samples(dicts)
+
+    for s, d in zip(samples, enriched):
+        score = d.get("quality_score")
+        if score is None or not (0.0 <= float(score) <= 1.0):
+            score = 1.0  # deterministic in-range fallback (no detection decision rides on it)
+        s.quality_score = float(score)
+
+    return samples
+
+
 def _build_report(
     audited: list[dict[str, Any]],
     skipped: list[dict[str, Any]],
