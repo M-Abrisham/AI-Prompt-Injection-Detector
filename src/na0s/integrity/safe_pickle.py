@@ -158,12 +158,38 @@ def _validate_pickle_magic(path):
 
 
 def _atomic_write_binary(path, data):
-    """Write *data* to *path* atomically via temp-file + os.replace()."""
+    """Write *data* to *path* atomically via temp-file + os.replace().
+
+    ``os.write`` wraps the POSIX ``write(2)`` syscall, which is **not**
+    guaranteed to consume the whole buffer in one call: a single transfer is
+    capped at ``INT_MAX`` (2 GiB - 1) and may also short-write under memory
+    pressure. The previous implementation issued one ``os.write`` and ignored
+    its return value, so any object whose pickle exceeded ~2 GiB (e.g. the
+    400k x 15029 sparse ``features.pkl``) was written truncated. The integrity
+    sidecar was then computed over the truncated file, so corruption only
+    surfaced later as ``pickle data was truncated`` in ``safe_load``.
+
+    We therefore loop until every byte is written, then ``fsync`` before
+    closing so the sidecar hash (computed afterwards on the same bytes) and the
+    on-disk file are guaranteed identical and durable.
+    """
     dir_name = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
     closed = False
     try:
-        os.write(fd, data)
+        mv = memoryview(data)
+        total = len(mv)
+        written = 0
+        while written < total:
+            n = os.write(fd, mv[written:])
+            if n == 0:  # pragma: no cover - should not happen for a regular file
+                raise OSError(
+                    "os.write wrote 0 bytes ({} of {} written) for {}".format(
+                        written, total, tmp
+                    )
+                )
+            written += n
+        os.fsync(fd)
         os.close(fd)
         closed = True
         os.replace(tmp, path)
@@ -253,7 +279,10 @@ def safe_dump(obj, path):
     Both the pickle file and the sidecar are written atomically via
     temp-file + ``os.replace()`` to prevent corruption on crash.
     """
-    pkl_data = pickle.dumps(obj)
+    # Pin the highest protocol explicitly: protocol >= 4 enables the framed
+    # format required to serialise objects larger than 4 GiB, and keeps the
+    # written bytes independent of the interpreter's default protocol.
+    pkl_data = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
     _atomic_write_binary(path, pkl_data)
 
     key = _get_signing_key()
