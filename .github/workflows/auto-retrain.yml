@@ -6,13 +6,23 @@ on:
     - cron: '0 8 * * 2'
 
   workflow_run:
+    # Retrain after the WEEKLY harvest only. The 3-hourly "Social Scraper"
+    # trigger was removed: it fired this ~45-min job ~8x/day (the ROADMAP's
+    # "constant red-noise generator"), far more often than a TF-IDF model needs
+    # retraining and with runs piling up. Weekly cadence is plenty.
     workflows:
       - "Weekly Dataset Harvest"
-      - "Social Scraper (3h)"
     types: [completed]
     branches: [main]
 
   workflow_dispatch:  # Manual trigger
+
+# Never run two retrains at once: a new trigger queues (at most one pending)
+# instead of overlapping. cancel-in-progress: false so a long retrain that is
+# already running always finishes rather than being killed by the next trigger.
+concurrency:
+  group: auto-retrain
+  cancel-in-progress: false
 
 permissions:
   contents: write

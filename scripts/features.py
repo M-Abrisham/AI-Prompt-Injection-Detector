@@ -59,7 +59,14 @@ _MIN_DF = 2
 # This is a *deliberate, reversible* model trade-off: set NA0S_MAX_TRAIN_ROWS
 # to a larger value (or 0 to disable the cap entirely) on a bigger runner to
 # train on the full set. Maintainer should tune to the runner's RAM.
-_DEFAULT_MAX_TRAIN_ROWS = 400000
+# Lowered 400k -> 150k: 400k still pushed Train model (calibrated LogReg over a
+# 150k+ x 15029 matrix) and the 2.3GB features.pkl over a standard runner's
+# limits, and the >2GB pickle tripped the os.write truncation boundary (see
+# safe_pickle fix). 150k keeps feature extraction + calibrated training fast and
+# the features.pkl well under 2GB, while a linear TF-IDF+LogReg saturates far
+# below this. Reversible: NA0S_MAX_TRAIN_ROWS=<n> (or 0 to disable) on a bigger
+# runner trains on more/all rows.
+_DEFAULT_MAX_TRAIN_ROWS = 150000
 # Env var that overrides the default ceiling. "0" (or any value <= 0)
 # disables the cap entirely (use the full dataset).
 _MAX_TRAIN_ROWS_ENV = "NA0S_MAX_TRAIN_ROWS"
