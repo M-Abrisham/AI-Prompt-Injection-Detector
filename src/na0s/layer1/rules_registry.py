@@ -438,7 +438,10 @@ RULES = [
     # Worm/Self-Replication Detection (Morris II)
     # ------------------------------------------------------------------
 
-    # 19. I1.5 Worm signature: 4 sub-patterns covering Morris II attack surface.
+    # 19. IM1.6 Worm signature: 4 sub-patterns covering Morris II attack surface.
+    #     Dedicated self-replication code under the IM (Inter-Model Propagation)
+    #     family — was mislabeled I1.5, which canonically means "Vector DB
+    #     poisoning" (taxonomy.yaml) / consistency-anomaly (rag.poison_detector).
     Rule("worm_signature",
          r"(?:"
          # (a) Direct propagation: "append/add this to every response"
@@ -471,7 +474,7 @@ RULES = [
          r"(?:into|to|in)\s+(?:every|all|each)\s+"
          r"(?:responses?|messages?|outputs?|repl(?:y|ies)|emails?|documents?)"
          r")",
-         technique_ids=["I1.5"],
+         technique_ids=["IM1.6"],
          severity="critical",
          paranoia_level=1,
          description="Self-replicating worm instruction pattern (Morris II)"),

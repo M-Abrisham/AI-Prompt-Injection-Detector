@@ -529,6 +529,7 @@ categories:
       IM1.3: { name: "Instruction amplification", severity: high }
       IM1.4: { name: "Cross-model context smuggling", severity: high }
       IM1.5: { name: "Cascading jailbreak", severity: critical }
+      IM1.6: { name: "Self-replicating prompt (Morris II worm)", severity: critical }
       IM2.1: { name: "Judge model manipulation", severity: critical }
       IM2.2: { name: "Supervisor prompt override", severity: critical }
       IM2.3: { name: "Evaluation metric gaming", severity: high }
