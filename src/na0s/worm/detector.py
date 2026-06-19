@@ -387,6 +387,11 @@ _BENIGN_TRAINING_TEXTS: Tuple[str, ...] = (
 # worm/benign corpus — see the "worm-embedding threshold calibration" item in
 # ROADMAP_V2.md.  Centralised here (instead of inline magic numbers) so a future
 # data-driven calibration pass changes one place.
+# Taxonomy code for self-replicating ("worm") prompts — IM (Inter-Model
+# Propagation) family.  Single source of truth shared by scan() and the
+# worm_signature rule (was the overloaded I1.5; see data/taxonomy.yaml).
+_WORM_TECHNIQUE_ID = "IM1.6"
+
 _EMBED_WORM_FLOOR = 0.45         # min cosine vs worm templates before scoring
 _EMBED_MARGIN_SCALE = 0.30       # margin (worm-benign) at which confidence saturates
 _EMBED_FIRE_THRESHOLD = 0.55     # scan() flags "embedding_similarity" at/above this
@@ -1577,6 +1582,7 @@ class WormSignatureDetector:
         """
         return {
             "is_worm": False,
+            "technique_ids": [],
             "confidence": 0.0,
             "matched_patterns": [],
             "semantic_score": 0.0,
@@ -1769,6 +1775,9 @@ class WormSignatureDetector:
 
         return {
             "is_worm": is_worm,
+            # Taxonomy provenance so an output-side worm hit is traceable to
+            # the self-replication code (matches the worm_signature regex rule).
+            "technique_ids": [_WORM_TECHNIQUE_ID] if is_worm else [],
             "confidence": round(confidence, 4),
             "matched_patterns": matched,
             "semantic_score": round(semantic_confidence, 4),

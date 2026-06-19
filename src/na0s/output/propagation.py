@@ -105,6 +105,10 @@ class PropagationScanner:
             worm_boost = worm_result["confidence"] * WORM_BOOST_FACTOR
             risk_score = min(1.0, risk_score + worm_boost)
             technique_tags.append("worm_propagation")
+            # Surface the taxonomy code so the worm hit is traceable to IM1.6.
+            for _tid in worm_result.get("technique_ids", []):
+                if _tid not in technique_tags:
+                    technique_tags.append(_tid)
 
         # Single decision criterion: boosted risk_score only.
         # No separate `or worm_result["is_worm"]` — that double-counted

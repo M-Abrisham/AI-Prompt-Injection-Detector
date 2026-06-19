@@ -933,7 +933,7 @@ Root-cause finding (audit 2026-06-19): the `worm_embedding` head (`_EmbeddingSim
 - [ ] **G3 — data-driven threshold calibration** — fit `_EMBED_WORM_FLOOR/_MARGIN_SCALE/_FIRE_THRESHOLD`, `_WORM_INPUT_*`, and the Bayes `embedding_confidence` LR to a labeled worm/benign corpus to a stated TPR/FPR; emit a calibration artifact + regression test. The F14 worm scenarios (above) are the corpus seed. **Priority**: P2.
 - [ ] **G6 — corpus breadth** — `_WORM_TRAINING_TEXTS` covers ~4/10 self-replication categories, English-only, no `$START$/$END$` markers. Add roleplay, RAG/DB-poisoning, memory-persistence, tool-mediated, metamorphic, multilingual, and soft/implicit exemplars + per-category paired benign siblings (via SIFT). The new F14 scenarios enumerate the missing categories. **Priority**: P2.
 - [ ] **G11 — wire or annotate `worm/advanced.py`** — `polymorphic_score`/`invariant_overlap` (metamorphic, category 10) are unit-tested but never reach `scan()`; either feed them into Bayes as a calibrated signal or mark the module unwired. **Priority**: P3.
-- [ ] **G10b — emit IM1.6 from `WormSignatureDetector.scan()`** — the regex rule now carries IM1.6, but `scan()` itself still emits no taxonomy code on the output path. **Priority**: P3.
+- [x] **G10b — emit IM1.6 from `WormSignatureDetector.scan()`** — `scan()` now returns `technique_ids: ["IM1.6"]` on a worm hit (`[]` otherwise), shared via the `_WORM_TECHNIQUE_ID` constant; `output/propagation.py` surfaces it into `technique_tags`. So output-side worm hits are now traceable to the taxonomy.
 - [ ] **G13 — dual-scanner env-gate consistency** — `DualDirectionScanner` runs the worm path unconditionally, ignoring `NA0S_PROPAGATION_SCAN` (moot today: no production caller). **Priority**: P3.
 
 ---
