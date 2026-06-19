@@ -1017,8 +1017,12 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     # model is CONFIDENTLY malicious (>= 0.85): benign academic questions
     # ("explain symmetric vs asymmetric encryption") score ML ~0.0, so this
     # cannot fire on them.  Frame-only with an uncertain/safe ML stays SAFE.
+    # Only lift toward the DEFAULT operating boundary: an operator who raises
+    # the threshold above DECISION_THRESHOLD is explicitly suppressing, so this
+    # confidence-boosting floor must yield to that intent.
     if (fictional_frame_fired
             and composite < threshold
+            and threshold <= DECISION_THRESHOLD
             and _ml_prob_malicious >= 0.85):
         composite = max(composite, threshold + 0.01)
         if label in ("SAFE", "safe", "benign"):
@@ -1058,6 +1062,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         )
         if (_has_high_extraction
                 and _ml_prob_malicious >= 0.35
+                and threshold <= DECISION_THRESHOLD
                 and composite < threshold + 0.01):
             composite = max(composite, threshold + 0.01)
         if composite >= threshold and label in ("SAFE", "safe", "benign"):
@@ -1262,7 +1267,9 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         if composite < threshold + 0.01:
             composite = max(composite, threshold + 0.01)
             label = "MALICIOUS"
-    elif _has_critical_e1 and composite < threshold + 0.01:
+    elif (_has_critical_e1
+            and threshold <= DECISION_THRESHOLD
+            and composite < threshold + 0.01):
         # g8: Degrade-aware Path-A.  The embedding-confirmed branch above
         # silently voids when the embedding signal is degraded (env-disabled
         # or fallback backend) because ``embedding_technique_matches`` is then

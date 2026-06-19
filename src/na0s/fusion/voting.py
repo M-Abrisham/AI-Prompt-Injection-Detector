@@ -335,8 +335,12 @@ def weighted_decision(
         )
         for h in hits
     )
+    # Only lift toward the DEFAULT operating boundary: an operator who raises
+    # the threshold above DECISION_THRESHOLD is explicitly suppressing, and a
+    # confidence-boosting floor must not override that intent.
     if (_has_override_extraction_anchor
             and ml_prob_malicious >= 0.35
+            and threshold <= DECISION_THRESHOLD
             and composite < threshold + 0.01):
         composite = max(composite, threshold + 0.01)
 
@@ -361,7 +365,9 @@ def weighted_decision(
         _sev_lookup.get(h) == "critical" and h not in FP_EXEMPT_HITS
         for h in hits
     )
-    if _has_critical_rule and composite < threshold + 0.01:
+    if (_has_critical_rule
+            and threshold <= DECISION_THRESHOLD
+            and composite < threshold + 0.01):
         composite = max(composite, threshold + 0.01)
 
     # Compute ML safe-confidence once.
