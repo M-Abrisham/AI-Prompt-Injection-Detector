@@ -312,7 +312,10 @@ def detect_context_manipulation(
             concentration_ratio=concentration_ratio,
             input_length_tokens=word_count,
             technique_ids=["D8.1", "D8.2"],
-            boost=min(0.3, 0.05 * many_shot_count),
+            # 0.06/shot (cap 0.3) so a 5-shot demonstrated jailbreak clears the
+            # decision threshold on detector merit alone, not on the optional
+            # embedding classifier (absent locally, loaded in CI -> the 0.532 flake).
+            boost=min(0.3, 0.06 * many_shot_count),
         )
 
     # --- Padding attack: payload concentrated in one segment ---
