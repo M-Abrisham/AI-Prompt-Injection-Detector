@@ -150,17 +150,16 @@ class TestRRFScore:
         assert rrf_score({}) == 0.0
 
     def test_single_signal(self):
-        score = rrf_score({"ml": 0.9})
-        # Single signal → rank 1 → 1/(k+1) / (1/(k+1)) = 1.0
-        assert score == 1.0
+        # GAP-11: value-weighted — a single signal returns its VALUE (0.9),
+        # not 1.0.  (Old magnitude-invariant scorer returned 1.0 for any value.)
+        assert rrf_score({"ml": 0.9}) == pytest.approx(0.9)
+        assert rrf_score({"ml": 0.1}) == pytest.approx(0.1)
 
     def test_two_equal_signals(self):
+        # GAP-11: value-weighted — two signals of value 0.5 yield ~0.5, NOT ~0.99.
+        # (The old magnitude-invariant scorer returned ~0.991 here — the bug.)
         score = rrf_score({"ml": 0.5, "rules": 0.5})
-        # Both tied: ranks assigned by sort order, but sum is the same
-        # raw = 1/(61) + 1/(62) = 0.01639 + 0.01613 = 0.03252
-        # max = 2 * 1/61 = 0.03279
-        # normalized = 0.03252 / 0.03279 ≈ 0.991...
-        assert 0.98 < score <= 1.0
+        assert 0.49 <= score <= 0.51
 
     def test_score_normalized_to_01(self):
         score = rrf_score({"a": 0.1, "b": 0.5, "c": 0.9})
@@ -179,21 +178,29 @@ class TestRRFScore:
         assert 0.0 <= score_k10 <= 1.0
         assert 0.0 <= score_k100 <= 1.0
 
-    def test_rank_ordering(self):
-        """Higher signal values should get better (lower) ranks."""
-        # With a big gap, the score should be close to 1 because
-        # all signals contribute
+    def test_magnitude_drives_score(self):
+        """GAP-11: strong signals score much higher than weak ones."""
         score_high = rrf_score({"ml": 0.99, "rules": 0.98})
         score_low = rrf_score({"ml": 0.01, "rules": 0.02})
-        # Both should produce similar RRF scores because RRF is
-        # rank-based, not magnitude-based
-        assert abs(score_high - score_low) < 0.05
+        assert score_high > score_low + 0.5
 
-    def test_rrf_is_rank_invariant(self):
-        """RRF score depends only on ranks, not magnitudes."""
-        s1 = rrf_score({"a": 100.0, "b": 50.0, "c": 1.0})
-        s2 = rrf_score({"a": 0.9, "b": 0.5, "c": 0.1})
-        assert s1 == s2
+    def test_rrf_is_magnitude_aware_not_count_based(self):
+        """GAP-11 regression: the score must depend on signal VALUES, not just
+        how many signals are present.  The old scorer returned identical scores
+        for {0.9,0.5,0.1} and {0.09,0.05,0.01}; it must not anymore."""
+        strong = rrf_score({"a": 0.9, "b": 0.5, "c": 0.1})
+        weak = rrf_score({"a": 0.09, "b": 0.05, "c": 0.01})
+        assert strong > weak + 0.3
+
+    def test_weak_signals_cannot_flag_malicious(self):
+        """GAP-11 GUARD: a handful of trivially-weak signals must NOT cross the
+        threshold (the dangerous behavior of the old count-based scorer)."""
+        for signals in (
+            {"ml": 0.01, "rules": 0.02, "obf": 0.03},
+            {"a": 0.05, "b": 0.04, "c": 0.03, "d": 0.02, "e": 0.01},
+        ):
+            label, score = rrf_decision(signals, threshold=0.55)
+            assert label == "SAFE", f"weak {signals} -> {label} ({score})"
 
 
 class TestRRFDecision:

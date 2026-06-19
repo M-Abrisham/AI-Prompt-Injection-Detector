@@ -94,7 +94,13 @@ Fix order (clear bugs/cleanup → decontaminate+calibrate → one calibrated fus
   behavior change (394 + 118 tests pass). The transient threshold±0.01 / floor /
   family-boost literals were intentionally NOT centralized — GAP-05/06/04/02
   delete them.
-- [ ] **GAP-11** [S] — RRF scorer is magnitude-invariant (flags on signal COUNT); fix/guard or remove.
+- [x] **GAP-11** — RRF scorer was magnitude-INVARIANT: `Σ 1/(k+rank)` depends only
+  on the signal COUNT (ranks are always {1..n}), so 3 signals of value 0.01 scored
+  the same (0.984 = MALICIOUS) as 0.9 — RRF misapplied to a single value vector.
+  Fixed: made it VALUE-WEIGHTED (`Σ value·/(k+rank)` / max) so magnitude drives the
+  score; corrected 4 tests that codified the bug (incl. `test_rrf_is_rank_invariant`)
+  + added GUARD test that weak signals cannot flag MALICIOUS. (env-gated path; GAP-10
+  decides keep-vs-remove.)
 - [ ] **GAP-15** [S] — `evidence_grading` `ambiguous_weight=0.4` is a documented no-op; wire or remove.
 - [ ] **GAP-10** [L] — 5 fusion strategies, 2 fully dead (Bayesian, Stacking); consolidate to one canonical combiner + retire the duplicate `fusion/` package.
 - [ ] **PREREQUISITE** — land the eval-leakage decontamination fix (`process_data` excludes holdout/benchmark) on main; required before honest calibration.
