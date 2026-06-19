@@ -136,7 +136,7 @@ L16_detectors:
   line: 166
 - name: EmbeddingDriftDetector
   file: src/na0s/conversation/detectors/embedding_drift.py
-  line: 115
+  line: 119
 - name: EscalationDetector
   file: src/na0s/conversation/detectors/escalation.py
   line: 86
@@ -145,7 +145,7 @@ L16_detectors:
   line: 44
 - name: PayloadSplittingDetector
   file: src/na0s/conversation/detectors/payload_splitting.py
-  line: 223
+  line: 224
 - name: SchemingDetector
   file: src/na0s/conversation/detectors/scheming.py
   line: 298
