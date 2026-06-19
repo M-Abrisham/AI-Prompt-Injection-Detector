@@ -382,6 +382,31 @@ _BENIGN_TRAINING_TEXTS: Tuple[str, ...] = (
 # Embedding similarity (sentence-transformers, optional)
 # ---------------------------------------------------------------------------
 
+# Calibration constants for the embedding worm-similarity signal.
+# These are a conservative *starting operating point*, NOT yet fit to a labeled
+# worm/benign corpus — see the "worm-embedding threshold calibration" item in
+# ROADMAP_V2.md.  Centralised here (instead of inline magic numbers) so a future
+# data-driven calibration pass changes one place.
+_EMBED_WORM_FLOOR = 0.45         # min cosine vs worm templates before scoring
+_EMBED_MARGIN_SCALE = 0.30       # margin (worm-benign) at which confidence saturates
+_EMBED_FIRE_THRESHOLD = 0.55     # scan() flags "embedding_similarity" at/above this
+_EMBED_MAX_CHARS = 2000          # per-window char cap before encoding
+_EMBED_WINDOW_OVERLAP = 200      # sliding-window overlap so a payload is not split
+_EMBED_MAX_WINDOWS = 24          # bound on windows encoded per input (DoS guard);
+                                 # fully tiles ~43 KB of head — see _embed_covered_extent()
+
+
+def _embed_covered_extent() -> int:
+    """Max input length the sliding windows fully tile (head region, tail excluded).
+
+    Inputs longer than this have an un-encoded middle region — the embedding
+    head sees only the head + tail — so callers flag them ``truncated`` instead
+    of treating a 0.0 score as "clean".
+    """
+    step = max(1, _EMBED_MAX_CHARS - _EMBED_WINDOW_OVERLAP)
+    return _EMBED_MAX_CHARS + (_EMBED_MAX_WINDOWS - 1) * step
+
+
 class _EmbeddingSimilarity:
     """Dense embedding cosine similarity against worm template corpus.
 
@@ -391,7 +416,7 @@ class _EmbeddingSimilarity:
     not installed.
     """
 
-    _instance: Optional["_EmbeddingSimilarity"] = None
+    _instances: Dict[str, "_EmbeddingSimilarity"] = {}
     _instance_lock = threading.Lock()
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
@@ -446,18 +471,26 @@ class _EmbeddingSimilarity:
 
     @classmethod
     def get_instance(cls, model_name: str = "all-MiniLM-L6-v2") -> "_EmbeddingSimilarity":
-        """Thread-safe singleton — avoids loading the model multiple times."""
-        if cls._instance is None:
+        """Thread-safe per-model singleton — avoids loading a model twice while
+        still honouring a distinct *model_name*.
+
+        Previously keyed only on ``_instance is None``, so the first model name
+        won and any later ``model_name`` silently returned the first scorer.
+        """
+        inst = cls._instances.get(model_name)
+        if inst is None:
             with cls._instance_lock:
-                if cls._instance is None:
-                    cls._instance = cls(model_name)
-        return cls._instance
+                inst = cls._instances.get(model_name)
+                if inst is None:
+                    inst = cls(model_name)
+                    cls._instances[model_name] = inst
+        return inst
 
     @classmethod
     def _reset_instance(cls) -> None:
-        """Reset the singleton instance (for test teardown only)."""
+        """Reset cached singletons (for test teardown only)."""
         with cls._instance_lock:
-            cls._instance = None
+            cls._instances.clear()
 
     @staticmethod
     def _is_model_cached(model_name: str) -> bool:
@@ -516,6 +549,50 @@ class _EmbeddingSimilarity:
     def available(self) -> bool:
         return self._available
 
+    @staticmethod
+    def _empty_score() -> Dict[str, float]:
+        """Zero-valued score dict — canonical shape returned by ``score()``."""
+        return {
+            "embedding_worm_similarity": 0.0,
+            "embedding_benign_similarity": 0.0,
+            "embedding_score": 0.0,
+        }
+
+    @staticmethod
+    def _windows(text: str) -> List[str]:
+        """Split *text* into overlapping windows for encoding.
+
+        A single global head-truncation (``text[:2000]``) let an attacker push
+        the worm payload past the cut with benign filler (prefix-padding) or
+        dilute a short worm inside a long benign body.  Overlapping windows tile
+        the input — plus an explicit tail window — so the payload lands wholly
+        inside at least one encoded span.
+
+        Work is bounded to ``_EMBED_MAX_WINDOWS`` (+1 tail) windows so a huge
+        adversarial input cannot exhaust memory.  Inputs longer than
+        ``_embed_covered_extent()`` therefore have an UN-encoded middle region
+        (head + tail only); ``worm_embedding_signal()`` flags those ``truncated``
+        rather than treating a 0.0 score as "clean" — the full-text regex /
+        lexical / D8 tail scans on the input path still cover that region.
+        """
+        text = text.strip()
+        if not text:
+            return []
+        if len(text) <= _EMBED_MAX_CHARS:
+            return [text]
+        step = max(1, _EMBED_MAX_CHARS - _EMBED_WINDOW_OVERLAP)
+        windows: List[str] = []
+        for start in range(0, len(text), step):
+            windows.append(text[start : start + _EMBED_MAX_CHARS])
+            if len(windows) >= _EMBED_MAX_WINDOWS:
+                break
+        # Always cover the tail so a payload stuffed at the very end of a long
+        # body is still encoded even when the head consumed the window budget.
+        tail = text[-_EMBED_MAX_CHARS:]
+        if tail not in windows:
+            windows.append(tail)
+        return windows
+
     def score(self, text: str) -> Dict[str, float]:
         """Return embedding similarity scores.
 
@@ -525,31 +602,36 @@ class _EmbeddingSimilarity:
             embedding_score – calibrated score (0 if benign > worm, else margin-based)
         """
         if not self._available or not text or not text.strip():
-            return {
-                "embedding_worm_similarity": 0.0,
-                "embedding_benign_similarity": 0.0,
-                "embedding_score": 0.0,
-            }
+            return self._empty_score()
 
         try:
-            # Cap input to avoid OOM on adversarial inputs — 2k chars is plenty
-            # for semantic similarity against short worm templates.
-            truncated = text.strip()[:2000]
-            vec = self._encode_normalized([truncated])
-            worm_sims = vec @ self._worm_embeddings.T
-            benign_sims = vec @ self._benign_embeddings.T
+            windows = self._windows(text)
+            if not windows:
+                return self._empty_score()
+            vecs = self._encode_normalized(windows)
+            worm_sims = vecs @ self._worm_embeddings.T
+            benign_sims = vecs @ self._benign_embeddings.T
+            if worm_sims.size == 0 or benign_sims.size == 0:
+                return self._empty_score()
 
-            worm_max = float(np.max(worm_sims)) if worm_sims.size > 0 else 0.0
-            benign_max = float(np.max(benign_sims)) if benign_sims.size > 0 else 0.0
+            # Per-window max similarity, then pick the window with the best
+            # worm-vs-benign margin (the densest-suspicion span).  This makes a
+            # short worm buried in long benign text score on its own window
+            # instead of being averaged toward benign.
+            worm_per = np.max(worm_sims, axis=1)
+            benign_per = np.max(benign_sims, axis=1)
+            best = int(np.argmax(worm_per - benign_per))
+            worm_max = float(worm_per[best])
+            benign_max = float(benign_per[best])
 
             margin = worm_max - benign_max
-            if margin <= 0.0 or worm_max < 0.45:
+            if margin <= 0.0 or worm_max < _EMBED_WORM_FLOOR:
                 score = 0.0
             else:
                 # worm_max gates the ceiling (low similarity → low score).
-                # margin/0.3 linearly scales confidence: a 0.3+ margin is
-                # near-certain, smaller margins ramp proportionally.
-                score = worm_max * min(1.0, margin / 0.3)
+                # margin/_EMBED_MARGIN_SCALE linearly scales confidence: a
+                # full-margin hit is near-certain, smaller margins ramp down.
+                score = worm_max * min(1.0, margin / _EMBED_MARGIN_SCALE)
 
             return {
                 "embedding_worm_similarity": round(worm_max, 4),
@@ -558,11 +640,23 @@ class _EmbeddingSimilarity:
             }
         except (ValueError, TypeError, AttributeError, RuntimeError):
             logger.debug("Embedding similarity scoring failed", exc_info=True)
-            return {
-                "embedding_worm_similarity": 0.0,
-                "embedding_benign_similarity": 0.0,
-                "embedding_score": 0.0,
-            }
+            return self._empty_score()
+
+    def score_max(self, texts: List[str]) -> Dict[str, float]:
+        """Score several views of one input and return the best-margin result.
+
+        Gives the embedding head the same normalized / decoded / multi-turn
+        views the regex path sees, so obfuscation that bypasses regex cannot
+        also bypass the embedding signal.
+        """
+        best: Optional[Dict[str, float]] = None
+        for t in texts:
+            if not t or not str(t).strip():
+                continue
+            r = self.score(t)
+            if best is None or r.get("embedding_score", 0.0) > best.get("embedding_score", 0.0):
+                best = r
+        return best if best is not None else self._empty_score()
 
 
 # ---------------------------------------------------------------------------
@@ -1507,6 +1601,7 @@ class WormSignatureDetector:
                 "worm_similarity": 0.0,
                 "benign_similarity": 0.0,
             },
+            "embedding_available": False,
             "corpus_classifier_score": 0.0,
             "bayes_score": 0.0,
             "auto_signature_score": 0.0,
@@ -1592,10 +1687,20 @@ class WormSignatureDetector:
         replication_score = float(replication.get("combined", 0.0))
         replication_confidence = 0.0
 
-        # Embedding similarity (optional, only when sentence-transformers available)
-        embedding_result = self._embedding.score(text)
+        # Embedding similarity (optional, only when sentence-transformers available).
+        # Score the normalized / decoded / reconstructed views — the same
+        # obfuscation-resistant variants the regex path sees — so homoglyph,
+        # token-splitting, base64/hex and multi-turn-split worms cannot bypass
+        # the embedding head while still bypassing regex (G4).
+        _embed_views = _build_text_variants(text)
+        if reconstructed_text and reconstructed_text != text:
+            _embed_views.append(reconstructed_text)
+        for _decoded in self._extract_decoded_payloads(_ascii_skeleton(text)):
+            _embed_views.append(_decoded)
+        embedding_result = self._embedding.score_max(_embed_views)
         embedding_confidence = float(embedding_result.get("embedding_score", 0.0))
-        if embedding_confidence >= 0.55:
+        embedding_available = self._embedding.available
+        if embedding_confidence >= _EMBED_FIRE_THRESHOLD:
             matched.append("embedding_similarity")
 
         # Corpus classifier (optional, only when a trained model is loaded)
@@ -1688,7 +1793,102 @@ class WormSignatureDetector:
                 "worm_similarity": embedding_result.get("embedding_worm_similarity", 0.0),
                 "benign_similarity": embedding_result.get("embedding_benign_similarity", 0.0),
             },
+            # G7: surface whether the dense embedding head is actually live so a
+            # consumer can distinguish "scored benign" from "model unavailable".
+            "embedding_available": embedding_available,
             "corpus_classifier_score": round(corpus_classifier_score, 4),
             "bayes_score": round(bayes_score, 4),
             "auto_signature_score": round(auto_sig_score, 4),
         }
+
+
+# ---------------------------------------------------------------------------
+# Input-side worm self-replication signal (cheap, fail-safe)
+# ---------------------------------------------------------------------------
+
+_lightweight_semantic_singleton: Optional["_LightweightSemanticClassifier"] = None
+_lightweight_semantic_lock = threading.Lock()
+
+
+def _get_lightweight_semantic() -> "_LightweightSemanticClassifier":
+    """Process-wide singleton for the dependency-free lexical worm scorer."""
+    global _lightweight_semantic_singleton
+    if _lightweight_semantic_singleton is None:
+        with _lightweight_semantic_lock:
+            if _lightweight_semantic_singleton is None:
+                _lightweight_semantic_singleton = _LightweightSemanticClassifier()
+    return _lightweight_semantic_singleton
+
+
+def worm_embedding_signal(text: str, model_name: str = "all-MiniLM-L6-v2") -> Dict[str, object]:
+    """Cheap, fail-safe worm self-replication signal for the INPUT path.
+
+    Scores *text* for self-replicating ("worm") intent using the dense
+    embedding-similarity head when a sentence-transformers model is cached, and
+    transparently degrades to the dependency-free lexical classifier when it is
+    not.  Both run over the obfuscation-resistant text variants.  Never raises
+    and never performs network I/O.
+
+    Returns a dict:
+        score            float in [0, 1] worm-likelihood
+        worm_similarity  / benign_similarity   diagnostic cosine values
+        available        True when the dense embedding head is active
+        degraded         True when running on the lexical fallback (no model)
+        mode             "embedding" | "lexical"
+        truncated        True when the input exceeds the embedding head's window
+                         budget, so its middle region was NOT embedding-scored
+                         (the full-text regex / lexical / tail scans still cover it)
+    """
+    result: Dict[str, object] = {
+        "score": 0.0,
+        "worm_similarity": 0.0,
+        "benign_similarity": 0.0,
+        "available": False,
+        "degraded": True,
+        "mode": "lexical",
+        "truncated": False,
+    }
+    if not text or not str(text).strip():
+        return result
+
+    result["truncated"] = len(str(text)) > _embed_covered_extent()
+    views = _build_text_variants(str(text))
+    if not views:
+        return result
+
+    # Preferred: dense embedding head (only when the model is actually cached).
+    try:
+        emb = _EmbeddingSimilarity.get_instance(model_name)
+        if emb.available:
+            r = emb.score_max(views)
+            result.update({
+                "score": float(r.get("embedding_score", 0.0)),
+                "worm_similarity": float(r.get("embedding_worm_similarity", 0.0)),
+                "benign_similarity": float(r.get("embedding_benign_similarity", 0.0)),
+                "available": True,
+                "degraded": False,
+                "mode": "embedding",
+            })
+            return result
+    except Exception:  # pragma: no cover - defensive, embedding head is optional
+        logger.debug("worm embedding signal failed; falling back to lexical", exc_info=True)
+
+    # Fallback: dependency-free lexical semantic classifier (no model needed).
+    try:
+        sem = _get_lightweight_semantic()
+        best = {"score": 0.0, "worm_similarity": 0.0, "benign_similarity": 0.0}
+        for v in views:
+            s = sem.score(v)
+            if s.get("score", 0.0) > best.get("score", 0.0):
+                best = s
+        result.update({
+            "score": float(best.get("score", 0.0)),
+            "worm_similarity": float(best.get("worm_similarity", 0.0)),
+            "benign_similarity": float(best.get("benign_similarity", 0.0)),
+            "available": False,
+            "degraded": True,
+            "mode": "lexical",
+        })
+    except Exception:  # pragma: no cover - defensive
+        logger.debug("worm lexical fallback failed", exc_info=True)
+    return result
