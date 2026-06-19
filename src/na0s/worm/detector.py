@@ -49,6 +49,10 @@ try:
 except ImportError:
     pass
 
+# Shared pinned loader: revision-pins all-MiniLM-L6-v2 (the default model) so
+# the worm-template encoder snapshot is deterministic across runs.
+from na0s.ml._st_loader import load_pinned_sentence_transformer
+
 # ---------------------------------------------------------------------------
 # Optional: sklearn (for corpus classifier)
 # ---------------------------------------------------------------------------
@@ -414,7 +418,9 @@ class _EmbeddingSimilarity:
             return
 
         try:
-            self._model = SentenceTransformer(model_name)
+            self._model = load_pinned_sentence_transformer(
+                SentenceTransformer, model_name,
+            )
             self._worm_embeddings = self._encode_normalized(
                 list(_WORM_TRAINING_TEXTS),
             )

@@ -45,11 +45,15 @@ from .base_detector import MultiTurnDetector
 
 _HAS_EMBEDDINGS = False
 try:
-    from sentence_transformers import SentenceTransformer  # noqa: F401
+    from sentence_transformers import SentenceTransformer
 
     _HAS_EMBEDDINGS = True
 except ImportError:
-    pass
+    SentenceTransformer = None  # type: ignore[assignment]
+
+# Shared pinned loader: revision-pins all-MiniLM-L6-v2 (the default model) so
+# the drift-detector encoder snapshot is deterministic across runs.
+from na0s.ml._st_loader import load_pinned_sentence_transformer
 
 # Sentinel so tests can check / override
 _MODEL_NAME = "all-MiniLM-L6-v2"
@@ -147,9 +151,9 @@ class EmbeddingDriftDetector(MultiTurnDetector):
         if cls._model is None and _HAS_EMBEDDINGS:
             with cls._model_lock:
                 if cls._model is None:  # double-check under lock
-                    from sentence_transformers import SentenceTransformer
-
-                    cls._model = SentenceTransformer(_MODEL_NAME)
+                    cls._model = load_pinned_sentence_transformer(
+                        SentenceTransformer, _MODEL_NAME,
+                    )
 
     def _get_embeddings(self, texts: List[str]) -> Optional[list]:
         """Batch-embed *texts* with sentence-transformers or deterministic fallback."""

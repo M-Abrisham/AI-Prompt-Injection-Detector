@@ -71,40 +71,13 @@ except ImportError:
 # ---------------------------------------------------------------------------
 DEFAULT_MODEL_NAME = "all-MiniLM-L6-v2"
 
-# Pin a specific model revision so HuggingFace Hub does not silently resolve a
-# different "latest" snapshot across CI runs (a source of runtime flakiness).
-# This is the canonical ``main`` commit of
-# ``sentence-transformers/all-MiniLM-L6-v2`` as of 2026-06-18.
-#
-# NOTE: verify this SHA against
-#   https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/commits/main
-# before relying on it in production; updating it is a one-line change here.
-# TODO: confirm the pinned revision SHA against the HF Hub.
-DEFAULT_MODEL_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
-
-
-def _hub_offline() -> bool:
-    """Return True when HuggingFace Hub network access should be disabled.
-
-    Honors the standard ``HF_HUB_OFFLINE`` env var (any truthy value) so that
-    callers/CI can force fully-local, deterministic loads.
-    """
-    return os.environ.get("HF_HUB_OFFLINE", "").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
-
-
-def _cache_folder() -> Optional[str]:
-    """Return an explicit sentence-transformers cache folder if configured.
-
-    Prefers ``HF_HOME``, then ``SENTENCE_TRANSFORMERS_HOME``.  Returns None when
-    neither is set, letting sentence-transformers use its own default.
-    """
-    for env_var in ("HF_HOME", "SENTENCE_TRANSFORMERS_HOME"):
-        val = os.environ.get(env_var)
-        if val:
-            return val
-    return None
+# Shared pinned loader (one place for revision pin + cache + offline mode).
+# ``DEFAULT_MODEL_REVISION`` is re-exported here for backward compatibility:
+# existing tests/callers reference ``embedding_classifier.DEFAULT_MODEL_REVISION``.
+from na0s.ml._st_loader import (  # noqa: E402
+    DEFAULT_MODEL_REVISION,
+    load_pinned_sentence_transformer,
+)
 
 
 def _load_sentence_transformer(
@@ -113,30 +86,15 @@ def _load_sentence_transformer(
 ):
     """Construct a SentenceTransformer with deterministic, pinned settings.
 
-    Centralizes the construction so revision pinning, cache-folder selection,
-    and offline-mode honoring live in exactly one place.  Raises whatever
-    ``SentenceTransformer(...)`` raises (caller handles fallback).
-
-    Older sentence-transformers releases may not accept ``revision`` /
-    ``cache_folder`` / ``local_files_only``; we fall back to a plain
-    construction on ``TypeError`` so the pin is best-effort, never fatal.
+    Thin wrapper around the shared :func:`load_pinned_sentence_transformer`
+    that injects this module's own ``SentenceTransformer`` reference so tests
+    patching ``embedding_classifier.SentenceTransformer`` keep intercepting
+    construction.  Raises whatever ``SentenceTransformer(...)`` raises (caller
+    handles fallback).
     """
-    kwargs = {"revision": revision}
-    cache_folder = _cache_folder()
-    if cache_folder:
-        kwargs["cache_folder"] = cache_folder
-    if _hub_offline():
-        kwargs["local_files_only"] = True
-    try:
-        return SentenceTransformer(model_name, **kwargs)
-    except TypeError:
-        # Installed sentence-transformers predates one of these kwargs.
-        logger.warning(
-            "SentenceTransformer does not accept pinning kwargs %s; "
-            "loading '%s' without them",
-            sorted(kwargs), model_name,
-        )
-        return SentenceTransformer(model_name)
+    return load_pinned_sentence_transformer(
+        SentenceTransformer, model_name, revision=revision,
+    )
 
 # Similarity thresholds per technique.  A technique "matches" when the
 # cosine similarity between the input embedding and the technique centroid
