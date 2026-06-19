@@ -43,3 +43,11 @@ repos:
         # what is staged, pre-commit reports "files were modified by this
         # hook" and the commit fails — re-stage docs/facts.yaml and retry.
         # Numbers must come from this file, never hand-typed in README/docs.
+      - id: extract-benchmarks
+        name: Regenerate docs/benchmarks.yaml from harness artifacts
+        entry: python3 scripts/extract_benchmarks.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        # Hook writes docs/benchmarks.yaml from benchmarks/results/*.json. Same
+        # contract as extract-facts: benchmark numbers come from this file.

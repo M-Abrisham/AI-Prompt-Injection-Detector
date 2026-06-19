@@ -1,0 +1,153 @@
+_meta:
+  generated_by: scripts/extract_benchmarks.py
+  edit_source_not_this_file: true
+  artifact: benchmarks/results/technique_analysis.json
+  git_sha: f6b3ab8
+  measured: '2026-06-17'
+  threshold: 0.55
+headline:
+  malicious_recall_pct: 57.1
+  malicious_recall_ci_pct:
+  - 51.7
+  - 62.2
+  malicious_detected: 194
+  malicious_total: 340
+  benign_fpr_pct: 1.2
+  benign_fpr_ci_pct:
+  - 0.5
+  - 2.6
+  benign_false_positives: 6
+  benign_total: 500
+  evasion_detection_pct: 47.6
+  evasion_detected: 270
+  evasion_total: 567
+  metrics_note: recall and benign_fpr are measured on independent pools; precision/F1
+    are intentionally omitted (no shared prevalence)
+per_category:
+  E2:
+    recall_pct: 0.0
+    detected: 0
+    total: 20
+  C1:
+    recall_pct: 24.0
+    detected: 6
+    total: 25
+  O1:
+    recall_pct: 30.0
+    detected: 6
+    total: 20
+  P1:
+    recall_pct: 35.0
+    detected: 7
+    total: 20
+  E1:
+    recall_pct: 48.0
+    detected: 12
+    total: 25
+  D2:
+    recall_pct: 56.7
+    detected: 17
+    total: 30
+  D7:
+    recall_pct: 64.0
+    detected: 16
+    total: 25
+  D8:
+    recall_pct: 64.0
+    detected: 16
+    total: 25
+  D6:
+    recall_pct: 66.7
+    detected: 20
+    total: 30
+  D1:
+    recall_pct: 72.5
+    detected: 29
+    total: 40
+  D4:
+    recall_pct: 80.0
+    detected: 20
+    total: 25
+  D5:
+    recall_pct: 80.0
+    detected: 20
+    total: 25
+  D3:
+    recall_pct: 83.3
+    detected: 25
+    total: 30
+per_evasion_type:
+  base64:
+    detection_pct: 90.5
+    detected: 57
+    total: 63
+  whitespace_insertion:
+    detection_pct: 71.4
+    detected: 45
+    total: 63
+  hex_encoding:
+    detection_pct: 69.8
+    detected: 44
+    total: 63
+  syllable_split:
+    detection_pct: 60.3
+    detected: 38
+    total: 63
+  unicode_homoglyphs:
+    detection_pct: 57.1
+    detected: 36
+    total: 63
+  rot13:
+    detection_pct: 31.8
+    detected: 20
+    total: 63
+  mixed_encoding:
+    detection_pct: 20.6
+    detected: 13
+    total: 63
+  reversed:
+    detection_pct: 15.9
+    detected: 10
+    total: 63
+  leetspeak:
+    detection_pct: 11.1
+    detected: 7
+    total: 63
+per_benign:
+  code:
+    fpr_pct: 1.0
+    false_positives: 1
+    total: 100
+  creative_writing:
+    fpr_pct: 1.0
+    false_positives: 1
+    total: 100
+  customer_support:
+    fpr_pct: 2.0
+    false_positives: 2
+    total: 100
+  instructional:
+    fpr_pct: 1.0
+    false_positives: 1
+    total: 100
+  technical_docs:
+    fpr_pct: 1.0
+    false_positives: 1
+    total: 100
+external:
+  deepset:
+    n_samples: 546
+    fpr_pct: 1.5
+    avg_latency_ms: 10.6
+    recall_pct: 32.0
+    precision_pct: 92.9
+    f1: 0.476
+    auc_roc: 0.78
+  alpaca:
+    n_samples: 2000
+    fpr_pct: 2.1
+    avg_latency_ms: 5.2
+  dolly:
+    n_samples: 2000
+    fpr_pct: 10.4
+    avg_latency_ms: 11.2

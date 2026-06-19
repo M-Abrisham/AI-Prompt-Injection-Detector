@@ -27,6 +27,24 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
 FACTS = REPO_ROOT / "docs" / "facts.yaml"
+BENCHMARKS = REPO_ROOT / "docs" / "benchmarks.yaml"
+
+
+def _collect_numeric(obj, allowed: set[str]) -> None:
+    """Recursively add every numeric leaf of `obj` to `allowed` (bare + comma forms)."""
+    if isinstance(obj, bool):
+        return
+    if isinstance(obj, (int, float)):
+        allowed.add(str(obj))
+        if float(obj).is_integer():
+            allowed.add(str(int(obj)))
+            allowed.add(f"{int(obj):,}")
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _collect_numeric(v, allowed)
+    elif isinstance(obj, list):
+        for v in obj:
+            _collect_numeric(v, allowed)
 
 
 def build_allowed_values(facts: dict) -> set[str]:
@@ -111,6 +129,10 @@ def extract_numeric_tokens(prose: str) -> list[tuple[str, int]]:
 def main() -> int:
     facts = yaml.safe_load(FACTS.read_text())
     allowed = build_allowed_values(facts)
+
+    # Benchmark numbers are grounded in docs/benchmarks.yaml (scripts/extract_benchmarks.py).
+    if BENCHMARKS.exists():
+        _collect_numeric(yaml.safe_load(BENCHMARKS.read_text()) or {}, allowed)
 
     raw = README.read_text()
     prose = strip_for_claim_extraction(raw)

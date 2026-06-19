@@ -33,6 +33,12 @@ recall-harness:  ## Run the recall + benign-FPR harness (report mode)
 recall-gate:  ## Run the recall harness as a CI gate (override RECALL_FLOOR / FPR_CEILING)
 	$(PYTHON) scripts/technique_analysis.py --gate --recall-floor $(RECALL_FLOOR) --fpr-ceiling $(FPR_CEILING)
 
+benchmark-facts:  ## Regenerate docs/benchmarks.yaml from the harness artifacts
+	$(PYTHON) scripts/extract_benchmarks.py
+
+benchmark-report:  ## Regenerate BENCHMARK_RESULTS.md from docs/benchmarks.yaml
+	$(PYTHON) scripts/benchmark_report.py
+
 build:  ## Build wheel and sdist
 	$(PYTHON) -m build
 	$(PYTHON) -m twine check dist/*

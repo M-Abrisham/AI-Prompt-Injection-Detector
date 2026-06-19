@@ -211,7 +211,13 @@ Layer 15 fetches public attack feeds (AIID, ATLAS, garak benchmark) into a local
 
 ## Benchmarks
 
-Not published. Reproducible numbers require a benchmark harness that emits `docs/benchmarks.yaml` keyed by dataset SHA + git SHA. Until that lands, this section stays empty — peer projects (LLM-Guard, Rebuff, garak, NeMo Guardrails) all omit benchmarks from their READMEs and we follow that norm.
+Measured on the locked holdout at the default threshold, regenerated from the recall harness into [`docs/benchmarks.yaml`](docs/benchmarks.yaml) and drift-checked in CI (`make benchmark-facts`):
+
+- Malicious recall: **57.1%** (194/340) <!-- benchmarks.yaml#headline -->
+- Benign false-positive rate: **1.2%** (6/500)
+- Evasion detection: **47.6%** (270/567)
+
+Recall and FPR are measured on independent pools, so no single F1 is reported. On the third-party deepset/prompt-injections set, recall is 32.0% at 92.9% precision — a stricter, narrower distribution. Per-category breakdown and reproduction: [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md).
 
 ---
 
