@@ -174,13 +174,23 @@ class TestLoadModels(unittest.TestCase):
     @patch("na0s.predict_embedding.SentenceTransformer")
     @patch("na0s.predict_embedding.safe_load")
     def test_load_models_uses_default_embedding_model(self, mock_safe_load, mock_st):
-        """load_models() should instantiate SentenceTransformer with DEFAULT_EMBEDDING_MODEL."""
+        """load_models() should instantiate SentenceTransformer with DEFAULT_EMBEDDING_MODEL.
+
+        Construction now routes through the shared pinned loader, so the model
+        name is passed positionally and the revision pin is threaded in as a
+        kwarg (deterministic snapshot across runs).
+        """
+        from na0s.ml._st_loader import DEFAULT_MODEL_REVISION
+
         mock_st.return_value = MagicMock()
         mock_safe_load.return_value = MagicMock()
 
         load_models()
 
-        mock_st.assert_called_once_with(DEFAULT_EMBEDDING_MODEL)
+        mock_st.assert_called_once()
+        args, kwargs = mock_st.call_args
+        assert args == (DEFAULT_EMBEDDING_MODEL,)
+        assert kwargs.get("revision") == DEFAULT_MODEL_REVISION
 
     @patch("na0s.predict_embedding.SentenceTransformer")
     @patch("na0s.predict_embedding.safe_load")

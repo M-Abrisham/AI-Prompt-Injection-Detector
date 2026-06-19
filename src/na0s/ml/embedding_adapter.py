@@ -56,6 +56,10 @@ try:
 except ImportError as exc:
     _st_import_error = str(exc)
 
+# Shared pinned loader: revision-pins all-MiniLM-L6-v2 (the default model) so
+# the encoder snapshot is deterministic across runs.
+from na0s.ml._st_loader import load_pinned_sentence_transformer
+
 
 # ---------------------------------------------------------------------------
 # EmbeddingAdapter — the trainable MLP head
@@ -317,7 +321,9 @@ class AdapterClassifier:
     def _ensure_encoder(self):
         """Lazy-load the sentence-transformer encoder."""
         if self._encoder is None:
-            self._encoder = SentenceTransformer(self._model_name)
+            self._encoder = load_pinned_sentence_transformer(
+                SentenceTransformer, self._model_name,
+            )
             # Determine embedding dimension from model
             self._input_dim = self._encoder.get_sentence_embedding_dimension()
 

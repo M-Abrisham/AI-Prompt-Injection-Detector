@@ -132,9 +132,23 @@ try:
     _HAS_EMBEDDING_CENTROID = True
 except ImportError:
     _HAS_EMBEDDING_CENTROID = False
-# Runtime kill-switch parity with predict.py: NA0S_EMBEDDING_ENABLED=0/false.
-if os.environ.get("NA0S_EMBEDDING_ENABLED", "").strip().lower() in ("0", "false"):
-    _HAS_EMBEDDING_CENTROID = False
+
+
+def _embedding_enabled():
+    """Whether the Layer 5 centroid classifier should feed the cascade.
+
+    Parity with predict._embedding_enabled(): combines the import-time
+    availability flag (``_HAS_EMBEDDING_CENTROID``) with a RUNTIME read of
+    ``NA0S_EMBEDDING_ENABLED`` so the kill-switch is honored even when flipped
+    AFTER this module is imported.  Disabled when the centroid is unavailable
+    OR the env is "0"/"false" (case-insensitive); the import-time default is
+    preserved when the env is unset.
+    """
+    if not _HAS_EMBEDDING_CENTROID:
+        return False
+    return os.environ.get(
+        "NA0S_EMBEDDING_ENABLED", "",
+    ).strip().lower() not in ("0", "false")
 
 # Layer 7: LLM checker — optional import
 try:
@@ -588,7 +602,7 @@ class WeightedClassifier:
         # is capped inside the classifier (NA0S_EMBEDDING_MAX_SCORE, default
         # 0.20) and the classifier degrades gracefully when embedding deps are
         # absent, so this never raises in the default (no-extra) install.
-        if _HAS_EMBEDDING_CENTROID:
+        if _embedding_enabled():
             try:
                 _emb_score, _emb_matches = _get_centroid_classifier().classify(text)
                 if _emb_score > 0.0:

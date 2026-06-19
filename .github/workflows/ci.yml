@@ -21,6 +21,11 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Deterministic embedding (g6): pin the HF cache dir so the warm step and
+    # the test run share one model copy, fetched once at the pinned revision.
+    env:
+      HF_HOME: ${{ github.workspace }}/.hf-cache
+      SENTENCE_TRANSFORMERS_HOME: ${{ github.workspace }}/.hf-cache
     strategy:
       fail-fast: false
       matrix:
@@ -43,10 +48,32 @@ jobs:
             ${{ runner.os }}-pip-${{ matrix.python-version }}-
             ${{ runner.os }}-pip-
 
+      - name: Cache HuggingFace embedding model
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.hf-cache
+          key: ${{ runner.os }}-hf-minilm-${{ hashFiles('src/na0s/ml/embedding_classifier.py') }}
+          restore-keys: |
+            ${{ runner.os }}-hf-minilm-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+
+      - name: Warm + verify embedding model (fail-fast)
+        run: |
+          # Fetch the pinned MiniLM revision ONCE into the HF cache and verify
+          # it actually serves. A model-load failure reds THIS setup step
+          # instead of randomly failing detection tests mid-suite (g6 — the
+          # runtime-flaky root fix). The loader (g1/g3) pins the revision and
+          # cascades to a deterministic fallback, so `available` is the signal.
+          python - <<'PY'
+          from na0s.ml.embedding_classifier import get_embedding_classifier
+          clf = get_embedding_classifier()
+          assert clf.available, "embedding model failed to load; failing setup"
+          print("embedding warm OK:", type(clf).__name__)
+          PY
 
       - name: Lint with flake8
         run: |

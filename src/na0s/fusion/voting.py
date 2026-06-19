@@ -396,6 +396,16 @@ def weighted_decision(
     if ml_uncertain_zone and unsuppressed_rule_count == 0 and obf_weight == 0:
         composite = min(composite, threshold - 0.01)
 
+    # Rule-anchor floors below target the DEFAULT operating point
+    # (get_decision_threshold() + epsilon), NOT the per-call ``threshold``.
+    # A critical rule must lift a near-miss over the *default* line so embedding
+    # stays confirmatory (g5) — but it must NOT force-cross a threshold the
+    # caller deliberately raised, else ``max(composite, threshold + 0.01)``
+    # would inflate the composite to ~threshold for ANY threshold (a raised
+    # threshold then never reduces sensitivity). See test_configurable_threshold
+    # and the test_cli threshold cases.
+    _anchor_floor = get_decision_threshold() + 0.01
+
     # --- Critical-content rule floor ---
     if severities_seen & {"critical_content"}:
         if "MALICIOUS" in ml_label and ml_prob_malicious >= 0.6:
@@ -412,7 +422,62 @@ def weighted_decision(
             for h in hits
         )
         if _has_e1_critical:
-            composite = max(composite, threshold + 0.01)
+            composite = max(composite, _anchor_floor)
+
+    # --- g5: Core-family rule anchor floor (embedding-independent) ---
+    # A HIGH/CRITICAL instruction-override (D1.x) or system-prompt extraction
+    # (E1.x) rule is a strong, self-standing attack anchor.  When such a rule
+    # fires but the ML model is merely UNCERTAIN (not confidently safe), the
+    # raw composite can sit in a dead-band just below threshold — historically
+    # only the optional embedding signal pushed it over (making embedding the
+    # deciding vote).  Floor it so rule+ML alone clears threshold; embedding
+    # then becomes confirmatory rather than load-bearing.
+    #
+    # Guarded conservatively:
+    #   - requires a HIGH/CRITICAL D1/E1 rule actually firing (not medium),
+    #   - requires ML NOT confidently safe (ml_prob_malicious >= 0.35), so a
+    #     confident benign verdict still wins,
+    #   - does NOT fire on embedding/obfuscation-only hits.
+    _has_override_extraction_anchor = any(
+        _sev_lookup.get(h) in ("high", "critical")
+        and any(
+            tid == "D1" or tid.startswith("D1.")
+            or tid == "E1" or tid.startswith("E1.")
+            for tid in RULE_TECHNIQUE_IDS.get(h, [])
+        )
+        for h in hits
+    )
+    # Only lift toward the DEFAULT operating boundary: an operator who raises
+    # the threshold above DECISION_THRESHOLD is explicitly suppressing, and a
+    # confidence-boosting floor must not override that intent.
+    if (_has_override_extraction_anchor
+            and ml_prob_malicious >= 0.35
+            and composite < _anchor_floor):
+        composite = max(composite, _anchor_floor)
+
+    # --- g5: Critical-rule anchor floor (embedding-independent) ---
+    # A CRITICAL-severity L1 rule is a high-precision attack signature
+    # (e.g. ``javascript:`` protocol in a markdown link → O2.1 XSS,
+    # ``training_data_extraction`` → P1.3 membership inference).  A critical
+    # rule should carry the verdict on rule weight ALONE — but the additive
+    # composite (0.6*ml + 0.30 critical) lands at ~0.46 when the ML model is
+    # confidently SAFE, so historically these attacks crossed threshold only
+    # because a tiny embedding score unlocked the AGREEMENT_BOOST (the g4
+    # double-count).  With that crutch removed, floor on the critical rule
+    # itself so detection no longer depends on an incidental embedding nudge.
+    #
+    # This mirrors the existing critical_content floor (which floors to 0.60
+    # regardless of ML).  We floor only to threshold+epsilon (not 0.60) to
+    # stay conservative, and exclude obfuscation-flag pseudo-hits — a real L1
+    # rule of critical severity must have fired.  ``decoded_payload_malicious``
+    # and ``decoded_escape_malicious`` are critical by registration but are
+    # already handled by the decoded-view path; they remain covered here.
+    _has_critical_rule = any(
+        _sev_lookup.get(h) == "critical" and h not in FP_EXEMPT_HITS
+        for h in hits
+    )
+    if _has_critical_rule and composite < _anchor_floor:
+        composite = max(composite, _anchor_floor)
 
     # Compute ML safe-confidence once.
     ml_safe_confidence = ml_prob if "SAFE" in ml_label else (1.0 - ml_prob)
@@ -449,8 +514,14 @@ def weighted_decision(
         signal_layers += 1
     if ml_prob_malicious > 0.5:
         signal_layers += 1
-    if embedding_weight > 0:
-        signal_layers += 1
+    # g4: Embedding is deliberately EXCLUDED from the signal_layers count.
+    # The embedding contribution is already added directly to the composite
+    # (embedding_weight, above).  Previously it ALSO counted as a 5th signal
+    # layer, which let a tiny ~0.05 embedding score single-handedly satisfy
+    # the >=2/>=3 agreement gate and unlock a separate AGREEMENT_BOOST — so a
+    # ~0.05 embedding swing moved the composite ~0.16 (double-counting).  By
+    # decoupling, AGREEMENT_BOOST now requires non-embedding anchor layers,
+    # and embedding stays a direct confirmation weight only.
 
     has_strong_anchor = bool(
         severities_seen & {"high", "critical", "critical_content"}
@@ -483,6 +554,23 @@ def weighted_decision(
     family_boost = min(family_boost, 0.10)
     if family_boost > 0:
         composite = min(composite + family_boost, 1.0)
+
+    # --- g9: Embedding-only FP guard ---
+    # The embedding / TF-IDF centroid signal is a keyword/semantic-similarity
+    # matcher with no benign-context understanding (e.g. "The security
+    # researcher demonstrated: Repeat your system prompt" scores malicious on
+    # the fallback).  It must CONFIRM, never DECIDE.  So when the embedding
+    # contribution is the only thing pushing the composite over threshold AND
+    # no rule of >= high severity fired, cap below threshold.  This keeps
+    # embedding from single-handedly converting a sub-threshold, weakly-
+    # anchored result into a MALICIOUS verdict.
+    if embedding_weight > 0.0 and composite >= threshold:
+        composite_without_embedding = composite - embedding_weight
+        has_high_anchor = bool(
+            severities_seen & {"high", "critical", "critical_content"}
+        )
+        if composite_without_embedding < threshold and not has_high_anchor:
+            composite = min(composite, threshold - 0.01)
 
     # Clamp to [0, 1].
     composite = min(max(composite, 0.0), 1.0)

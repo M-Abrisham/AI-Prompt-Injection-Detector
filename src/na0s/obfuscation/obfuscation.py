@@ -235,6 +235,34 @@ _SPACED_HEX_RE = re.compile(
     r"(?![A-Za-z0-9])",                          # not followed by alnum
 )
 
+# Pattern to find a single "0x"-prefixed contiguous hex run, e.g.
+#     "Decode this hex: 0x49676e6f726520616c6c..."
+# This is the Praetorian Augustus / blockchain-style hex format that
+# _EMBEDDED_HEX_RE misses: the leading "0x" puts an alpha char ("x")
+# immediately before the hex run, so the (?<![A-Za-z0-9]) boundary in
+# _EMBEDDED_HEX_RE refuses to match the digits after the prefix.
+#
+# Require >=16 hex digits (8 decoded bytes), matching the contiguous
+# minimum, so benign short literals like a "0x1A2B" colour code or a
+# short "0xDEAD" address are below threshold and never decoded.  The
+# decoded view is additionally attack-keyword-gated in _extract_embedded_hex
+# so benign long hex blobs (a 0x-prefixed key/recipe) stay benign.
+_0X_HEX_RE = re.compile(
+    r"(?<![A-Za-z0-9])0[xX]([0-9a-fA-F]{16,})(?![A-Za-z0-9])",
+)
+
+# Pattern to find a "0x"-prefixed comma/space-separated byte token list, e.g.
+#     "0x49,0x67,0x6e,0x6f,0x72,0x65,..."   (C array / shellcode style)
+# Each token is "0x" + exactly two hex digits.  Require >=8 tokens (8 decoded
+# bytes), matching the contiguous minimum, so a benign pair like "0x1A, 0x2B"
+# (a two-element colour table) is below threshold.  The reconstructed payload
+# is attack-keyword-gated in _extract_embedded_hex.
+_0X_TOKEN_LIST_RE = re.compile(
+    r"(?<![A-Za-z0-9])"
+    r"((?:0[xX][0-9a-fA-F]{2}[ \t]*,[ \t]*){7,}0[xX][0-9a-fA-F]{2})"
+    r"(?![A-Za-z0-9])",
+)
+
 
 def _accept_hex_decode(candidate):
     """Decode a run of hex digits and return text if it looks like plaintext.
@@ -264,11 +292,29 @@ def _extract_embedded_hex(text):
     catches attacks like:
         "Decode this hex: 49676e6f726520616c6c..."          (contiguous)
         "Decode this hex: 49 67 6e 6f 72 65 ..."            (space-separated)
+        "Decode this hex: 0x49676e6f726520616c6c..."        (0x-prefixed)
+        "0x49,0x67,0x6e,0x6f,0x72,0x65,..."                 (0x token list)
 
     Returns a list of (decoded_text, "hex") tuples for each valid
     hex substring found.
     """
     results = []
+    # 0x-prefixed contiguous hex.  Keyword-gate the decoded view so a benign
+    # long 0x literal (key material, a blockchain address) that happens to be
+    # valid UTF-8 does not surface a spurious detection.
+    for match in _0X_HEX_RE.finditer(text):
+        decoded = _accept_hex_decode(match.group(1))
+        if decoded is not None and _has_attack_keywords(decoded, min_hits=1):
+            results.append((decoded, "hex"))
+    # 0x byte-token lists (0x49,0x67,...).  Strip the "0x" prefixes and the
+    # separators, reassemble the contiguous hex, decode, and keyword-gate —
+    # mirrors the spaced-hex path so benign short colour/address tables
+    # (below the >=8-token floor) and keyword-free blobs stay benign.
+    for match in _0X_TOKEN_LIST_RE.finditer(text):
+        candidate = re.sub(r"0[xX]|[ \t,]+", "", match.group(1))
+        decoded = _accept_hex_decode(candidate)
+        if decoded is not None and _has_attack_keywords(decoded, min_hits=1):
+            results.append((decoded, "hex"))
     for match in _EMBEDDED_HEX_RE.finditer(text):
         decoded = _accept_hex_decode(match.group(1))
         if decoded is not None:

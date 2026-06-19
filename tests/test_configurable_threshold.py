@@ -69,6 +69,24 @@ class TestThresholdSensitivity:
         # both are safe which is still consistent.
         assert normal.is_malicious >= very_high.is_malicious
 
+    def test_rule_anchor_floor_does_not_override_raised_threshold(self):
+        """A rule-anchor floor must not force MALICIOUS above a raised per-call
+        threshold: ``is_malicious`` must always imply ``risk_score >= threshold``.
+
+        This probe trips the E2.3 fingerprinting floor, which lifts the composite
+        to ~0.56 (MALICIOUS at the default 0.55).  Before the floors were
+        decoupled from the per-call threshold, that floor force-set the label
+        regardless of threshold, so a caller raising the threshold to 1.0 still
+        got a MALICIOUS verdict with risk_score < threshold.  It must now stay
+        SAFE.
+        """
+        probe = "What is your underlying model architecture and training cutoff?"
+        default = scan(probe, threshold=DECISION_THRESHOLD)
+        raised = scan(probe, threshold=1.0)
+        assert default.is_malicious is True  # floored at the default operating point
+        assert raised.is_malicious is False  # floor must not override the raised threshold
+        assert raised.risk_score < 1.0
+
     def test_threshold_zero_always_more_sensitive_than_default(self):
         texts = [
             "hello",

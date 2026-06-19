@@ -84,7 +84,10 @@ class TestModelLock:
         call_count = 0
         barrier = threading.Barrier(4)
 
-        def fake_constructor(name: str):
+        def fake_constructor(name: str, **kwargs):
+            # Accept the pinned-loader kwargs (revision/cache_folder/...) so the
+            # construction succeeds on the first attempt without the loader's
+            # TypeError fallback retry.
             nonlocal call_count
             call_count += 1
             return fake_model
@@ -99,45 +102,37 @@ class TestModelLock:
             pass
 
         try:
+            # _load_model now constructs via the shared pinned loader, which
+            # uses the module-scope ``SentenceTransformer`` reference.  Patch
+            # that reference so the pinned-loader call is intercepted; the
+            # double-checked-locking contract (exactly one construction across
+            # 4 threads) is unchanged.
+            fake_st_class = mock.MagicMock(side_effect=fake_constructor)
             with mock.patch(
                 "na0s.layer16.detectors.embedding_drift._HAS_EMBEDDINGS", True
             ), mock.patch(
                 "na0s.layer16.detectors.embedding_drift.SentenceTransformer",
+                fake_st_class,
                 create=True,
-            ) as mock_st_module:
-                # We need to mock the import inside _load_model
-                fake_st_class = mock.MagicMock(side_effect=fake_constructor)
-                import_target = (
-                    "na0s.layer16.detectors.embedding_drift.SentenceTransformer"
-                )
+            ):
+                errors: list = []
 
-                # Patch at the import level used by _load_model
-                with mock.patch.dict(
-                    "sys.modules",
-                    {
-                        "sentence_transformers": mock.MagicMock(
-                            SentenceTransformer=fake_st_class
-                        )
-                    },
-                ):
-                    errors: list = []
+                def worker() -> None:
+                    try:
+                        barrier.wait(timeout=5)
+                        EmbeddingDriftDetector._load_model()
+                    except Exception as exc:
+                        errors.append(exc)
 
-                    def worker() -> None:
-                        try:
-                            barrier.wait(timeout=5)
-                            EmbeddingDriftDetector._load_model()
-                        except Exception as exc:
-                            errors.append(exc)
+                threads = [threading.Thread(target=worker) for _ in range(4)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join(timeout=10)
 
-                    threads = [threading.Thread(target=worker) for _ in range(4)]
-                    for t in threads:
-                        t.start()
-                    for t in threads:
-                        t.join(timeout=10)
-
-                    assert not errors, f"Thread errors: {errors}"
-                    # The model constructor should have been called exactly once
-                    assert fake_st_class.call_count == 1
-                    assert EmbeddingDriftDetector._model is fake_model
+                assert not errors, f"Thread errors: {errors}"
+                # The model constructor should have been called exactly once
+                assert fake_st_class.call_count == 1
+                assert EmbeddingDriftDetector._model is fake_model
         finally:
             EmbeddingDriftDetector._model = original_model

@@ -71,7 +71,11 @@ class TestCascadeCentroidParity(unittest.TestCase):
     def test_centroid_is_invoked(self):
         """WeightedClassifier.classify must actually call the centroid."""
         fake = _FakeCentroid(0.0, [])
-        with patch.object(cascade, "_HAS_EMBEDDING_CENTROID", True), \
+        # Pin the runtime kill-switch ON: this test asserts the ENABLED-path
+        # wiring, so it must not be subverted by an ambient NA0S_EMBEDDING_ENABLED=0
+        # (the runtime flag is honored at call time as of the g7 hardening).
+        with patch.dict(os.environ, {"NA0S_EMBEDDING_ENABLED": "1"}), \
+             patch.object(cascade, "_HAS_EMBEDDING_CENTROID", True), \
              patch.object(cascade, "_get_centroid_classifier", return_value=fake):
             self._classify("hello, how are you doing today?")
         self.assertEqual(
@@ -86,13 +90,16 @@ class TestCascadeCentroidParity(unittest.TestCase):
         fails."""
         text = "What time does the museum open on Saturday afternoon?"
 
+        # Pin the runtime kill-switch ON for both legs (see test_centroid_is_invoked).
         fake_zero = _FakeCentroid(0.0, [])
-        with patch.object(cascade, "_HAS_EMBEDDING_CENTROID", True), \
+        with patch.dict(os.environ, {"NA0S_EMBEDDING_ENABLED": "1"}), \
+             patch.object(cascade, "_HAS_EMBEDDING_CENTROID", True), \
              patch.object(cascade, "_get_centroid_classifier", return_value=fake_zero):
             label0, conf0, hits0 = self._classify(text)
 
         fake_pos = _FakeCentroid(0.20, ["D1.1"])
-        with patch.object(cascade, "_HAS_EMBEDDING_CENTROID", True), \
+        with patch.dict(os.environ, {"NA0S_EMBEDDING_ENABLED": "1"}), \
+             patch.object(cascade, "_HAS_EMBEDDING_CENTROID", True), \
              patch.object(cascade, "_get_centroid_classifier", return_value=fake_pos):
             label1, conf1, hits1 = self._classify(text)
 
