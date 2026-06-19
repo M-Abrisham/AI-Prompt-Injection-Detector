@@ -44,7 +44,7 @@ packaging==26.0
 pandas==2.3.3
 pluggy==1.6.0
 pycodestyle==2.14.0
-pycparser==2.23
+pycparser==3.0
 pycryptodome==3.23.0
 pydantic==2.12.5
 pydantic_core==2.41.5
