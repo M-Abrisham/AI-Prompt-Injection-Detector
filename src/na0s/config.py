@@ -26,6 +26,17 @@ OPENCLAW_TIMEOUT: int = int(os.getenv("OPENCLAW_TIMEOUT", 30))
 APPROVALS_BRANCH: str = os.getenv("NA0S_APPROVALS_BRANCH", "agent-approvals")
 APPROVALS_REMOTE: str = os.getenv("NA0S_APPROVALS_REMOTE", "origin")
 
+# -- Agent approval sender allowlist (defense-in-depth) --
+# Comma-separated iMessage handles (phones/emails) permitted to authorize a
+# deploy. SECONDARY to the per-request nonce — the sender is spoofable, so it
+# never bypasses the nonce; it only adds a fail-closed gate in front of it.
+# Empty (the default) disables the gate, preserving today's behavior.
+NA0S_AGENT_APPROVAL_ALLOWED_SENDERS: tuple[str, ...] = tuple(
+    s.strip()
+    for s in os.getenv("NA0S_AGENT_APPROVAL_ALLOWED_SENDERS", "").split(",")
+    if s.strip()
+)
+
 
 @dataclass(frozen=True)
 class ThresholdConfig:

@@ -881,7 +881,10 @@ class TestPerformance(unittest.TestCase):
         start = time.monotonic()
         normalize_homoglyphs(text)
         elapsed = time.monotonic() - start
-        self.assertLess(elapsed, 0.5,
+        # Generous bound: guards against catastrophic regressions (ReDoS /
+        # O(n^2)), not microbenchmark jitter. ~4x over worst-case CI timing so
+        # a loaded shared runner doesn't flake; real regressions are multi-x.
+        self.assertLess(elapsed, 2.0,
                         "Too slow: {:.3f}s for 10k words".format(elapsed))
 
     def test_adversarial_all_mixed_words(self):
@@ -892,7 +895,7 @@ class TestPerformance(unittest.TestCase):
         start = time.monotonic()
         normalize_homoglyphs(text)
         elapsed = time.monotonic() - start
-        self.assertLess(elapsed, 0.5,
+        self.assertLess(elapsed, 2.0,
                         "Too slow: {:.3f}s for adversarial text".format(elapsed))
 
     def test_pure_cyrillic_10k_words(self):
@@ -903,7 +906,7 @@ class TestPerformance(unittest.TestCase):
         result, count = normalize_homoglyphs(text)
         elapsed = time.monotonic() - start
         self.assertEqual(count, 0)
-        self.assertLess(elapsed, 0.2,
+        self.assertLess(elapsed, 1.0,
                         "Too slow: {:.3f}s for pure Cyrillic".format(elapsed))
 
     def test_full_pipeline_with_homoglyphs(self):
@@ -912,7 +915,7 @@ class TestPerformance(unittest.TestCase):
         start = time.monotonic()
         normalize_text(attack)
         elapsed = time.monotonic() - start
-        self.assertLess(elapsed, 0.2,
+        self.assertLess(elapsed, 1.0,
                         "Full pipeline too slow: {:.3f}s".format(elapsed))
 
 

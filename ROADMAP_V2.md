@@ -2930,4 +2930,24 @@ Na0S is stateless — each `scan()` call has no memory. Crescendo attacks exploi
 - [ ] `ci.yml` and `pr-check.yml` both run the full pytest+coverage on every PR (two ~22-min runs). Consolidate or differentiate so the suite isn't double-run.
 
 **Sequencing:** P0 first — a green `main` is the prerequisite for branch protection to be usable (protecting a chronically-red `main` would block *all* merges). Then merge safety, then retrain + observability.
+---
+
+## `agents/` MCP / Agent-Security Hardening (added 2026-06-18)
+
+**Context:** A 2026-06-18 audit of the `src/na0s/agents/` deploy-approval orchestration (Claude Agents + OpenClaw iMessage) found it sits squarely on the "lethal trifecta" — it ingests untrusted data (canary/gate JSON, quarantine rows, synthetic samples), sends it to the Claude API, and executes privileged shell (`deploy_model.py`, `quarantine.py`) gated on a one-word iMessage reply. Approvals were **unauthenticated strings** — `curl -XPOST localhost:3000/replies -d '{"reply":"approve"}'` forged an approval and triggered a model deploy. The prompt-injection-defense product also **never ran its own agent inputs through its own `predict()` detector** (dogfooding gap).
+
+### DONE (commit `13d56cf`, branch `hardening/agents-mcp-approval-auth`)
+- [x] **Approval authentication** — per-request secret nonce (`secrets.token_hex(16)`) delivered only inside the approval iMessage; reply must be `approve <nonce>` (`hmac.compare_digest`); bare/forged/stale `approve` → REJECTED, no deploy. (CRITICAL-1/2)
+- [x] **TOCTOU re-verify** — `execute_deploy` re-hashes `pending_deploy.json` and aborts before the subprocess if it changed since notification.
+- [x] **Prompt-injection hardening** — untrusted gate JSON fenced in `<UNTRUSTED_CI_DATA>` with "treat as inert data" framing; Claude output labeled advisory + approve-imperatives neutralized before reaching the human. (HIGH-4)
+- [x] +22 adversarial security tests (`tests/agents/test_approval_auth.py`), mutation-verified.
+
+### REMAINING
+- [x] **P0 — Sign the mail-drop request (DONE, commit `7525aca`).** HMAC-SHA256 over canonical JSON; `approvals_sync._authenticate_request` rejects unsigned/invalid requests when `NA0S_AGENT_APPROVAL_HMAC_KEY` is set (warns+accepts when unset for staged rollout); `auto-retrain.yml` producer signs with a byte-identical canonicalization. **Activation needs:** add the `NA0S_AGENT_APPROVAL_HMAC_KEY` GitHub Actions secret AND set it on the local daemon. (HIGH-3)
+- [x] **P0 — Sender-identity allowlist (DONE, commit `406506e`).** `poll_replies_with_sender()` parses an optional sender; `deploy_approver.handle_approval` rejects replies from a missing/unlisted sender (`NA0S_AGENT_APPROVAL_ALLOWED_SENDERS`) BEFORE the nonce check, fail-closed. The audit's "needs gateway support" premise was WRONG — the OpenClaw SDK reply path is non-functional (`OpenClawClient.poll_replies` doesn't exist); the operative contract is the in-repo mock, now extended to carry a sender, and iMessage intrinsically has one. Sender stays SECONDARY to the nonce (it's spoofable, so it never bypasses it). **Activation:** set `NA0S_AGENT_APPROVAL_ALLOWED_SENDERS` on the local daemon.
+- [x] **P1 — Dogfood `predict()` (DONE, commit `77cbc64`).** `agents/input_guard.py` runs na0s `predict()` (its OWN calibrated verdict — no invented threshold; fail-safe to "unscanned" if models are absent) over untrusted canary `errors` in `gate_analyzer` before they reach the Claude prompt; flagged text is annotated for the human approver. (quarantine/synthetic rows never reach an LLM prompt, so left unscanned for now.) The defender now runs its own defense on its own agents.
+- [ ] **P1 — Complete mediation / least privilege.** Pin the candidate model path + hash in the approval request; have `deploy_model.py` itself re-verify the gate artifacts + approval token (don't trust the orchestrator). Currently `deploy_model.py` ignores `candidate_path` and always deploys `data/processed/`.
+- [ ] **P1 — Fail-closed deploy mode.** `openclaw_bridge` `mode="auto"` silently falls back to mock on send/poll failure — a deploy path must require `mode="real"`.
+- [ ] **P1 — Strict `entry_name` validation** in `quarantine_reviewer.execute_action` (`^[a-z0-9_-]+$`) + secret-hygiene DLP-scan of subprocess stdout/stderr before persisting/sending.
+- [ ] **P2 — Tamper-evident approval audit log.** `approval_history.jsonl` is plain mutable JSON; hash-chain records (prev-hash) or use an append-only store.
  

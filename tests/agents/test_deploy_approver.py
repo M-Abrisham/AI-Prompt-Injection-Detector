@@ -268,7 +268,11 @@ def test_deploy_approver_update_status_with_execution(temp_data_dir):
 
 
 def test_deploy_approver_handle_approval_approve(temp_data_dir):
-    """Test handling approval response with successful deployment."""
+    """Test handling approval response with successful deployment.
+
+    Updated for the nonce-authenticated flow: a valid `approve <nonce>` reply
+    is required (a bare "approve" is now correctly rejected).
+    """
     data_dir = Path(temp_data_dir)
 
     deployment = {
@@ -279,6 +283,7 @@ def test_deploy_approver_handle_approval_approve(temp_data_dir):
         json.dump(deployment, f)
 
     approver = DeployApprover(data_dir=temp_data_dir)
+    nonce = "a" * 32
 
     with patch.object(approver, "execute_deploy") as mock_deploy:
         mock_deploy.return_value = (
@@ -292,7 +297,9 @@ def test_deploy_approver_handle_approval_approve(temp_data_dir):
             },
         )
 
-        success, message = approver.handle_approval("approve")
+        success, message = approver.handle_approval(
+            f"approve {nonce}", expected_nonce=nonce
+        )
 
         assert success is True
         assert "deployed successfully" in message.lower()
@@ -335,6 +342,7 @@ def test_deploy_approver_handle_approval_deploy_failure(temp_data_dir):
         json.dump(deployment, f)
 
     approver = DeployApprover(data_dir=temp_data_dir)
+    nonce = "b" * 32
 
     with patch.object(approver, "execute_deploy") as mock_deploy:
         mock_deploy.return_value = (
@@ -349,7 +357,9 @@ def test_deploy_approver_handle_approval_deploy_failure(temp_data_dir):
             },
         )
 
-        success, message = approver.handle_approval("approve")
+        success, message = approver.handle_approval(
+            f"approve {nonce}", expected_nonce=nonce
+        )
 
         assert success is False
         assert "failed" in message.lower()

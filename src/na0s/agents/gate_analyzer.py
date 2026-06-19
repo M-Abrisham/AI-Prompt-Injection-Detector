@@ -7,13 +7,43 @@ for intelligent root cause analysis and fix recommendations.
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 from na0s.agents.claude_gate_analyzer import ClaudeGateAnalyzer, GateCacheManager
+from na0s.agents.input_guard import scan_untrusted
 
 logger = logging.getLogger(__name__)
+
+# Free-text fields inside a canary ``error`` record that originate from the
+# (adversarial) sample text and are therefore untrusted. These are the strings
+# Na0S dogfoods its own detector on before they reach the Claude prompt.
+_UNTRUSTED_ERROR_FIELDS = ("text_preview", "text", "prompt", "technique", "note")
+
+# Imperative approve/deploy-like tokens that, if echoed by the model into the
+# iMessage, could be misread by the human as an authorization. The Claude
+# analysis is advisory only; these are defanged so model output can never look
+# like an approval instruction. The deploy itself is gated by the nonce
+# challenge regardless, but the human-facing text must not suggest "approve".
+_APPROVE_LIKE_RE = re.compile(
+    r"\b(approve|approved|authorize|authorized|deploy now|ship it|lgtm|"
+    r"go ahead|proceed)\b",
+    re.IGNORECASE,
+)
+
+
+def _neutralize_advisory(text: Any) -> str:
+    """Defang approve-like imperatives in untrusted AI analysis text.
+
+    Claude's ``root_cause``/``fix_specificity`` is model output and must not be
+    able to inject an approval suggestion into the human's iMessage. Approve-like
+    tokens are replaced with a bracketed, inert marker.
+    """
+    if not text:
+        return ""
+    return _APPROVE_LIKE_RE.sub(lambda m: f"[{m.group(0)}]", str(text))
 
 
 class GateAnalyzer:
@@ -202,6 +232,40 @@ class GateAnalyzer:
 
         return self.claude_analyzer.analyze_gate(gate_type, failure_data)
 
+    @staticmethod
+    def _guard_canary_errors(errors: List[Any]) -> List[Dict[str, Any]]:
+        """Dogfood Na0S's detector on canary error free-text before Claude sees it.
+
+        Each canary ``error`` record carries free-text fields derived from the
+        (adversarial-by-design) sample. Before that text is serialized into the
+        Claude analysis prompt, run it through Na0S's own ``predict()``; when the
+        detector flags it, replace the field with the annotated ``safe_text`` so
+        the verdict travels with the data into the prompt (behind the existing
+        ``<UNTRUSTED_CI_DATA>`` fence). Returns a list of flagged-input summaries
+        for the failure report. Fail-safe: never raises.
+        """
+        flagged_inputs: List[Dict[str, Any]] = []
+        for error in errors:
+            if not isinstance(error, dict):
+                continue
+            for field_name in _UNTRUSTED_ERROR_FIELDS:
+                value = error.get(field_name)
+                if not isinstance(value, str) or not value.strip():
+                    continue
+                guard = scan_untrusted(value, source=f"canary_error.{field_name}")
+                if guard.flagged:
+                    # Replace in place so the annotation reaches the prompt.
+                    error[field_name] = guard.safe_text
+                    flagged_inputs.append(
+                        {
+                            "field": field_name,
+                            "label": guard.label,
+                            "risk_score": round(guard.risk_score, 4),
+                            "technique_ids": guard.technique_ids,
+                        }
+                    )
+        return flagged_inputs
+
     def diagnose_failures(self) -> Dict[str, Any]:
         """Run all gate checks and compile failure report.
 
@@ -216,7 +280,21 @@ class GateAnalyzer:
             "shadow": self.check_shadow(),
             "f14": self.check_f14(),
             "claude_analysis": {},
+            "flagged_inputs": {},
         }
+
+        # Dogfood our own injection detector on the untrusted canary error text
+        # BEFORE it is handed to the Claude analyzer. Flagged strings are
+        # replaced in place with an annotated safe_text and summarized here.
+        if results["canary"] and results["canary"].get("errors"):
+            flagged = self._guard_canary_errors(results["canary"]["errors"])
+            if flagged:
+                results["flagged_inputs"]["canary"] = flagged
+                logger.warning(
+                    "na0s dogfood flagged %d untrusted canary error field(s) "
+                    "as likely injection before Claude analysis",
+                    len(flagged),
+                )
 
         # Determine which gate(s) failed
         failed_gates = []
@@ -303,10 +381,35 @@ class GateAnalyzer:
             logger.error(f"Error writing report: {e}")
             return None
 
+    @staticmethod
+    def _append_advisory(
+        lines: List[str], results: Dict[str, Any], gate_type: str
+    ) -> None:
+        """Append Claude's analysis for a gate, labeled advisory and neutralized.
+
+        The analysis is model output: it is clearly marked as advisory (never an
+        authorization) and any approve-like imperative is defanged so it cannot
+        be misread by the human as an approval suggestion.
+        """
+        analysis = results.get("claude_analysis", {}).get(gate_type)
+        if not analysis:
+            return
+        root_cause = analysis.get("root_cause")
+        fix = analysis.get("fix_specificity")
+        if not (root_cause or fix):
+            return
+        lines.append("  AI analysis (advisory — NOT an authorization):")
+        if root_cause:
+            lines.append(f"    Root Cause: {_neutralize_advisory(root_cause)}")
+        if fix:
+            lines.append(f"    Fix: {_neutralize_advisory(fix)}")
+
     def format_message(self) -> str:
         """Format gate analysis results for iMessage.
 
         Includes Claude's root cause analysis and fix specificity when available.
+        Claude's analysis is surfaced as advisory only and approve-like tokens in
+        it are neutralized — it can never read as a deploy authorization.
 
         Returns:
             Human-readable message for user approval or retry decision
@@ -320,23 +423,13 @@ class GateAnalyzer:
                 for err in results["canary"]["errors"]:
                     technique = err.get("technique", "?")
                     lines.append(f"  • {technique}: misclassified")
-                # Include Claude analysis if available
-                if "canary" in results.get("claude_analysis", {}):
-                    analysis = results["claude_analysis"]["canary"]
-                    if analysis.get("root_cause"):
-                        lines.append(f"  Root Cause: {analysis['root_cause']}")
-                    if analysis.get("fix_specificity"):
-                        lines.append(f"  Fix: {analysis['fix_specificity']}")
+                # Include Claude analysis (advisory — NOT an authorization)
+                self._append_advisory(lines, results, "canary")
 
         if results["shadow"]:
             lines.append(f"Shadow: {results['shadow']['verdict']}")
-            # Include Claude analysis if available
-            if "shadow" in results.get("claude_analysis", {}):
-                analysis = results["claude_analysis"]["shadow"]
-                if analysis.get("root_cause"):
-                    lines.append(f"  Root Cause: {analysis['root_cause']}")
-                if analysis.get("fix_specificity"):
-                    lines.append(f"  Fix: {analysis['fix_specificity']}")
+            # Include Claude analysis (advisory — NOT an authorization)
+            self._append_advisory(lines, results, "shadow")
 
         if results["f14"]:
             lines.append(f"F14: {results['f14']['verdict']}")
@@ -344,13 +437,8 @@ class GateAnalyzer:
                 cat = reg.get("category", "?")
                 delta = reg.get("delta", 0)
                 lines.append(f"  • {cat}: TPR {delta:+.1%}")
-            # Include Claude analysis if available
-            if "f14" in results.get("claude_analysis", {}):
-                analysis = results["claude_analysis"]["f14"]
-                if analysis.get("root_cause"):
-                    lines.append(f"  Root Cause: {analysis['root_cause']}")
-                if analysis.get("fix_specificity"):
-                    lines.append(f"  Fix: {analysis['fix_specificity']}")
+            # Include Claude analysis (advisory — NOT an authorization)
+            self._append_advisory(lines, results, "f14")
 
         if results["overall_verdict"] == "ALL_PASSED":
             return "✅ All gates passed. Ready for deployment approval."
