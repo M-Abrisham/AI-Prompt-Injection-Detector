@@ -168,6 +168,20 @@ try:
 except ImportError:
     _HAS_RAG_POSITION = False
 
+# Inter-model propagation detector (IM category / INJ-0017) — optional import.
+# Detects fabricated cross-model authority: a prompt claiming some other
+# model / agent / judge / vote / middleware / checkpoint already approved or
+# authorized the request so the receiving model "should" comply.
+try:
+    from .detectors.inter_model import (
+        detect_inter_model as _detect_inter_model,
+        get_inter_model_weight as _get_inter_model_weight,
+        STRONG_MATCH_THRESHOLD as _INTER_MODEL_STRONG_THRESHOLD,
+    )
+    _HAS_INTER_MODEL = True
+except ImportError:
+    _HAS_INTER_MODEL = False
+
 # MCP tool shadowing detector (T1) — optional import
 try:
     from .mcp_tool_detector import (
@@ -1108,6 +1122,40 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     if rag_poison_weight > 0.0:
         composite = min(composite + rag_poison_weight, 1.0)
         if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
+
+    # --- Inter-model propagation detection (IM category / INJ-0017) ---
+    # The eight hardest IM techniques read as benign collaboration to a lexical
+    # classifier (fabricated judge/consensus/upstream/middleware approval), so
+    # they score ~0 on every other layer.  A bounded weight reaches the
+    # composite, and a STRONG (>=0.85) precision-anchored match — FP-verified at
+    # 0% on the probe's 55 benign and the 500-line safe_holdout — escalates the
+    # label directly so these otherwise-invisible attacks are caught.
+    inter_model_weight = 0.0
+    inter_model_strong = False
+    if _HAS_INTER_MODEL:
+        try:
+            im_result = _detect_inter_model(clean)
+            if im_result.risk_score > 0.0:
+                inter_model_weight = _get_inter_model_weight(im_result)
+                inter_model_strong = (
+                    im_result.risk_score >= _INTER_MODEL_STRONG_THRESHOLD
+                )
+                _sev = "high" if inter_model_strong else "medium"
+                for indicator in im_result.risk_indicators:
+                    hit_name = "inter_model:" + indicator
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        _local_severities[hit_name] = _sev
+        except Exception:
+            logger.debug("Inter-model propagation detection failed", exc_info=True)
+
+    if inter_model_weight > 0.0:
+        composite = min(composite + inter_model_weight, 1.0)
+        if (composite >= threshold or inter_model_strong) and label in (
+            "SAFE", "safe", "benign",
+        ):
             label = "MALICIOUS"
 
     # --- Position-weighted RAG context scan (D8.3/D8.4) ---

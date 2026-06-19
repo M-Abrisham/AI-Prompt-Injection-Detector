@@ -1,7 +1,16 @@
 # INJ-0017 — Inter-Model Propagation Detector (Scoping Note)
 
-Status: **SCOPED, not implemented.** Stub + failing test landed; matching
-layer and `predict.py` wiring are the implement phase.
+Status: **IMPLEMENTED + WIRED.** The 76-pattern matching layer (6
+fabricated-cross-model-authority families, all 29 IM techniques) landed in
+`src/na0s/detectors/inter_model.py` and is wired input-side into both decision
+paths — `predict.py` composite scoring and `cascade.py` (parity block +
+positive-validation veto + whitelist tripwire). Measured: detector 516/516
+recall, 0/55 probe benign + 0/500 safe_holdout + 0/71 adversarial
+hard-negatives; `predict.scan` 25.78%→**100%**, cascade 12.4%→**99.81%**,
+benign FP unchanged (1.82%, pre-existing). Tests: `tests/detectors/
+test_inter_model.py` (now green) + `tests/detectors/test_inter_model_wiring.py`.
+Residual: validated on the synthetic probe corpus — real-world traffic +
+paraphrase-robustness validation remain.
 
 ## Problem
 
