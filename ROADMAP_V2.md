@@ -890,18 +890,48 @@ Core scanner: `OutputScanResult` dataclass with `technique_ids` taxonomy, 9 dete
 - [ ] **Wire L9 into `predict.py`** — cascade.py is the only caller today; `predict.scan()` users get no output-side defense. **Priority**: P2. **Effort**: Low.
 
 **Test coverage gaps:**
-- [ ] **Worm detector output-side tests** — `worm_detector.py` (shim → `worm/detector.py`) is imported by `propagation.py` but has no dedicated `tests/output/test_worm.py`. **Priority**: P2. **Effort**: Low.
+- [ ] **Worm detector output-side tests** — `worm_detector.py` (shim → `worm/detector.py`) is imported by `propagation.py` but has no dedicated `tests/output/test_worm.py`. **Priority**: P2. **Effort**: Low. (Input-side coverage now exists: `tests/worm/test_worm_input_path.py`, `tests/worm/test_worm_embedding_hardening.py`.)
 - [ ] **`decode_output()` edge cases** — ROT13 branch (line 534) always appends when text has ≥5 alpha chars with no plausibility check; needs a negative test covering benign prose. **Priority**: P3. **Effort**: Trivial.
 - [ ] **Threshold-sensitivity regression test** — assert that `risk_score < threshold` with `len(flags) > 0` is correctly handled once the bug below is fixed. **Priority**: P2. **Effort**: Trivial.
 
 **Bugs / errors discovered during audit:**
 - [ ] **HIGH — duplicate redaction block runs twice per scan**, `src/na0s/rag/output_scanner.py:374-403`. The role-break + leak-fragment redaction loop is copy-pasted: lines 374-386 and lines 388-403 do the same work. Regexes re-run on already-redacted text, wasting cycles and producing nested `[REDACTED]` substitutions on any text containing `[REDACTED]` itself. **Repro**: scan any output with a role-break phrase; second pass re-substitutes. **Fix**: delete lines 388-403 (the "BUG-L9-2 fix: comprehensive redaction pass." duplicate block).
 - [ ] **HIGH — threshold is effectively bypassed**, `src/na0s/rag/output_scanner.py:407`. `is_suspicious = risk_score >= threshold or len(flags) > 0` — any single flag marks the output suspicious regardless of sensitivity. The `_THRESHOLD` table becomes dead configuration. **Fix**: drop the `or len(flags) > 0` disjunction, or route low-confidence flags through an informational channel instead of `is_suspicious=True`.
-- [ ] **MEDIUM — shim import in canonical code path**, `src/na0s/rag/propagation.py:18` imports `from na0s.worm_detector` (the 15-line DeprecationWarning shim) instead of `na0s.worm.detector`. Every `PropagationScanner()` instantiation emits a warning. **Fix**: `from na0s.worm.detector import WormSignatureDetector`.
+- [x] **MEDIUM — shim import in canonical code path** — `src/na0s/output/propagation.py:18` (canonical location of the former `rag/propagation.py`) imported `from na0s.worm_detector` (the DeprecationWarning shim) instead of `na0s.worm.detector`. ✅ Fixed on `hardening/worm-embedding-pipeline` — now imports from `na0s.worm.detector`; verified the only remaining canonical-code shim import. Import-time worm-shim DeprecationWarning gone.
 - [ ] **MEDIUM — shim import in canonical code path**, `src/na0s/segment_grader.py:16` imports `from na0s.output_scanner` instead of `na0s.rag.output_scanner`. Same DeprecationWarning pollution. **Fix**: switch to the canonical path.
 - [ ] **MEDIUM — package init triggers deprecation warnings on every `import na0s`**, `src/na0s/__init__.py:46-47` imports `na0s.output_scanner` and `na0s.streaming_scanner` shims. Any consumer of `na0s` sees two `DeprecationWarning`s at import time. **Fix**: point `__init__.py` at `na0s.rag.output_scanner` / `na0s.rag.streaming`.
 - [ ] **LOW — raw regex source leaks in flag label**, `src/na0s/rag/output_scanner.py:646-647`: `label = pat.pattern[:40]` is interpolated into the flag string `"Secret pattern detected ({label}): ..."`. Downstream logs and UIs display truncated regex syntax (e.g., `-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KE`). **Fix**: maintain a parallel human-readable label list alongside `_SECRET_PATTERNS`.
 - [ ] **LOW — `pat.findall` returns tuples for patterns with capture groups**, `src/na0s/rag/output_scanner.py:645`: `sample = matches[0] if isinstance(matches[0], str) else matches[0]` branches on a string check but both branches assign the same value. For patterns with capture groups (e.g., `r"\b(sk-[a-zA-Z0-9]{20,})\b"`), `matches[0]` is a `str` (single group) — OK for the current regex set but brittle. **Fix**: use `pat.search(text).group(0)` or a named helper.
+
+---
+
+## Worm-embedding input-path hardening (`hardening/worm-embedding-pipeline`)
+
+Root-cause finding (audit 2026-06-19): the `worm_embedding` head (`_EmbeddingSimilarity` in `worm/detector.py`) and the whole worm detector were **unreachable on the default INPUT path** — `predict.py`/`cascade.py` had zero worm references; the only consumer was the OUTPUT-side `PropagationScanner`, env-gated off (`NA0S_PROPAGATION_SCAN=0`) and model-cache-gated. A worm arriving as input was never embedding-scored; only the I1.5 keyword regex covered it.
+
+**DONE this session (critical core):**
+- [x] **G1 — wire a fail-safe, bounded worm signal into `predict.classify_prompt()`** — new `worm_embedding_signal()` (in `worm/detector.py`) runs the embedding head when a model is cached and **degrades to the dependency-free lexical classifier otherwise**, so the signal works without sentence-transformers. Bounded contribution (`_WORM_INPUT_MAX_WEIGHT=0.30`); emits a `worm_embedding:{medium,high}` hit. Opt out via `NA0S_WORM_INPUT_SCAN=0`. Verified: fires on template/near-template worms, silent on benign (incl. the benign "forward the meeting notes" sibling).
+- [x] **G4 — normalization parity** — `scan()` now scores the embedding head over `_build_text_variants()` + reconstructed-turns + decoded base64/hex views (via `score_max`), so homoglyph / token-splitting / multi-turn / encoded worms can no longer bypass the embedding head while bypassing regex.
+- [x] **G5 — sliding-window chunking** — replaced the single 2000-char head-truncation with overlapping windows + an explicit tail window (bounded by `_EMBED_MAX_WINDOWS`), defeating prefix-padding / dilution past the cap.
+- [x] **G7 — degraded observability** — `scan()` and `worm_embedding_signal()` surface `embedding_available`/`degraded`/`mode` so "scored benign" is distinguishable from "model dark"; the lexical fallback fills the empty slot.
+- [x] **G12 — singleton keyed by `model_name`** (was first-wins); `_reset_instance()` clears the cache; tests reset in teardown.
+- [x] **G9 — canonical import** in `output/propagation.py` (see Layer-9 bug list above).
+- [x] Tests: `tests/worm/test_worm_input_path.py` (reachability, degraded flag, env toggle, FP guard) + `tests/worm/test_worm_embedding_hardening.py` (chunking, `score_max`, singleton). Model-independent; live-model assertions remain skip-guarded.
+- [x] Threshold constants centralised (`_EMBED_WORM_FLOOR/_MARGIN_SCALE/_FIRE_THRESHOLD`, `_WORM_INPUT_*`) — removes inline magic numbers (calibration itself deferred → G3).
+
+**Known limits (by design, documented honestly):**
+- In the default dependency-free deployment the input signal runs in **lexical mode** — recall is narrow (it fires on keyword-similar worms, is silent on pure paraphrase). Semantic-paraphrase recall requires a cached sentence-transformers model (G8) and a broader corpus (G6). Do not oversell the input signal as semantic coverage until those land.
+- The embedding head encodes a **bounded** set of windows (`_embed_covered_extent()` ≈ 43 KB head + tail); inputs longer than that have an un-encoded middle and are flagged `truncated` rather than scored "clean". The full-text regex / lexical / D8 tail scans on the input path still cover that region.
+
+**DEFERRED (tracked follow-ups):**
+- [ ] **G2 — COVERAGE_MATRIX doc-truth** — `docs/COVERAGE_MATRIX.md` (lives on the `feat/doc-truth-benchmark-consolidation` branch, **not** `main`) overclaims the worm path as "wired+tested". Apply on that branch: downgrade to "present; input signal via `worm_embedding_signal` (bounded, lexical-degraded by default); output path env-gated off". **Priority**: P1.
+- [ ] **G3 — data-driven threshold calibration** — fit `_EMBED_WORM_FLOOR/_MARGIN_SCALE/_FIRE_THRESHOLD`, `_WORM_INPUT_*`, and the Bayes `embedding_confidence` LR to a labeled worm/benign corpus to a stated TPR/FPR; emit a calibration artifact + regression test. **Priority**: P2.
+- [ ] **G6 — corpus breadth** — `_WORM_TRAINING_TEXTS` covers ~4/10 self-replication categories, English-only, no `$START$/$END$` markers. Add roleplay, RAG/DB-poisoning, memory-persistence, tool-mediated, metamorphic, multilingual, and soft/implicit exemplars + per-category paired benign siblings (via SIFT). **Priority**: P2.
+- [ ] **G10 — taxonomy I1.5 double-booking** — the worm rule stamps I1.5 (also "Vector DB poisoning"); add a dedicated self-replication code under the IM family and have `scan()` emit it. **Priority**: P2.
+- [ ] **G11 — wire or annotate `worm/advanced.py`** — `polymorphic_score`/`invariant_overlap` (metamorphic, category 10) are unit-tested but never reach `scan()`; either feed them into Bayes as a calibrated signal or mark the module unwired. **Priority**: P3.
+- [ ] **G8 — run live-model worm tests in CI** — pin sentence-transformers (or vendor a fixture model) so `TestEmbeddingSimilarityLive` + paraphrase-recall assertions actually execute. **Priority**: P2.
+- [ ] **F14 worm scenarios** — `data/eval/scenarios/` has zero worm/morris/propagation scenarios; author paired worm+benign INPUT scenarios across the 10 categories. **Priority**: P2.
+- [ ] **G13 — dual-scanner env-gate consistency** — `DualDirectionScanner` runs the worm path unconditionally, ignoring `NA0S_PROPAGATION_SCAN` (moot today: no production caller). **Priority**: P3.
 
 ---
 
