@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 
 from .. import config
@@ -72,6 +73,24 @@ _THRESHOLD_JSON_PATH = os.path.join(
 _cached_threshold = None
 
 
+def _valid_threshold(value):
+    """Return ``value`` as a finite float in (0, 1], or ``None`` if invalid.
+
+    A NaN/inf/out-of-range threshold is a fail-OPEN hazard: ``score >= nan`` is
+    always False (everything becomes SAFE) and a non-positive threshold marks
+    everything MALICIOUS. We reject such values so the resolver falls through
+    to the calibrated JSON or the safe hardcoded fallback (fail CLOSED).
+    """
+    try:
+        f = float(value)
+    except (ValueError, TypeError):
+        return None
+    # math.isfinite rejects NaN and ±inf; bound to the meaningful (0, 1] range.
+    if not math.isfinite(f) or not (0.0 < f <= 1.0):
+        return None
+    return f
+
+
 def get_decision_threshold():
     """Return the active decision threshold (cached after first call).
 
@@ -93,17 +112,18 @@ def get_decision_threshold():
     # 1. Env-var override
     env_val = os.environ.get("DECISION_THRESHOLD")
     if env_val is not None:
-        try:
-            _cached_threshold = float(env_val)
+        valid = _valid_threshold(env_val)
+        if valid is not None:
+            _cached_threshold = valid
             _logger.info(
                 "Decision threshold set from DECISION_THRESHOLD env var: %.4f",
                 _cached_threshold,
             )
             return _cached_threshold
-        except (ValueError, TypeError):
-            _logger.warning(
-                "Invalid DECISION_THRESHOLD env var %r; ignoring.", env_val,
-            )
+        _logger.warning(
+            "Invalid DECISION_THRESHOLD env var %r (must be finite, in (0,1]); "
+            "ignoring.", env_val,
+        )
 
     # 2. Load from optimal_threshold.json
     json_path = os.path.normpath(_THRESHOLD_JSON_PATH)
@@ -113,8 +133,16 @@ def get_decision_threshold():
                 data = json.load(fh)
             # Prefer the FPR-anchored operating point (GAP-03); fall back to the
             # legacy recall-95 key for artifacts produced before the FPR change.
-            val = data.get("target_fpr_threshold", data.get("recall95_threshold"))
-            _cached_threshold = float(val)
+            raw = data.get("target_fpr_threshold", data.get("recall95_threshold"))
+            # Fail-closed validation (#420): reject NaN/inf/out-of-range so a
+            # bad artifact can't silently disable detection (score >= nan is
+            # always False -> everything SAFE). Fall through to the fallback.
+            valid = _valid_threshold(raw)
+            if valid is None:
+                raise ValueError(
+                    f"threshold not finite in (0,1]: {raw!r}"
+                )
+            _cached_threshold = valid
             _logger.info(
                 "Decision threshold loaded from %s: %.4f",
                 json_path, _cached_threshold,
@@ -238,6 +266,7 @@ def weighted_decision(
     embedding_score=0.0,
     threshold=DECISION_THRESHOLD,
     extra_severities=None,
+    hit_weights=None,
 ):
     """Combine ML confidence, rule severity, obfuscation, structural
     features, and embedding similarity into a composite score.
@@ -259,12 +288,34 @@ def weighted_decision(
         Default 0.0 (no embedding signal / model not available).
     threshold : float
         Decision threshold (default 0.55).
+    hit_weights : dict[str, float] or None
+        Optional per-rule-name multiplier in (0, 1] from span-aware evidence
+        grading. An "ambiguous" hit (e.g. matched inside a code/quote/doc
+        context but too high-severity to remove) is down-weighted by its
+        multiplier instead of contributing full severity weight. None
+        (default) means full strength for every hit — backward compatible.
 
     Returns
     -------
     tuple[str, float]
         (label, composite_score) where label is "SAFE" or "MALICIOUS".
     """
+    # --- Fail-closed input sanitization ---
+    # A NaN/inf ml_prob would make every later comparison fail open: e.g.
+    # ``composite >= threshold`` with a NaN composite is always False -> SAFE.
+    # Coerce non-finite ml_prob to the most cautious value (0.5 = maximally
+    # uncertain) so the rule/obfuscation/structural signals decide the verdict
+    # rather than a single bad number silently disabling detection. Clamp
+    # finite values to the valid [0,1] probability range.
+    if not math.isfinite(ml_prob):
+        ml_prob = 0.5
+    else:
+        ml_prob = min(max(ml_prob, 0.0), 1.0)
+    if not math.isfinite(embedding_score):
+        embedding_score = 0.0
+    else:
+        embedding_score = min(max(embedding_score, 0.0), 1.0)
+
     # --- ML signal ---
     # Convert to a malicious-probability axis.
     if "MALICIOUS" in ml_label:
@@ -278,10 +329,29 @@ def weighted_decision(
     _sev_lookup = RULE_SEVERITY if extra_severities is None else {**RULE_SEVERITY, **extra_severities}
     rule_weight = 0.0
     severities_seen = set()
-    for hit_name in hits:
+    # Dedup by rule name first: the same rule appearing twice (e.g. matched on
+    # both sanitized and raw views) must not double-count its severity weight
+    # and inflate the score. dict.fromkeys preserves first-seen order.
+    for hit_name in dict.fromkeys(hits):
         sev = _sev_lookup.get(hit_name, "medium")
         severities_seen.add(sev)
-        rule_weight += SEVERITY_WEIGHTS.get(sev, 0.1)
+        base_w = SEVERITY_WEIGHTS.get(sev, 0.1)
+        # Span-aware evidence grading: an "ambiguous" hit (matched inside a
+        # benign code/quote/doc context but too high-severity to fully remove)
+        # contributes a fraction of its severity weight. Missing/None entries
+        # default to 1.0 (full strength), so this is a no-op when hit_weights
+        # is not supplied. HR-4: the multiplier is floored (>0), so context
+        # never zeroes a hit's vote.
+        if hit_weights:
+            mult = hit_weights.get(hit_name, 1.0)
+            try:
+                mult = float(mult)
+            except (TypeError, ValueError):
+                mult = 1.0
+            # Clamp to (0, 1]: weights only ever DOWN-weight, never amplify.
+            mult = min(max(mult, 0.0), 1.0)
+            base_w *= mult
+        rule_weight += base_w
 
     # --- Obfuscation signal ---
     obf_weight = min(OBFUSCATION_WEIGHT_PER_FLAG * len(obs_flags),
@@ -357,7 +427,9 @@ def weighted_decision(
             and not obs_flags
             and structural_weight == 0.0
             and composite < threshold):
-        return "SAFE", composite
+        # Clamp here too: this early return bypasses the final [0,1] clamp,
+        # so a negative composite (from an out-of-range ml_prob) could escape.
+        return "SAFE", min(max(composite, 0.0), 1.0)
 
     # --- Extended override protection ---
     has_decoded_payload = "decoded_payload_malicious" in hits
