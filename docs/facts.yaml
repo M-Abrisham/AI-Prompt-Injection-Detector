@@ -41,8 +41,8 @@ rule_count:
     count: 4
   total_ast: 120
 taxonomy:
-  category_count: 29
-  technique_count_total: 276
+  category_count: 30
+  technique_count_total: 279
   techniques_by_category:
     D1: 22
     D2: 4
@@ -66,13 +66,14 @@ taxonomy:
     S: 8
     C: 8
     C1: 8
-    IM: 29
+    IM: 30
     IG: 12
     AD: 19
     CT: 20
     AB: 12
     MB: 15
     C1MT: 6
+    BEN: 2
 test_count:
   count: 8653
   collection_errors: 8
