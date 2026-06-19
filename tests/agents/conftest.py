@@ -15,11 +15,12 @@ default, so no agents test invokes the real detector. Tests that specifically
 verify the dogfood flagging (``test_dogfood_*``) override it with their own
 ``patch(...)`` inside the test body, which nests over this stub.
 
-NOTE: this is purely test hygiene. It is NOT the cause of the intermittent
-C1/D1/D3/D4/E1 CI bursts — those are a pre-existing, branch-agnostic flake
-where CI's runtime sentence-transformers model load intermittently degrades,
-dropping embedding-dependent detection scores below threshold (reproduces on
-``main`` identically). See ROADMAP "CI / GitHub-Automation Hardening".
+NOTE: this is purely test hygiene. The C1/D1/D3/D4/E1 CI failures were NOT a
+flake: they were deterministic process pollution from tests/ml/ injecting a
+``MagicMock`` for ``sentence_transformers`` (guarded only on ``not in
+sys.modules``), which shadowed the real package in CI and zeroed the embedding
+classifier for every later detection test. Fixed in tests/ml/ (find_spec guard
++ tests/ml/conftest.py); see that commit.
 """
 
 from unittest.mock import patch
