@@ -21,6 +21,11 @@ permissions:
 jobs:
   retrain:
     runs-on: ubuntu-latest
+    # Cap the whole job so a hang (e.g. an OOM-bound feature-extraction step
+    # that the runner silently kills after ~28 min) FAILS CLEANLY with a clear
+    # "exceeded the maximum execution time" signal instead of a silent cancel.
+    # Generous enough for sync + ingest + gen + features + train + gates.
+    timeout-minutes: 60
     # Skip if triggered by a failed upstream workflow
     if: >-
       github.event_name != 'workflow_run' ||
