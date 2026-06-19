@@ -529,7 +529,14 @@ categories:
       IM1.3: { name: "Instruction amplification", severity: high }
       IM1.4: { name: "Cross-model context smuggling", severity: high }
       IM1.5: { name: "Cascading jailbreak", severity: critical }
-      IM1.6: { name: "Self-replicating prompt (Morris II worm)", severity: critical }
+      IM1.6:
+        name: "Self-replicating prompt (Morris II worm)"
+        severity: critical
+        # Per-technique external crosswalk (AML.T0061 is specific to
+        # self-replication, so it belongs here, not on the whole IM family).
+        tags:
+          - "owasp-llm:2025:llm01"
+          - "mitre-atlas:AML.T0061"
       IM2.1: { name: "Judge model manipulation", severity: critical }
       IM2.2: { name: "Supervisor prompt override", severity: critical }
       IM2.3: { name: "Evaluation metric gaming", severity: high }
