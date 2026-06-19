@@ -38,7 +38,7 @@ class TestContrastivePairCreation(unittest.TestCase):
 
     def test_pair_count(self):
         """Generated pairs should respect max_pairs limit."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from contrastive_finetune import create_training_pairs
 
         df = self._make_df()
@@ -47,7 +47,7 @@ class TestContrastivePairCreation(unittest.TestCase):
 
     def test_pair_structure_dict_fallback(self):
         """Without sentence_transformers, pairs should be dicts."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from contrastive_finetune import _make_pair
 
         pair = _make_pair(["hello", "world"], 1.0)
@@ -60,7 +60,7 @@ class TestContrastivePairCreation(unittest.TestCase):
 
     def test_pair_labels_are_binary(self):
         """All pair labels should be 0.0 or 1.0."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from contrastive_finetune import create_training_pairs
 
         df = self._make_df()
@@ -71,7 +71,7 @@ class TestContrastivePairCreation(unittest.TestCase):
 
     def test_positive_negative_balance(self):
         """Roughly half positive, half negative pairs."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from contrastive_finetune import create_training_pairs
 
         df = self._make_df()
@@ -84,7 +84,7 @@ class TestContrastivePairCreation(unittest.TestCase):
 
     def test_empty_class_raises(self):
         """Should raise ValueError if one class is missing."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from contrastive_finetune import create_training_pairs
 
         df = pd.DataFrame({"text": ["a", "b"], "label": [0, 0]})
@@ -93,7 +93,7 @@ class TestContrastivePairCreation(unittest.TestCase):
 
     def test_reproducibility(self):
         """Same seed should produce identical pairs."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from contrastive_finetune import create_training_pairs
 
         df = self._make_df()
@@ -107,7 +107,7 @@ class TestContrastivePairCreation(unittest.TestCase):
 
     def test_cli_parser(self):
         """CLI parser should accept required arguments."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from contrastive_finetune import _parse_args
 
         args = _parse_args(["--model", "test-model", "--epochs", "5"])
@@ -124,7 +124,7 @@ class TestKnowledgeDistillation(unittest.TestCase):
 
     def test_soften_probabilities(self):
         """Temperature softening should push probabilities toward 0.5."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from distill_model import _soften_probabilities
 
         probs = np.array([0.9, 0.1, 0.5])
@@ -136,7 +136,7 @@ class TestKnowledgeDistillation(unittest.TestCase):
 
     def test_soften_temperature_1(self):
         """Temperature=1 should approximately preserve probabilities."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from distill_model import _soften_probabilities
 
         probs = np.array([0.8, 0.2, 0.5])
@@ -145,7 +145,7 @@ class TestKnowledgeDistillation(unittest.TestCase):
 
     def test_distill_basic(self):
         """Distillation should produce a fitted LogisticRegression."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from distill_model import distill
 
         rng = np.random.RandomState(42)
@@ -162,7 +162,7 @@ class TestKnowledgeDistillation(unittest.TestCase):
 
     def test_distill_shape_mismatch_raises(self):
         """Mismatched shapes should raise ValueError."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from distill_model import distill
 
         X = np.random.randn(100, 50)
@@ -173,7 +173,7 @@ class TestKnowledgeDistillation(unittest.TestCase):
 
     def test_distill_2d_teacher_predictions(self):
         """Teacher predictions can be 2D (n_samples, 2)."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from distill_model import distill
 
         rng = np.random.RandomState(42)
@@ -187,7 +187,7 @@ class TestKnowledgeDistillation(unittest.TestCase):
 
     def test_evaluate_distilled(self):
         """evaluate_distilled should return metrics dict."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from distill_model import distill, evaluate_distilled
 
         rng = np.random.RandomState(42)
@@ -206,7 +206,7 @@ class TestKnowledgeDistillation(unittest.TestCase):
 
     def test_cli_parser(self):
         """CLI parser should handle arguments."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from distill_model import _parse_args
 
         args = _parse_args(["--temperature", "3.0", "--eval"])
@@ -337,14 +337,14 @@ class TestGCGSuffixPatterns(unittest.TestCase):
 
     def test_suffix_patterns_non_empty(self):
         """GCG_SUFFIX_PATTERNS should contain patterns."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from generate_gcg_samples import GCG_SUFFIX_PATTERNS
 
         self.assertGreater(len(GCG_SUFFIX_PATTERNS), 15)
 
     def test_all_suffixes_are_strings(self):
         """Every suffix should be a non-empty string."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from generate_gcg_samples import GCG_SUFFIX_PATTERNS
 
         for suffix in GCG_SUFFIX_PATTERNS:
@@ -353,7 +353,7 @@ class TestGCGSuffixPatterns(unittest.TestCase):
 
     def test_generate_samples_count(self):
         """generate_samples should produce exactly n samples."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from generate_gcg_samples import generate_samples
 
         df = generate_samples(
@@ -364,7 +364,7 @@ class TestGCGSuffixPatterns(unittest.TestCase):
 
     def test_generate_samples_columns(self):
         """Output DataFrame should have text and label columns."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from generate_gcg_samples import generate_samples
 
         df = generate_samples(base_prompts=["test prompt"], n=10)
@@ -373,7 +373,7 @@ class TestGCGSuffixPatterns(unittest.TestCase):
 
     def test_generate_samples_ratio(self):
         """Malicious/safe ratio should match malicious_ratio."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from generate_gcg_samples import generate_samples
 
         df = generate_samples(
@@ -386,7 +386,7 @@ class TestGCGSuffixPatterns(unittest.TestCase):
 
     def test_malicious_samples_contain_suffix(self):
         """Malicious samples should be base + suffix (longer than base)."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from generate_gcg_samples import generate_samples, GCG_SUFFIX_PATTERNS
 
         base = ["short prompt"]
@@ -400,7 +400,7 @@ class TestGCGSuffixPatterns(unittest.TestCase):
 
     def test_generate_empty_prompts_raises(self):
         """Empty base_prompts should raise ValueError."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from generate_gcg_samples import generate_samples
 
         with self.assertRaises(ValueError):
@@ -408,7 +408,7 @@ class TestGCGSuffixPatterns(unittest.TestCase):
 
     def test_generate_reproducibility(self):
         """Same seed should produce identical samples."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from generate_gcg_samples import generate_samples
 
         df1 = generate_samples(base_prompts=["test"], n=50, seed=123)
@@ -417,7 +417,7 @@ class TestGCGSuffixPatterns(unittest.TestCase):
 
     def test_cli_parser(self):
         """CLI parser should accept arguments."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from generate_gcg_samples import _parse_args
 
         args = _parse_args(["--n", "500", "--seed", "99"])
@@ -426,7 +426,7 @@ class TestGCGSuffixPatterns(unittest.TestCase):
 
     def test_save_csv(self):
         """Generated samples should save to CSV correctly."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from generate_gcg_samples import generate_samples
 
         df = generate_samples(base_prompts=["test"], n=20)
@@ -452,13 +452,13 @@ class TestGracefulDegradation(unittest.TestCase):
 
     def test_contrastive_has_import_flag(self):
         """contrastive_finetune should expose _HAS_SENTENCE_TRANSFORMERS."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from contrastive_finetune import _HAS_SENTENCE_TRANSFORMERS
         self.assertIsInstance(_HAS_SENTENCE_TRANSFORMERS, bool)
 
     def test_distill_has_import_flag(self):
         """distill_model should expose _HAS_SKLEARN."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         from distill_model import _HAS_SKLEARN
         self.assertIsInstance(_HAS_SKLEARN, bool)
 
@@ -470,7 +470,7 @@ class TestGracefulDegradation(unittest.TestCase):
 
     def test_contrastive_finetune_returns_none_without_deps(self):
         """finetune() should return None if sentence-transformers missing."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
         import contrastive_finetune
 
         if contrastive_finetune._HAS_SENTENCE_TRANSFORMERS:
