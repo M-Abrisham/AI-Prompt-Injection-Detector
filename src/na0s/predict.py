@@ -1008,6 +1008,13 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         except Exception:
             pass  # Fictional frame detection failure is non-fatal
 
+    # Rule-anchor / frame floors below target the DEFAULT operating point
+    # (_get_decision_threshold() + epsilon), NOT the per-call ``threshold``.
+    # Using max(composite, threshold + 0.01) would inflate the composite to
+    # ~threshold for ANY threshold, so a raised threshold could never reduce
+    # sensitivity (see test_configurable_threshold / test_cli threshold cases).
+    _anchor_floor = _get_decision_threshold() + 0.01
+
     # Wire fictional frame signal into composite scoring.  (Previously the
     # weight was computed but never added, leaving C1 detection inert.)
     # "generic_attack" inner matches *conceptual* references (the words
@@ -1022,7 +1029,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         # framings as confidently safe.  Floor to ensure detection.  Frame-only
         # (no inner attack) is NOT floored -- that is the false-positive guard.
         if fictional_has_inner and composite < threshold:
-            composite = max(composite, threshold + 0.01)
+            composite = max(composite, _anchor_floor)
         if composite >= threshold and label in ("SAFE", "safe", "benign"):
             label = "MALICIOUS"
 
@@ -1041,7 +1048,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     if (fictional_frame_fired
             and composite < threshold
             and _ml_prob_malicious >= 0.85):
-        composite = max(composite, threshold + 0.01)
+        composite = max(composite, _anchor_floor)
         if label in ("SAFE", "safe", "benign"):
             label = "MALICIOUS"
 
@@ -1079,8 +1086,8 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         )
         if (_has_high_extraction
                 and _ml_prob_malicious >= 0.35
-                and composite < threshold + 0.01):
-            composite = max(composite, threshold + 0.01)
+                and composite < _anchor_floor):
+            composite = max(composite, _anchor_floor)
         if composite >= threshold and label in ("SAFE", "safe", "benign"):
             label = "MALICIOUS"
 
@@ -1280,10 +1287,10 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
 
     # Path A: critical E1 rule + embedding E1 match (strongest evidence)
     if _has_critical_e1 and embedding_technique_matches and "E1" in embedding_technique_matches:
-        if composite < threshold + 0.01:
-            composite = max(composite, threshold + 0.01)
+        if composite < _anchor_floor:
+            composite = max(composite, _anchor_floor)
             label = "MALICIOUS"
-    elif _has_critical_e1 and composite < threshold + 0.01:
+    elif _has_critical_e1 and composite < _anchor_floor:
         # g8: Degrade-aware Path-A.  The embedding-confirmed branch above
         # silently voids when the embedding signal is degraded (env-disabled
         # or fallback backend) because ``embedding_technique_matches`` is then
@@ -1315,7 +1322,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                 "(embedding unavailable; critical-E1 rule + structural "
                 "corroboration)."
             )
-            composite = max(composite, threshold + 0.01)
+            composite = max(composite, _anchor_floor)
             label = "MALICIOUS"
 
     # --- E1 high-severity + FingerprintStore floor ---
@@ -1336,7 +1343,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                     _has_high_e1 = True
                     break
             if _has_high_e1:
-                composite = max(composite, threshold + 0.01)
+                composite = max(composite, _anchor_floor)
                 label = "MALICIOUS"
 
     # --- E2 reconnaissance floor ---
@@ -1359,7 +1366,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
             for dh in detailed_hits
         )
         if _has_recon_probe:
-            composite = max(composite, threshold + 0.01)
+            composite = max(composite, _anchor_floor)
             label = "MALICIOUS"
 
     # --- D5 Unicode obfuscation signal ---
@@ -1393,7 +1400,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     if ("SAFE" in label and composite < threshold
             and {"non_english_input", "mixed_language_input"} & set(l0.anomaly_flags)
             and ({h.name for h in detailed_hits} & _MULTILINGUAL_FORCE_HITS)):
-        composite = max(composite, threshold + 0.01)
+        composite = max(composite, _anchor_floor)
         label = "MALICIOUS"
 
     # --- Narrative / legitimate-role dampening ---

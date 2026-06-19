@@ -294,6 +294,16 @@ def weighted_decision(
     if ml_uncertain_zone and unsuppressed_rule_count == 0 and obf_weight == 0:
         composite = min(composite, threshold - 0.01)
 
+    # Rule-anchor floors below target the DEFAULT operating point
+    # (get_decision_threshold() + epsilon), NOT the per-call ``threshold``.
+    # A critical rule must lift a near-miss over the *default* line so embedding
+    # stays confirmatory (g5) — but it must NOT force-cross a threshold the
+    # caller deliberately raised, else ``max(composite, threshold + 0.01)``
+    # would inflate the composite to ~threshold for ANY threshold (a raised
+    # threshold then never reduces sensitivity). See test_configurable_threshold
+    # and the test_cli threshold cases.
+    _anchor_floor = get_decision_threshold() + 0.01
+
     # --- Critical-content rule floor ---
     if severities_seen & {"critical_content"}:
         if "MALICIOUS" in ml_label and ml_prob_malicious >= 0.6:
@@ -310,7 +320,7 @@ def weighted_decision(
             for h in hits
         )
         if _has_e1_critical:
-            composite = max(composite, threshold + 0.01)
+            composite = max(composite, _anchor_floor)
 
     # --- g5: Core-family rule anchor floor (embedding-independent) ---
     # A HIGH/CRITICAL instruction-override (D1.x) or system-prompt extraction
@@ -337,8 +347,8 @@ def weighted_decision(
     )
     if (_has_override_extraction_anchor
             and ml_prob_malicious >= 0.35
-            and composite < threshold + 0.01):
-        composite = max(composite, threshold + 0.01)
+            and composite < _anchor_floor):
+        composite = max(composite, _anchor_floor)
 
     # --- g5: Critical-rule anchor floor (embedding-independent) ---
     # A CRITICAL-severity L1 rule is a high-precision attack signature
@@ -361,8 +371,8 @@ def weighted_decision(
         _sev_lookup.get(h) == "critical" and h not in FP_EXEMPT_HITS
         for h in hits
     )
-    if _has_critical_rule and composite < threshold + 0.01:
-        composite = max(composite, threshold + 0.01)
+    if _has_critical_rule and composite < _anchor_floor:
+        composite = max(composite, _anchor_floor)
 
     # Compute ML safe-confidence once.
     ml_safe_confidence = ml_prob if "SAFE" in ml_label else (1.0 - ml_prob)
