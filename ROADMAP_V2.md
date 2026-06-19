@@ -2903,6 +2903,35 @@ Na0S is stateless — each `scan()` call has no memory. Crescendo attacks exploi
 
 ---
 
+## CI / GitHub-Automation Hardening (added 2026-06-18)
+
+**Context (audited 2026-06-18, repo M-Abrisham/Na0S):** `main` CI has had **0 green runs in the last 100** (red since 2026-03-31); auto-retrain fails 100% of runs; there is **no branch protection**, so red status gates nothing — feature PR #416 merged to `main` *before CI was green* because `gh pr merge --auto` merges immediately when no checks are required; 13 dependabot PRs are open (11 ~53 days old). The scheduled data-plumbing (scraper/harvest/intel-sync) is healthy; the **quality gates and the retrain loop are broken**.
+
+### P0 — Unblock `main` CI (root cause is ONE test)
+- [ ] Fix `tests/test_scan_d8_context_manipulation.py::TestD8_Combined::test_d8_many_shot_plus_flooding` — asserts D8.1+D8.2 risk ≥ threshold but gets **0.532**; this single real failure red-bars *every* CI run on `main` (the rest are `cancelled` by concurrency, not failures). Originates from `hardening/d8-context-window`. Fix the detector or recalibrate the assertion — do **not** weaken it silently.
+
+### P0 — Merge safety (the gap that let #416 merge red)
+- [ ] **Branch protection on `main`**: require `CI` (test matrix) + `PR Check` status checks to pass, `strict: true`; decide `enforce_admins` + required-review count. Makes `gh pr merge --auto` **wait for green** instead of merging immediately. Free, ~15 min, admin-only.
+- [ ] **Per-event CI concurrency** in `ci.yml`: `cancel-in-progress` on `push` only, **not** `pull_request`, so rapid pushes (e.g. the v1.0.0 restructure) don't cancel-and-hide a PR's checks.
+- [ ] Set `delete_branch_on_merge=true` (merged `retrain/*` / `scrape/*` / `harvest/*` / dependabot branches currently accumulate).
+
+### P1 — Fix the retrain loop (constant red-noise generator)
+- [ ] Auto-retrain fails **every** run at `hard_negatives.py:546 → safe_load → integrity/safe_pickle.py:304 _validate_pickle_magic` (base model fails the pickle-magic integrity check); it triggers ~8×/day off scraper/harvest. Fix the model load / integrity check and gate retrain on a healthy base model.
+- [ ] Repair the rotted HF dataset registry (`data/datasets.yaml`): ~30 datasets error — gated (need `HF_TOKEN`: hackaprompt, wildjailbreak, decodingtrust, advbench, lima, wildguardmix), missing-config (jailbreakbench, wmdp, agentharm), or removed (dolly-15k, red-team-attempts). Add the `HF_TOKEN` secret + prune/repair entries.
+
+### P2 — CI-redness observability (Claude automation)
+- [ ] Add a CI-failure-triage handler — workflow on `workflow_run: {types:[completed]}` filtered to `conclusion=='failure'` on `main` → open/update a *single* "main CI is red" issue with the failing test + run link (dedupe to one open issue; no per-failure spam). Cheaper alternative: a `/schedule` daily CI-health routine. Use `anthropics/claude-code-action` at a **pinned** version; **never** trigger on untrusted PR/issue comments (prompt-injection surface).
+- [ ] Pin `security-review.yml`'s `anthropics/claude-code-security-review@main` to a release tag — an unpinned, prompt-injection-unhardened, security-critical action (supply-chain drift risk).
+
+### P2 — Dependabot backlog
+- [ ] Add `groups:` to `.github/dependabot.yml` to batch bumps; enable **auto-merge for green patch/minor bumps** (requires branch protection first). Close the duplicate torch bumps (#133 vs #408). 13 open, 11 from ~2026-04-26.
+
+### P3 — Remove duplicate CI cost
+- [ ] `ci.yml` and `pr-check.yml` both run the full pytest+coverage on every PR (two ~22-min runs). Consolidate or differentiate so the suite isn't double-run.
+
+**Sequencing:** P0 first — a green `main` is the prerequisite for branch protection to be usable (protecting a chronically-red `main` would block *all* merges). Then merge safety, then retrain + observability.
+---
+
 ## `agents/` MCP / Agent-Security Hardening (added 2026-06-18)
 
 **Context:** A 2026-06-18 audit of the `src/na0s/agents/` deploy-approval orchestration (Claude Agents + OpenClaw iMessage) found it sits squarely on the "lethal trifecta" — it ingests untrusted data (canary/gate JSON, quarantine rows, synthetic samples), sends it to the Claude API, and executes privileged shell (`deploy_model.py`, `quarantine.py`) gated on a one-word iMessage reply. Approvals were **unauthenticated strings** — `curl -XPOST localhost:3000/replies -d '{"reply":"approve"}'` forged an approval and triggered a model deploy. The prompt-injection-defense product also **never ran its own agent inputs through its own `predict()` detector** (dogfooding gap).
