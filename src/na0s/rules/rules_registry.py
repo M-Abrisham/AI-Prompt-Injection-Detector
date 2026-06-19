@@ -71,7 +71,7 @@ RULES = [
          # Old regex missed "ignore all previous instructions" (2 adjectives).
          # Uses {0,3} instead of * to pass safe_compile nested-quantifier check.
          r"(?:ignore|disregard|forget|bypass|skip|drop|dismiss|override"
-         r"|cancel|delete|erase)\s+"
+         r"|cancel|delete|erase|set\s+aside|put\s+aside)\s+"
          r"(?:(?:all|any|every|the|my|your|prior|previous|earlier|above"
          r"|old|existing|initial|original|current|preceding|foregoing"
          r"|system|safety|internal|hidden|secret|core|base|default"
