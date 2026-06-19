@@ -196,12 +196,26 @@ try:
 except ImportError:
     _HAS_EMBEDDING_CLASSIFIER = False
 
-# Runtime toggle: set NA0S_EMBEDDING_ENABLED=0 to disable the embedding
-# classifier even when sentence-transformers / sklearn is installed.
-# Any value other than "0" or "false" (case-insensitive) keeps the default.
-_embedding_env = os.environ.get("NA0S_EMBEDDING_ENABLED", "").strip().lower()
-if _embedding_env in ("0", "false"):
-    _HAS_EMBEDDING_CLASSIFIER = False
+
+def _embedding_enabled():
+    """Whether the Layer 5 embedding classifier should contribute to a scan.
+
+    Combines the import-time availability flag (``_HAS_EMBEDDING_CLASSIFIER``,
+    set once when sentence-transformers / sklearn import succeeds) with a
+    RUNTIME read of ``NA0S_EMBEDDING_ENABLED``.  Reading the env at the call
+    site (rather than once at import) lets tests/apps flip the toggle AFTER
+    importing this module and have it honored at scan time.
+
+    Disabled when the classifier is unavailable OR the env is "0"/"false"
+    (case-insensitive).  When the env is UNSET the import-time default is
+    preserved exactly.  Kept in lock-step with cascade._embedding_enabled() so
+    predict.scan() and CascadeClassifier agree on the embedding signal.
+    """
+    if not _HAS_EMBEDDING_CLASSIFIER:
+        return False
+    return os.environ.get(
+        "NA0S_EMBEDDING_ENABLED", "",
+    ).strip().lower() not in ("0", "false")
 
 # Layer 2: ASCII art detector — optional import
 try:
@@ -904,13 +918,20 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     # is in [0.0, 0.20] and technique_matches is a list of technique IDs.
     embedding_score = 0.0
     embedding_technique_matches = []
-    if _HAS_EMBEDDING_CLASSIFIER:
+    # Observability: track whether the embedding signal was live for this scan.
+    # Degraded == disabled (env / import-unavailable) OR running on a fallback
+    # backend (Tfidf/NoOp).  Surfaced via ScanResult.embedding_available so
+    # callers/telemetry can see when detection ran without the semantic model.
+    embedding_degraded = not _embedding_enabled()
+    if _embedding_enabled():
         try:
             _emb_clf = get_embedding_classifier()
             embedding_score, embedding_technique_matches = _emb_clf.classify(clean)
+            embedding_degraded = bool(getattr(_emb_clf, "is_degraded", False))
         except Exception:
             embedding_score = 0.0
             embedding_technique_matches = []
+            embedding_degraded = True
 
     # Capture the ML model's malicious-axis probability BEFORE voting
     # overwrites ``label`` with the composite verdict.  ``prob`` is the model's
@@ -1273,8 +1294,8 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         # on a non-embedding co-signal rather than the rule alone.  When the
         # embedding model IS available and simply didn't match E1, we do NOT
         # floor here (that is the model legitimately disagreeing).
-        _embedding_degraded = not _HAS_EMBEDDING_CLASSIFIER
-        if _HAS_EMBEDDING_CLASSIFIER:
+        _embedding_degraded = not _embedding_enabled()
+        if _embedding_enabled():
             try:
                 _embedding_degraded = bool(
                     getattr(get_embedding_classifier(), "is_degraded", False)
@@ -1416,6 +1437,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     embedding_info = {
         "score": embedding_score,
         "technique_matches": embedding_technique_matches,
+        "degraded": embedding_degraded,
     }
 
     # Attach dynamic severities to l0 so cascade can pass them to
@@ -2027,6 +2049,7 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         ml_label="malicious" if "MALICIOUS" in label else "safe",
         anomaly_flags=l0.anomaly_flags,
         embedding_score=round(embedding_info.get("score", 0.0), 4),
+        embedding_available=not embedding_info.get("degraded", False),
         model_version=_get_model_version(),
         perplexity_score=round(perplexity_score, 4),
     )

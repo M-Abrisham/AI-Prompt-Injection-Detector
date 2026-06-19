@@ -34,6 +34,7 @@ class TestScanResultToDict:
             "rejection_reason",
             "cascade_stage",
             "embedding_score",
+            "embedding_available",
             "model_version",
             "perplexity_score",
             "judge_reasoning",
