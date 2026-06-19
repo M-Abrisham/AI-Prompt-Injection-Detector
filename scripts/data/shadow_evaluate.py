@@ -273,6 +273,46 @@ def compute_shadow_metrics(results: list[dict]) -> dict:
     }
 
 
+def evaluate(jsonl_path: str) -> dict:
+    """Evaluate a JSONL dataset end-to-end and return aggregate metrics.
+
+    Reads the JSONL at ``jsonl_path`` (one sample per line, each with at least
+    ``text`` and ``label`` fields), runs the samples through
+    :func:`shadow_evaluate_batch`, computes metrics via
+    :func:`compute_shadow_metrics`, and augments the result with an
+    ``accuracy`` field that the underlying helper does not provide.
+
+    Parameters
+    ----------
+    jsonl_path : str
+        Path to a JSONL file; each non-empty line is a JSON object with
+        ``text`` and ``label`` (string or int) keys.
+
+    Returns
+    -------
+    dict
+        The metrics dict from :func:`compute_shadow_metrics` with an added
+        ``accuracy`` key.  Guaranteed numeric keys include ``accuracy``,
+        ``precision``, ``recall``, and ``f1``.
+    """
+    samples: list = []
+    with open(jsonl_path) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                samples.append(json.loads(line))
+
+    results = shadow_evaluate_batch(samples)
+    metrics = compute_shadow_metrics(results)
+
+    total = metrics.get("total", 0)
+    tp = metrics.get("tp", 0)
+    tn = metrics.get("tn", 0)
+    metrics["accuracy"] = (tp + tn) / total if total else 0.0
+
+    return metrics
+
+
 # ---------------------------------------------------------------------------
 # 3. Active learning selection
 # ---------------------------------------------------------------------------
