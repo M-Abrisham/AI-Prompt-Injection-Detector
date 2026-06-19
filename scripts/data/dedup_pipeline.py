@@ -163,6 +163,24 @@ def _assign_dedup_flags(
     return stats
 
 
+# ── Public API ────────────────────────────────────────────────────
+
+
+def compute_simhash(text: str) -> int:
+    """Return the deterministic 64-bit SimHash fingerprint for *text*."""
+    return simhash(text)
+
+
+def mark_duplicates(samples: list[Na0SSample]) -> list[Na0SSample]:
+    """Flag duplicates in *samples* in-place and return the same list.
+
+    Sets ``is_duplicate=True`` and ``near_dup_cluster`` on detected
+    duplicates without deleting any sample, so length is preserved.
+    """
+    _assign_dedup_flags(samples)
+    return samples
+
+
 # ── JSONL pipeline ────────────────────────────────────────────────
 
 
