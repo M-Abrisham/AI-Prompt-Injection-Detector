@@ -35,14 +35,19 @@ ASSEMBLY_CONFIDENCE_MIN = 0.5  # min confidence to generate alert
 ASSEMBLY_MAX_CANDIDATES = 5  # cap on re-scan candidates per turn
 
 # Borderline payload-assembly path: a fragmented payload can reassemble to a
-# clearly-elevated risk that still sits just *below* the 0.55 malicious line
-# (the split defeats single-rule firing, and after the embedding-double-count
-# fix embedding is confirmatory only, so it no longer nudges these over). Such
-# an assembly is still flagged when it (a) clears this absolute floor — set far
-# above the benign-reassembly baseline (benign multi-turn scenarios reassemble
-# to <=0.06, see payload_split_rescan_benign fixtures), (b) shows a positive
-# risk jump over its individual turns, and (c) carries explicit assembly cues.
-ASSEMBLY_BORDERLINE_RISK_FLOOR = 0.45
+# clearly-elevated risk that still sits just *below* the malicious line (the
+# split defeats single-rule firing, and after the embedding-double-count fix
+# embedding is confirmatory only, so it no longer nudges these over). Such an
+# assembly is still flagged when it (a) clears a floor set this far BELOW the
+# active decision threshold — far above the benign-reassembly baseline (benign
+# multi-turn scenarios in tests/conversation/fixtures/payload_split_rescan_benign.json
+# reassemble to <=0.06), (b) shows a positive risk jump over its individual
+# turns, and (c) carries explicit assembly cues. Expressed as a margin below
+# the decision threshold (not an absolute) so a raised operator threshold also
+# tightens this path, consistent with the fusion rule-anchor floors. At the
+# default 0.55 threshold the floor is 0.45 (a ~7x margin over benign).
+# Calibration parameter — revisit if the benign corpus widens.
+ASSEMBLY_BORDERLINE_MARGIN = 0.10
 FRAGMENT_MARKERS = [
     "remember this", "add to", "continue from", "combine",
     "piece together", "concatenate", "merge", "join",

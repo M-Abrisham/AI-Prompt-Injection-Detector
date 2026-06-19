@@ -22,7 +22,7 @@ import re
 from typing import List, Optional, Tuple
 
 from ..config import (
-    ASSEMBLY_BORDERLINE_RISK_FLOOR,
+    ASSEMBLY_BORDERLINE_MARGIN,
     ASSEMBLY_CONFIDENCE_MIN,
     ASSEMBLY_MAX_CANDIDATES,
     ASSEMBLY_RISK_GAP_THRESHOLD,
@@ -351,6 +351,11 @@ class PayloadSplittingDetector(MultiTurnDetector):
         # ----------------------------------------------------------
         try:
             from na0s.conversation.scan_bridge import rescan_text  # lazy import
+            from na0s.fusion.voting import get_decision_threshold  # lazy import
+
+            # Borderline floor tracks the active decision threshold so a raised
+            # operator threshold tightens this path too (default 0.55 -> 0.45).
+            borderline_floor = get_decision_threshold() - ASSEMBLY_BORDERLINE_MARGIN
 
             for candidate_text, label in candidates:
                 result = rescan_text(candidate_text)
@@ -375,7 +380,7 @@ class PayloadSplittingDetector(MultiTurnDetector):
                 # positive jump over the individual turns, and carries explicit
                 # assembly cues.
                 borderline = (
-                    result.risk_score >= ASSEMBLY_BORDERLINE_RISK_FLOOR
+                    result.risk_score >= borderline_floor
                     and risk_gap > 0.0
                     and has_assembly
                 )
