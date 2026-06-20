@@ -128,7 +128,7 @@ jobs:
         id: canary
         continue-on-error: true
         run: |
-          python -m scripts.canary_eval 2>&1 | tee canary_output.txt
+          python -m scripts.canary_eval --model-dir data/processed 2>&1 | tee canary_output.txt
           CANARY_EXIT=${PIPESTATUS[0]}
           echo "exit_code=${CANARY_EXIT}" >> $GITHUB_OUTPUT
           if [ "$CANARY_EXIT" -eq 0 ]; then
