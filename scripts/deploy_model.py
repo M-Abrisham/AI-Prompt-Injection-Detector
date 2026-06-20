@@ -155,9 +155,18 @@ def deploy(source_dir=None, dest_dir=None, init_path=None):
         print(f"ERROR: could not read {init_path}: {exc}")
         sys.exit(1)
 
-    # Build replacement dict literal
+    # Build replacement dict literal — MERGE the freshly-deployed hashes OVER the
+    # existing pins, so entries the retrain does NOT regenerate (notably
+    # model_embedding.pkl, produced only by scripts/model_embedding.py, which is
+    # not in the retrain pipeline) keep their pin instead of being silently
+    # dropped (which would un-pin the embedding model's supply-chain guard).
+    try:
+        from na0s.models import KNOWN_HASHES as _existing_hashes
+    except Exception:
+        _existing_hashes = {}
+    merged_hashes = {**_existing_hashes, **new_hashes}
     entries = ",\n".join(
-        f'    "{fname}": "{digest}"' for fname, digest in sorted(new_hashes.items())
+        f'    "{fname}": "{digest}"' for fname, digest in sorted(merged_hashes.items())
     )
     new_dict = "KNOWN_HASHES = {\n" + entries + ",\n}"
 

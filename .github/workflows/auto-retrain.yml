@@ -371,6 +371,15 @@ jobs:
           print(f"F14 failure report written to {report_path}")
           EOF
 
+      - name: Deploy model + update KNOWN_HASHES
+        # Copies the freshly-trained candidate (data/processed/) into the package
+        # (src/na0s/models/) and rewrites KNOWN_HASHES, so the retrain actually
+        # SHIPS a model.  Without this the "Check for model changes" diff below
+        # always reports unchanged and no PR is ever created.  Gated on the same
+        # approval success as the diff/PR steps, so a failed gate never ships.
+        if: steps.approval.outcome == 'success'
+        run: python scripts/deploy_model.py
+
       - name: Check for model changes
         id: diff
         if: steps.approval.outcome == 'success'
