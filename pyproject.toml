@@ -128,7 +128,7 @@ include = ["na0s*"]
 
 [tool.setuptools.package-data]
 "na0s" = ["py.typed"]
-"na0s.models" = ["*.pkl", "*.sha256"]
+"na0s.models" = ["*.pkl", "*.sha256", "*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
