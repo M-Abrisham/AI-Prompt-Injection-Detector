@@ -14,9 +14,12 @@ import pytest
 _WT_SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if _WT_SRC not in sys.path:
     sys.path.insert(0, _WT_SRC)
-for _m in [m for m in list(sys.modules) if m == "na0s" or m.startswith("na0s.")]:
-    if getattr(sys.modules[_m], "__file__", "") and not sys.modules[_m].__file__.startswith(_WT_SRC):
-        del sys.modules[_m]
+# NOTE: this module previously purged already-imported ``na0s.*`` from
+# sys.modules at collection time to force a reload from _WT_SRC.  That nuked the
+# shared module cache mid-session and corrupted singletons / module-level
+# constants (e.g. the resolved decision threshold) for every later test —
+# producing broad, order-dependent failures across the suite.  Rely on
+# PYTHONPATH / the installed package instead; never delete na0s modules here.
 
 from na0s.fusion import voting  # noqa: E402
 
