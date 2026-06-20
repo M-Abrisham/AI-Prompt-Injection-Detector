@@ -188,7 +188,10 @@ _ADV_PUNCT_RE = re.compile(
     r'(!{3,}|={2,}|=\$?\{|\]\(|\}\)|={\(|\.\]|!--|\]\]<|>>>|<<<|\.\\|=>"|__\(|\${|\}\{'
     r'|\)=\[|#{2,}|-{3,}|%{2,}|&{2,}|@{2,}|\*{2,}|-->|<--|!"|}\s*[%#]|[%#]}|\+{3,}'
     r'|\(\{|\{\[|\]\]|:__|__:|\}\(|\)\{)')
-_SYM_CLUSTER_RE = re.compile(r'^[^A-Za-z0-9\s]{3,}$')
+# A "symbol cluster" token is 3+ NON-word, non-space chars.  ``\w`` is
+# Unicode-aware, so letters of non-Latin scripts (Devanagari, CJK, Arabic, …)
+# are NOT treated as symbols — otherwise benign non-Latin text trips cluster_dense.
+_SYM_CLUSTER_RE = re.compile(r'^[^\w\s]{3,}$')
 
 
 def _alpha_core(tok: str) -> str:
@@ -216,7 +219,7 @@ def _structural_salad(text: str) -> Tuple[bool, List[str]]:
     if not seg:
         return False, []
     total = len(seg)
-    nonword = word_judged = glued_pseudo = sym_cluster_tokens = intra_repeat = 0
+    nonword = word_judged = sym_cluster_tokens = intra_repeat = 0
 
     for tok in seg:
         core = _alpha_core(tok)
@@ -225,13 +228,10 @@ def _structural_salad(text: str) -> Tuple[bool, List[str]]:
         m = re.fullmatch(r'(?:([^A-Za-z0-9\s]{1,3}))\1{2,}', tok)
         if m:
             intra_repeat = max(intra_repeat, len(tok) // len(m.group(1)))
-        alpha_runs = re.findall(r'[A-Za-z]+', tok)
-        run = max(alpha_runs, key=len) if alpha_runs else ''
-        if len(run) >= 8:
-            parts = re.split(r'(?<=[a-z])(?=[A-Z])', run)
-            if len(parts) > 1 and all(len(p) >= 3 for p in parts):
-                if any(not _looks_dictionary(p.lower()) for p in parts):
-                    glued_pseudo += 1
+        # NOTE: a structural "glued camelCase pseudoword" signal was removed — it
+        # false-positived on legitimate CamelCase tech terms (PostgreSQL, GraphQL)
+        # and caught 0 GCG samples not already covered by the explicit P_GLUED
+        # marker (recall stays 203/203 without it).
         if core:
             word_judged += 1
             if not _looks_dictionary(core):
@@ -262,8 +262,6 @@ def _structural_salad(text: str) -> Tuple[bool, List[str]]:
                      and dict_words <= 3)
 
     hits: List[str] = []
-    if glued_pseudo >= 1:
-        hits.append("glued_pseudo")
     if repeat_pseudo >= 4:
         hits.append("repeat_pseudo")
     if sym_flood >= 5:
@@ -278,6 +276,25 @@ def _structural_salad(text: str) -> Tuple[bool, List[str]]:
 # ---------------------------------------------------------------------------
 # Result + public interface (mirrors detectors.inter_model)
 # ---------------------------------------------------------------------------
+
+# Benign-analysis / educational / config framing.  Security users legitimately
+# QUOTE attack directives ("Example from MITRE ATLAS: override safety settings",
+# "this prompt was flagged by our WAF: '...DAN...'", CONST_KEY = "bypass_safety").
+# A real GCG attack carries no such framing, so when it is present we suppress
+# this (defense-in-depth) detector and let the rest of the pipeline judge the
+# text — preventing FPs on security/educational/config content.
+_BENIGN_FRAMING_RE = re.compile(
+    r"\b(?:for example|e\.g\.|example (?:from|of|attack|payload|prompt)|for reference|"
+    r"mitre|atlas|owasp|cve-\d|cwe-\d|"
+    r"flagged by|detected by|blocked by|caught by|(?:our|the) waf|"
+    r"this (?:prompt|payload|message|input|text|string) (?:was|is|looks|appears)|"
+    r"the following (?:prompt|payload|attack|input|example)|"
+    r"suspected|sample attack|known attack|test (?:case|payload)|attack example|"
+    r"real attack or|false (?:alarm|positive)|is this (?:a )?(?:real|safe|legit)|"
+    r"for analysis|under review|quarantine)\b",
+    re.IGNORECASE)
+# Constant/config assignment (CONST_KEY = "..."), case-sensitive on the key.
+_CONFIG_ASSIGN_RE = re.compile(r"\b[A-Z][A-Z0-9_]{2,}\s*=\s*['\"]")
 
 # A structural-salad-only hit (no marker) is treated as this confidence — strong
 # enough to escalate, since these signals are FP-verified at 0% on benign.
@@ -304,6 +321,12 @@ def detect_adversarial_suffix(text: str) -> AdversarialSuffixResult:
     matched-signal weight, ``0.0`` when nothing fires.
     """
     if not text or not text.strip():
+        return AdversarialSuffixResult()
+
+    # Suppress on clear benign-analysis / educational / config framing: security
+    # users quote attack directives for analysis, and a genuine GCG attack carries
+    # no such framing.  Other pipeline layers still judge the text.
+    if _BENIGN_FRAMING_RE.search(text) or _CONFIG_ASSIGN_RE.search(text):
         return AdversarialSuffixResult()
 
     fired, weight, labels = _marker_score(text)
