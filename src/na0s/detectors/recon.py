@@ -7,7 +7,19 @@ Two detection modes:
   Mode 1 (stateless): Single-turn pattern matching -> LOW severity
   Mode 2 (stateful):  Multi-probe escalation across turns -> MEDIUM/HIGH
 
-Integration: Called from cascade.py. Results feed into composite scoring.
+Integration
+-----------
+The single-turn E2 path that runs in production is the rule set: ``RECON_RULES``
+is consumed by ``layer1/rules_registry.py`` and the E2-reconnaissance floor in
+``predict.py`` escalates high/critical E2 rule hits — single-turn E2 recall is
+already 100% via that path (see ``tests/test_scan_e2_reconnaissance.py``).
+
+``detect_reconnaissance()`` itself is a standalone helper (exercised by
+``tests/detectors/test_recon_detector.py``) and is **not** currently wired into
+``predict.py`` / ``cascade.py``; wiring its single-turn Mode 1 would duplicate the
+rules path.  Its Mode 2 (multi-turn stateful escalation) is the only net-new
+capability and is intended for future integration into the conversation
+subsystem (``layer16``), which owns cross-turn state.
 """
 
 from __future__ import annotations
