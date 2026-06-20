@@ -182,6 +182,19 @@ try:
 except ImportError:
     _HAS_INTER_MODEL = False
 
+# Adversarial-suffix / token-smuggling detector (D7.5 + A1.1 — GCG family) —
+# optional import.  Catches gradient-optimized adversarial suffixes that evade
+# the perplexity heuristic by construction (a harmful request + gibberish suffix).
+try:
+    from .detectors.adversarial_suffix import (
+        detect_adversarial_suffix as _detect_adversarial_suffix,
+        get_adversarial_suffix_weight as _get_adversarial_suffix_weight,
+        STRONG_MATCH_THRESHOLD as _ADV_SUFFIX_STRONG_THRESHOLD,
+    )
+    _HAS_ADV_SUFFIX = True
+except ImportError:
+    _HAS_ADV_SUFFIX = False
+
 # MCP tool shadowing detector (T1) — optional import
 try:
     from .mcp_tool_detector import (
@@ -1154,6 +1167,39 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     if inter_model_weight > 0.0:
         composite = min(composite + inter_model_weight, 1.0)
         if (composite >= threshold or inter_model_strong) and label in (
+            "SAFE", "safe", "benign",
+        ):
+            label = "MALICIOUS"
+
+    # --- Adversarial-suffix / token-smuggling detection (D7.5 + A1.1, GCG) ---
+    # GCG suffixes are gradient-optimized to keep perplexity low (real suffixes
+    # score 0.38-0.51, never crossing the 0.7 perplexity gate), so a harmful
+    # request + adversarial suffix otherwise scores ~0.  A dedicated detector
+    # (FP-verified at 0% on code/regex/math/bash benign) contributes a bounded
+    # weight and a STRONG-match escalation.
+    adv_suffix_weight = 0.0
+    adv_suffix_strong = False
+    if _HAS_ADV_SUFFIX:
+        try:
+            as_result = _detect_adversarial_suffix(clean)
+            if as_result.risk_score > 0.0:
+                adv_suffix_weight = _get_adversarial_suffix_weight(as_result)
+                adv_suffix_strong = (
+                    as_result.risk_score >= _ADV_SUFFIX_STRONG_THRESHOLD
+                )
+                _sev = "high" if adv_suffix_strong else "medium"
+                for indicator in as_result.risk_indicators:
+                    hit_name = "adv_suffix:" + indicator
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        _local_severities[hit_name] = _sev
+        except Exception:
+            logger.debug("Adversarial-suffix detection failed", exc_info=True)
+
+    if adv_suffix_weight > 0.0:
+        composite = min(composite + adv_suffix_weight, 1.0)
+        if (composite >= threshold or adv_suffix_strong) and label in (
             "SAFE", "safe", "benign",
         ):
             label = "MALICIOUS"

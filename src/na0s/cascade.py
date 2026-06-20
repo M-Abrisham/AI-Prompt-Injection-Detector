@@ -183,6 +183,19 @@ try:
 except ImportError:
     _HAS_INTER_MODEL = False
 
+# Adversarial-suffix / token-smuggling detector (D7.5 + A1.1, GCG) — PARITY with
+# predict.py scan(): a harmful request + gradient-optimized gibberish suffix that
+# evades the perplexity gate.  Mirror the bounded weight + strong-match escalation.
+try:
+    from .detectors.adversarial_suffix import (
+        detect_adversarial_suffix as _detect_adversarial_suffix,
+        get_adversarial_suffix_weight as _get_adversarial_suffix_weight,
+        STRONG_MATCH_THRESHOLD as _ADV_SUFFIX_STRONG_THRESHOLD,
+    )
+    _HAS_ADV_SUFFIX = True
+except ImportError:
+    _HAS_ADV_SUFFIX = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 
@@ -662,6 +675,29 @@ class WeightedClassifier:
                         label = "MALICIOUS"
             except Exception:
                 _logger.debug("Inter-model propagation (parity) failed", exc_info=True)
+
+        # --- Adversarial-suffix / token-smuggling (D7.5 + A1.1) — parity with scan() ---
+        # GCG suffix attacks evade the perplexity gate; a strong precision-anchored
+        # match escalates directly so the cascade path catches them too.
+        if _HAS_ADV_SUFFIX:
+            try:
+                _as_result = _detect_adversarial_suffix(text)
+                if _as_result.risk_score > 0.0:
+                    _as_weight = _get_adversarial_suffix_weight(_as_result)
+                    if _as_weight > 0.0:
+                        composite = min(composite + _as_weight, 1.0)
+                    for _ind in _as_result.risk_indicators:
+                        _as_hit = "adv_suffix:" + _ind
+                        if _as_hit not in hit_names_seen:
+                            hit_names.append(_as_hit)
+                            hit_names_seen.add(_as_hit)
+                    _as_strong = (
+                        _as_result.risk_score >= _ADV_SUFFIX_STRONG_THRESHOLD
+                    )
+                    if (composite >= self.threshold or _as_strong) and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Adversarial-suffix (parity) failed", exc_info=True)
 
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
@@ -1194,19 +1230,19 @@ class CascadeClassifier:
                     with self._stats_lock:
                         self._layer_failures["judge"] += 1
 
-        # A strong fabricated-authority (inter-model) match must veto the
-        # Layer-8 positive-validation downgrade below: these attacks read as
-        # benign collaboration, which is exactly what positive validation keys
-        # on, so without this guard a confirmed propagation block would be
-        # erased.  Recomputed here (the weighted stage's local does not cross
-        # the method boundary) and only when it can matter (label == MALICIOUS).
+        # A strong confirmed-attack signal must veto the Layer-8 positive-validation
+        # downgrade below: inter-model propagation reads as benign collaboration, and
+        # a GCG/adversarial-suffix attack carries a harmful request that positive
+        # validation could wrongly clear — without this guard a confirmed block would
+        # be erased.  Recomputed here (the weighted stage's local does not cross the
+        # method boundary) and only when it can matter (label == MALICIOUS).
         _strong_propagation_hit = False
-        if _HAS_INTER_MODEL and label == "MALICIOUS":
+        if label == "MALICIOUS":
             try:
-                _im_pv = _detect_inter_model(clean)
-                _strong_propagation_hit = (
-                    _im_pv.risk_score >= _INTER_MODEL_STRONG_THRESHOLD
-                )
+                if _HAS_INTER_MODEL and _detect_inter_model(clean).risk_score >= _INTER_MODEL_STRONG_THRESHOLD:
+                    _strong_propagation_hit = True
+                elif _HAS_ADV_SUFFIX and _detect_adversarial_suffix(clean).risk_score >= _ADV_SUFFIX_STRONG_THRESHOLD:
+                    _strong_propagation_hit = True
             except Exception:
                 _strong_propagation_hit = False
 
