@@ -96,6 +96,9 @@ jobs:
       - name: Generate synthetic training samples (D3/D4/D5/D6/D7/D8/E1/E2/C1/O1/P1)
         run: python scripts/gen_all_datasets.py
 
+      - name: Generate taxonomy-probe training samples (IM/IG/AD/M/T/S/... + gap closure)
+        run: python -m scripts.generate_taxonomy_samples
+
       - name: Merge and deduplicate all data
         run: python -m scripts.process_data
 
