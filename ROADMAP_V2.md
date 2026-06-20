@@ -1460,7 +1460,7 @@ Full pipeline end-to-end: registry-driven sync of 72 external sources (count ver
 - [ ] **Parallel generation** — `generate_taxonomy_samples.py` is single-threaded. **Priority**: P2.
 
 **Test coverage gaps:**
-- [ ] **`deploy_model.py`** — backup/rollback paths, `KNOWN_HASHES` regex replacement, failure-mode assertions. **Priority**: P1.
+- [x] **`deploy_model.py`** ✅ DONE (this commit, branch `fix/auto-retrain-integrity-gate`) — backup/rollback paths, `KNOWN_HASHES` regex replacement, failure-mode assertions. `tests/test_deploy_model.py` now 38 tests; the happy paths (copy/backup/rollback/KNOWN_HASHES-merge/char-vectorizer/sidecar-regen) were already covered, this adds the error branches via `TestDeployFailureModes`: deploy copy-failure, rollback restore-failure, unreadable `__init__`, `_write_sidecar` OSError, and `_backup_file` size-mismatch — each must exit 1. **Priority**: P1.
 - [x] **`integrate_harvest.py`** ✅ DONE (this commit, branch `fix/auto-retrain-integrity-gate`) — end-to-end JSONL → staging routing through quarantine, confidence filter, malformed-line tolerance. New `tests/test_integrate_harvest.py` (14 tests): `read_jsonl` malformed/blank/missing-file handling; F2 harvest-description safe-default (skipped unless `--include-harvest-descriptions`) + short-description filter; scrape confidence filter + non-numeric-confidence→0.0 + normalized-text dedup + label normalization; `ingest_via_quarantine` grouping + per-source staging + quarantined/direct_pass/error tally + dry-run-stages-without-ingest + empty-records. **Priority**: P1.
 - [ ] **`features.py` + `model.py`** — thin CLI wrappers around ml/tfidf but no direct tests. **Priority**: P2.
 

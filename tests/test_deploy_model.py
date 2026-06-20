@@ -708,5 +708,98 @@ class TestShippedSidecarsFresh(unittest.TestCase):
             self.skipTest("no shipped .pkl + .sha256 pairs found in this build")
 
 
+# ---------------------------------------------------------------------------
+# Failure-mode branch coverage (TC1)
+# ---------------------------------------------------------------------------
+
+class TestDeployFailureModes(unittest.TestCase):
+    """Exercise the error branches that the happy-path tests never reach:
+    copy failure, rollback restore failure, unreadable __init__, sidecar write
+    failure, and backup size-mismatch — each must exit 1 (or sys.exit(1))."""
+
+    def _setup_dirs(self, td):
+        src_dir = os.path.join(td, "processed")
+        dst_dir = os.path.join(td, "models")
+        os.makedirs(src_dir)
+        os.makedirs(dst_dir)
+        init_path = os.path.join(dst_dir, "__init__.py")
+        _write_file(init_path, _INIT_TEMPLATE.encode())
+        return src_dir, dst_dir, init_path
+
+    def test_deploy_copy_failure_exits_1(self):
+        """shutil.copy2 raising OSError during deploy must exit 1."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"data_" + fname.encode())
+            with mock.patch("shutil.copy2", side_effect=OSError("disk full")):
+                with self.assertRaises(SystemExit) as ctx:
+                    deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            self.assertEqual(ctx.exception.code, 1)
+
+    def test_rollback_copy_failure_exits_1(self):
+        """shutil.copy2 raising OSError during rollback must exit 1."""
+        from scripts.deploy_model import rollback
+        with tempfile.TemporaryDirectory() as td:
+            dst_dir = os.path.join(td, "models")
+            os.makedirs(dst_dir)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(dst_dir, fname), b"live")
+                _write_file(os.path.join(dst_dir, fname + ".bak"), b"old")
+            with mock.patch("shutil.copy2", side_effect=OSError("read-only fs")):
+                with self.assertRaises(SystemExit) as ctx:
+                    rollback(dest_dir=dst_dir)
+            self.assertEqual(ctx.exception.code, 1)
+
+    def test_deploy_unreadable_init_exits_1(self):
+        """An __init__ path that cannot be read (here: a directory) exits 1."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir = os.path.join(td, "processed")
+            dst_dir = os.path.join(td, "models")
+            os.makedirs(src_dir)
+            os.makedirs(dst_dir)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"data_" + fname.encode())
+            # init_path is a directory -> open(..., "r") raises OSError.
+            init_dir = os.path.join(dst_dir, "init_as_dir")
+            os.makedirs(init_dir)
+            with self.assertRaises(SystemExit) as ctx:
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_dir)
+            self.assertEqual(ctx.exception.code, 1)
+
+    def test_write_sidecar_oserror_exits_1(self):
+        """_write_sidecar must exit 1 when the sidecar path is unwritable."""
+        from scripts.deploy_model import _write_sidecar
+        with tempfile.TemporaryDirectory() as td:
+            pkl = os.path.join(td, "model.pkl")
+            _write_file(pkl, b"x")
+            os.makedirs(pkl + ".sha256")  # directory at the sidecar path
+            with self.assertRaises(SystemExit) as ctx:
+                _write_sidecar(pkl, "deadbeef")
+            self.assertEqual(ctx.exception.code, 1)
+
+    def test_backup_size_mismatch_exits_1(self):
+        """_backup_file must exit 1 when the backup size differs from the original."""
+        from scripts.deploy_model import _backup_file
+        with tempfile.TemporaryDirectory() as td:
+            dst = os.path.join(td, "model.pkl")
+            _write_file(dst, b"data")
+            real_getsize = os.path.getsize
+
+            def fake_getsize(p):
+                # Report a wrong size for the timestamped backup only.
+                base = os.path.basename(p)
+                if base.startswith("model.pkl.") and base.endswith(".bak") and "-" in base:
+                    return 999999
+                return real_getsize(p)
+
+            with mock.patch("os.path.getsize", side_effect=fake_getsize):
+                with self.assertRaises(SystemExit) as ctx:
+                    _backup_file(dst)
+            self.assertEqual(ctx.exception.code, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
