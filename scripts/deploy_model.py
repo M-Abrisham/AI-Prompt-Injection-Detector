@@ -42,6 +42,36 @@ def _sha256(path):
     return h.hexdigest()
 
 
+def _write_sidecar(dst, digest):
+    """Write a fresh plain-SHA-256 sidecar (``<dst>.sha256``) for *dst*.
+
+    ``deploy_model`` copies the .pkl but not its sidecar, so without this the
+    destination keeps whatever (possibly stale) sidecar shipped — the .sha256
+    drifts from the .pkl it is supposed to guard (the F-AR6 bug).  Regenerate it
+    from the freshly-deployed file every time, including the unchanged-skip path.
+
+    Uses the canonical versioned format from ``safe_pickle._format_sidecar``
+    (``v1:sha256:<digest>``) so it never drifts from what ``safe_dump`` writes;
+    falls back to the legacy bare-hex form (still accepted by ``_parse_sidecar``)
+    if na0s is not importable, so deployment never breaks on the sidecar.  The
+    primary supply-chain anchor remains KNOWN_HASHES in __init__.py; this keeps
+    the secondary/legacy sidecar path honest.
+    """
+    sidecar_path = dst + ".sha256"
+    try:
+        from na0s.integrity.safe_pickle import _format_sidecar
+        content = _format_sidecar("sha256", digest)
+    except Exception:
+        content = digest  # legacy bare-hex form; _parse_sidecar accepts it
+    try:
+        with open(sidecar_path, "w", encoding="utf-8") as f:
+            f.write(content)
+    except OSError as exc:
+        print(f"ERROR: could not write sidecar {sidecar_path}: {exc}")
+        sys.exit(1)
+    print(f"  Wrote sidecar {os.path.basename(sidecar_path)}")
+
+
 def _backup_file(dst):
     """Create two backups of *dst*: a timestamped one and a plain .bak.
 
@@ -132,6 +162,9 @@ def deploy(source_dir=None, dest_dir=None, init_path=None):
             if src_digest == dst_digest:
                 print(f"  {fname}: unchanged (sha256 identical), skipping copy")
                 new_hashes[fname] = src_digest
+                # Even when the .pkl is unchanged, refresh the sidecar: the
+                # shipped one may be stale (the F-AR6 bug this closes).
+                _write_sidecar(dst, src_digest)
                 continue
 
             # Backup the existing destination before overwriting
@@ -145,6 +178,7 @@ def deploy(source_dir=None, dest_dir=None, init_path=None):
 
         digest = _sha256(dst)
         new_hashes[fname] = digest
+        _write_sidecar(dst, digest)
         print(f"  Copied {fname}  sha256={digest[:16]}...")
 
     # 2. Update KNOWN_HASHES in __init__.py

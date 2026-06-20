@@ -614,5 +614,99 @@ class TestCharVectorizerRequired(unittest.TestCase):
                 self.assertEqual(f.read(), bak_content)
 
 
+# ---------------------------------------------------------------------------
+# Sidecar regeneration (F-AR6)
+# ---------------------------------------------------------------------------
+
+def _parse_sidecar(raw):
+    """Local mirror of safe_pickle._parse_sidecar so this test has no hard
+    dependency on the (heavy) na0s import for the deploy-path assertions."""
+    raw = raw.strip()
+    if raw.startswith("v1:"):
+        parts = raw.split(":", 2)
+        if len(parts) == 3:
+            return parts[2]
+    return raw
+
+
+class TestSidecarRegen(unittest.TestCase):
+    """F-AR6: deploy_model must (re)write each model file's .sha256 sidecar from
+    the freshly-deployed bytes — deploy copies the .pkl but not its sidecar, so
+    without this the destination keeps a stale sidecar that no longer matches the
+    .pkl it guards."""
+
+    def _setup_dirs(self, td):
+        src_dir = os.path.join(td, "processed")
+        dst_dir = os.path.join(td, "models")
+        os.makedirs(src_dir)
+        os.makedirs(dst_dir)
+        init_path = os.path.join(dst_dir, "__init__.py")
+        _write_file(init_path, _INIT_TEMPLATE.encode())
+        return src_dir, dst_dir, init_path
+
+    def test_sidecar_written_and_matches_pkl(self):
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"fresh_" + fname.encode())
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                pkl = os.path.join(dst_dir, fname)
+                sidecar = pkl + ".sha256"
+                self.assertTrue(os.path.exists(sidecar), f"sidecar missing for {fname}")
+                parsed = _parse_sidecar(open(sidecar).read())
+                self.assertEqual(parsed, _sha256(pkl),
+                                 f"sidecar for {fname} does not match its .pkl")
+
+    def test_unchanged_branch_refreshes_stale_sidecar(self):
+        """The bug exactly: .pkl unchanged but the shipped sidecar is stale.
+        deploy's unchanged-skip path must still rewrite the sidecar."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                content = b"identical_" + fname.encode()
+                _write_file(os.path.join(src_dir, fname), content)
+                _write_file(os.path.join(dst_dir, fname), content)  # same bytes -> skip copy
+                # Seed a STALE sidecar that does NOT match the file.
+                _write_file(os.path.join(dst_dir, fname + ".sha256"), b"v1:sha256:" + b"0" * 64)
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                pkl = os.path.join(dst_dir, fname)
+                parsed = _parse_sidecar(open(pkl + ".sha256").read())
+                self.assertEqual(parsed, _sha256(pkl),
+                                 f"stale sidecar for {fname} was not refreshed")
+
+
+class TestShippedSidecarsFresh(unittest.TestCase):
+    """Regression guard against the real shipped sidecars going stale again
+    (the original F-AR6 finding: model.pkl.sha256 / tfidf_vectorizer.pkl.sha256
+    did not match their .pkl)."""
+
+    def test_shipped_sidecars_match_their_pkl(self):
+        from scripts.deploy_model import DEST_DIR
+        checked = 0
+        for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+            pkl = os.path.join(DEST_DIR, fname)
+            sidecar = pkl + ".sha256"
+            if not (os.path.exists(pkl) and os.path.exists(sidecar)):
+                continue
+            parsed = _parse_sidecar(open(sidecar).read())
+            self.assertEqual(
+                parsed, _sha256(pkl),
+                f"shipped {fname}.sha256 is stale — does not match {fname}",
+            )
+            checked += 1
+        if checked == 0:
+            self.skipTest("no shipped .pkl + .sha256 pairs found in this build")
+
+
 if __name__ == "__main__":
     unittest.main()
