@@ -193,6 +193,28 @@ class TestDeploy(unittest.TestCase):
             self.assertRegex(content, r'"model\.pkl":\s*"[0-9a-f]{64}"')
             self.assertRegex(content, r'"tfidf_vectorizer\.pkl":\s*"[0-9a-f]{64}"')
 
+    def test_merge_preserves_unretrained_pins(self):
+        """F-AR2: deploy MERGES new hashes over the existing KNOWN_HASHES, so a
+        pin the retrain does NOT regenerate (model_embedding.pkl, produced only
+        by scripts/model_embedding.py) is preserved rather than dropped."""
+        from scripts.deploy_model import deploy
+        try:
+            from na0s.models import KNOWN_HASHES
+        except Exception:
+            self.skipTest("na0s.models not importable")
+        if "model_embedding.pkl" not in KNOWN_HASHES:
+            self.skipTest("no model_embedding.pkl pin to preserve in this build")
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"cand_" + fname.encode())
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            content = open(init_path).read()
+            # The unretrained embedding pin survives the rewrite (merge, not replace).
+            self.assertIn("model_embedding.pkl", content)
+            self.assertIn(KNOWN_HASHES["model_embedding.pkl"], content)
+
     def test_backup_created_when_dest_exists(self):
         from scripts.deploy_model import deploy
         with tempfile.TemporaryDirectory() as td:
