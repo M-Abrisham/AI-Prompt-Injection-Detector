@@ -1,8 +1,49 @@
 """Unit tests for na0s.predict public interface."""
 
+from unittest.mock import MagicMock
+
 import pytest
-from na0s.predict import scan
+import scipy.sparse
+
+from na0s.predict import scan, _transform
 from na0s.scan_result import ScanResult
+
+
+class TestTransformFailLoud:
+    """F-AR8: a *provided* feature artifact that fails to transform must fail
+    loud, not silently skip.  Skipping a provided component builds a feature
+    vector that doesn't match what the model was trained on, producing
+    silently-wrong scores (e.g. a candidate graded in the canary gate against a
+    mismatched bundle).  The only legitimate skip is the artifact-is-None
+    backward-compat case."""
+
+    @staticmethod
+    def _word_vectorizer():
+        vec = MagicMock()
+        vec.transform.return_value = scipy.sparse.csr_matrix([[1.0, 2.0]])
+        return vec
+
+    def test_provided_char_vectorizer_failure_raises(self):
+        bad = MagicMock()
+        bad.transform.side_effect = ValueError("dimension mismatch")
+        with pytest.raises(ValueError):
+            _transform("hi", self._word_vectorizer(), char_vectorizer=bad)
+
+    def test_provided_scaler_failure_raises(self):
+        bad = MagicMock()
+        bad.transform.side_effect = ValueError("scaler shape mismatch")
+        # Only meaningful when structural features are available in this build.
+        from na0s import predict as _p
+        if not _p._HAS_STRUCTURAL_FEATURES:
+            pytest.skip("structural features unavailable in this build")
+        with pytest.raises(ValueError):
+            _transform("hi", self._word_vectorizer(), scaler=bad)
+
+    def test_none_artifacts_skip_gracefully(self):
+        # Backward-compat: None components are skipped without error.
+        out = _transform("hi", self._word_vectorizer(),
+                         scaler=None, char_vectorizer=None)
+        assert scipy.sparse.issparse(out)
 
 
 class TestScanBasic:

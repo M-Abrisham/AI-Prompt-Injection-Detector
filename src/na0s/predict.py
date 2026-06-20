@@ -470,23 +470,30 @@ def _transform(text, vectorizer, scaler=None, char_vectorizer=None):
     import scipy.sparse
     X = vectorizer.transform([text])
 
-    # Layer 4: char-level TF-IDF (optional)
+    # Layer 4: char-level TF-IDF (optional).  Backward-compat skip is the
+    # `char_vectorizer is None` case (handled by the guard).  A PROVIDED
+    # char-vectorizer that fails to transform is a real model/vectorizer mismatch
+    # — silently skipping it would build a feature vector that doesn't match what
+    # the model was trained on, producing silently-wrong scores (e.g. a candidate
+    # graded in the canary gate against a mismatched bundle).  Fail loud instead.
     if char_vectorizer is not None:
         try:
             X_char = char_vectorizer.transform([text])
             X = scipy.sparse.hstack([X, X_char], format="csr")
-        except Exception:
-            logger.warning("char TF-IDF transform failed — skipping char features")
+        except Exception as exc:
+            logger.error("char TF-IDF transform failed for a provided vectorizer: %s", exc)
+            raise
 
-    # Layer 3: structural features (optional)
+    # Layer 3: structural features (optional) — same fail-loud contract.
     if scaler is not None and _HAS_STRUCTURAL_FEATURES:
         try:
             struct_arr = extract_structural_features_batch([text])
             struct_scaled = scaler.transform(struct_arr)
             X = scipy.sparse.hstack([X, scipy.sparse.csr_matrix(struct_scaled)],
                                     format="csr")
-        except Exception:
-            logger.warning("structural feature transform failed — skipping")
+        except Exception as exc:
+            logger.error("structural feature transform failed for a provided scaler: %s", exc)
+            raise
     return X
 
 
