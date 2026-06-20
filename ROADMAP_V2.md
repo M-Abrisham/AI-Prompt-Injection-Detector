@@ -1461,7 +1461,7 @@ Full pipeline end-to-end: registry-driven sync of 72 external sources (count ver
 
 **Test coverage gaps:**
 - [ ] **`deploy_model.py`** — backup/rollback paths, `KNOWN_HASHES` regex replacement, failure-mode assertions. **Priority**: P1.
-- [ ] **`integrate_harvest.py`** — end-to-end JSONL → staging routing through quarantine, confidence filter, malformed-line tolerance. **Priority**: P1.
+- [x] **`integrate_harvest.py`** ✅ DONE (this commit, branch `fix/auto-retrain-integrity-gate`) — end-to-end JSONL → staging routing through quarantine, confidence filter, malformed-line tolerance. New `tests/test_integrate_harvest.py` (14 tests): `read_jsonl` malformed/blank/missing-file handling; F2 harvest-description safe-default (skipped unless `--include-harvest-descriptions`) + short-description filter; scrape confidence filter + non-numeric-confidence→0.0 + normalized-text dedup + label normalization; `ingest_via_quarantine` grouping + per-source staging + quarantined/direct_pass/error tally + dry-run-stages-without-ingest + empty-records. **Priority**: P1.
 - [ ] **`features.py` + `model.py`** — thin CLI wrappers around ml/tfidf but no direct tests. **Priority**: P2.
 
 **Pipeline Architecture v2 — harvest → classify → label → dedup → train (approved 2026-04-23):**
