@@ -36,6 +36,19 @@ TRAINING_JSONL_DIRS = [AGGREGATED_DIR, HARVEST_DIR]
 TEXT_CANDIDATES = ["text", "prompt", "instruction", "User Prompt", "body"]
 LABEL_CANDIDATES = ["label", "labels"]
 
+# Provenance columns carried through into combined_data.csv (F7).
+# These are ADDITIVE metadata only — they never affect which rows train or
+# their labels. Downstream consumers (scripts/features.py, scripts/model.py)
+# read only `text`/`label` and ignore unknown columns. Guarded by
+# tests/test_no_holdout_leakage.py + tests/test_process_data_provenance.py.
+PROVENANCE_COLUMNS = ("source", "source_id", "license")
+
+# Candidate column names for provenance carried from inputs (e.g. JSONL
+# enrichment metadata written by the harvest pipeline / Na0SSample.to_dict).
+SOURCE_CANDIDATES = ["source", "hf_dataset", "dataset"]
+SOURCE_ID_CANDIDATES = ["source_id", "stable_id", "id"]
+LICENSE_CANDIDATES = ["license", "license_url"]
+
 
 def _detect_column(df, candidates):
     """Return the first column name from *candidates* that exists in *df*."""
@@ -45,8 +58,42 @@ def _detect_column(df, candidates):
     return None
 
 
+def _attach_provenance(out, df, path):
+    """Stamp provenance columns onto *out* (aligned to *df*'s index).
+
+    `source` defaults to the input file's basename so every training row is
+    traceable to its origin file even when the input has no `source` column.
+    `source_id` / `license` are carried from the input when present, else NaN.
+    *out* must share *df*'s index (it does — `out` is built column-by-column
+    from *df*), so this assignment is row-aligned before any dropna.
+    """
+    basename = os.path.basename(path)
+
+    src_col = _detect_column(df, SOURCE_CANDIDATES)
+    if src_col is not None:
+        # Carry input source, but fall back to the file basename for any
+        # row missing a value so provenance is never blank.
+        out["source"] = df[src_col].astype("object").where(
+            df[src_col].notna(), basename
+        )
+    else:
+        out["source"] = basename
+
+    sid_col = _detect_column(df, SOURCE_ID_CANDIDATES)
+    out["source_id"] = (
+        df[sid_col].astype("object") if sid_col is not None else pd.NA
+    )
+
+    lic_col = _detect_column(df, LICENSE_CANDIDATES)
+    out["license"] = (
+        df[lic_col].astype("object") if lic_col is not None else pd.NA
+    )
+
+    return out
+
+
 def _load_csv(path):
-    """Load a single CSV and normalise to (text, label)."""
+    """Load a single CSV and normalise to (text, label) + provenance."""
     df = pd.read_csv(path)
 
     text_col = _detect_column(df, TEXT_CANDIDATES)
@@ -57,7 +104,7 @@ def _load_csv(path):
 
     label_col = _detect_column(df, LABEL_CANDIDATES)
 
-    out = pd.DataFrame()
+    out = pd.DataFrame(index=df.index)
     out["text"] = df[text_col].astype(str)
 
     if label_col is not None:
@@ -68,6 +115,10 @@ def _load_csv(path):
               f"(no label column found among {LABEL_CANDIDATES})")
         return None
 
+    # Provenance is attached BEFORE dropna so it stays row-aligned; rows
+    # dropped for missing text/label drop their provenance with them.
+    _attach_provenance(out, df, path)
+
     out = out.dropna(subset=["text", "label"])
     out["label"] = out["label"].astype(int)
     # Only keep valid binary labels
@@ -76,7 +127,7 @@ def _load_csv(path):
 
 
 def _load_jsonl(path):
-    """Load a single JSONL file and normalise to (text, label)."""
+    """Load a single JSONL file and normalise to (text, label) + provenance."""
     df = pd.read_json(path, lines=True)
 
     text_col = _detect_column(df, TEXT_CANDIDATES)
@@ -87,7 +138,7 @@ def _load_jsonl(path):
 
     label_col = _detect_column(df, LABEL_CANDIDATES)
 
-    out = pd.DataFrame()
+    out = pd.DataFrame(index=df.index)
     out["text"] = df[text_col].astype(str)
 
     if label_col is not None:
@@ -96,6 +147,8 @@ def _load_jsonl(path):
         print(f"  WARN: skipping {os.path.basename(path)} "
               f"(no label column found among {LABEL_CANDIDATES})")
         return None
+
+    _attach_provenance(out, df, path)
 
     out = out.dropna(subset=["text", "label"])
     out["label"] = out["label"].astype(int)

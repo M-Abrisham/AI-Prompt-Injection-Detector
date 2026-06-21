@@ -372,8 +372,16 @@ def scan_huggingface(queries, since_days=7, known_ids=None):
 # Source B: arXiv
 # ---------------------------------------------------------------------------
 
-def scan_arxiv(queries, since_days=7):
-    """Search arXiv API for recent papers.  Returns list of paper dicts."""
+def scan_arxiv(queries, since_days=7, known_ids=None):
+    """Search arXiv API for recent papers.  Returns list of paper dicts.
+
+    *known_ids* is the shared known-corpus registry (arXiv IDs, GitHub
+    full_names, and HF IDs all live in one set). Papers whose arXiv ID is
+    already known are skipped so weekly runs don't re-surface the same papers.
+    """
+    if known_ids is None:
+        known_ids = set()
+
     cutoff = _utcnow() - timedelta(days=since_days)
     seen_ids = set()
     results = []
@@ -400,7 +408,7 @@ def scan_arxiv(queries, since_days=7):
             if arxiv_id_el is None or arxiv_id_el.text is None:
                 continue
             arxiv_id = arxiv_id_el.text.strip()
-            if arxiv_id in seen_ids:
+            if arxiv_id in seen_ids or arxiv_id in known_ids:
                 continue
             seen_ids.add(arxiv_id)
 
@@ -472,8 +480,15 @@ def scan_arxiv(queries, since_days=7):
 # Source C: GitHub
 # ---------------------------------------------------------------------------
 
-def scan_github(queries, since_days=7):
-    """Search GitHub API for new repos.  Returns list of repo dicts."""
+def scan_github(queries, since_days=7, known_ids=None):
+    """Search GitHub API for new repos.  Returns list of repo dicts.
+
+    *known_ids* is the shared known-corpus registry. Repos whose ``full_name``
+    is already known are skipped so weekly runs don't re-surface the same repos.
+    """
+    if known_ids is None:
+        known_ids = set()
+
     since_date = _date_str(_utcnow() - timedelta(days=since_days))
     seen_ids = set()
     results = []
@@ -499,7 +514,7 @@ def scan_github(queries, since_days=7):
 
         for repo in items:
             full_name = repo.get("full_name", "")
-            if not full_name or full_name in seen_ids:
+            if not full_name or full_name in seen_ids or full_name in known_ids:
                 continue
             seen_ids.add(full_name)
 
@@ -634,7 +649,9 @@ def run_harvest(output_dir, since_days=7, sources=None, dry_run=False):
     # --- Source B: arXiv ---
     if "arxiv" in sources:
         try:
-            arxiv_results = scan_arxiv(ARXIV_QUERIES, since_days=since_days)
+            arxiv_results = scan_arxiv(
+                ARXIV_QUERIES, since_days=since_days, known_ids=known_ids,
+            )
             all_discoveries.extend(arxiv_results)
             source_counts["arxiv"] = len(arxiv_results)
         except Exception as exc:
@@ -645,7 +662,9 @@ def run_harvest(output_dir, since_days=7, sources=None, dry_run=False):
     # --- Source C: GitHub ---
     if "github" in sources:
         try:
-            gh_results = scan_github(GITHUB_QUERIES, since_days=since_days)
+            gh_results = scan_github(
+                GITHUB_QUERIES, since_days=since_days, known_ids=known_ids,
+            )
             all_discoveries.extend(gh_results)
             source_counts["github"] = len(gh_results)
         except Exception as exc:
@@ -722,15 +741,20 @@ def run_harvest(output_dir, since_days=7, sources=None, dry_run=False):
         _append_new_datasets(output_dir, all_discoveries)
     _update_scan_history(output_dir, scan_summary)
 
-    # Update known-datasets registry with newly discovered HF dataset IDs
-    new_hf_ids = {
-        entry["id"] for entry in all_discoveries
-        if entry["source"] == "huggingface"
+    # Update the shared known-corpus registry with ALL newly discovered IDs
+    # (HuggingFace IDs, arXiv IDs, and GitHub full_names alike).  Previously
+    # only HF IDs were persisted, so every weekly run re-surfaced the same
+    # arXiv papers and GitHub repos.  One flat registry serves all three
+    # sources because their ID namespaces are disjoint (HF "org/ds", arXiv
+    # "http://arxiv.org/abs/...", GitHub "owner/repo").
+    new_ids = {
+        entry["id"] for entry in all_discoveries if entry.get("id")
     }
-    if new_hf_ids:
-        updated_known = known_ids | new_hf_ids
+    new_ids -= known_ids
+    if new_ids:
+        updated_known = known_ids | new_ids
         save_known_datasets(known_path, updated_known)
-        log.info("Added %d new ID(s) to known-datasets registry", len(new_hf_ids))
+        log.info("Added %d new ID(s) to known-datasets registry", len(new_ids))
 
     # Print discovered items
     if all_discoveries:
