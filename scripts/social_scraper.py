@@ -82,7 +82,7 @@ SEARCH_KEYWORDS = [
 # rule categories (override, system_prompt, roleplay, named_jailbreak_persona,
 # exfiltration, api_key_extraction, completion_trick family, tool_enumeration,
 # worm_signature, destructive_action, ...).
-from na0s.layer1.rules_registry import RULES as _NA0S_RULES
+from na0s.rules.rules_registry import RULES as _NA0S_RULES
 
 INJECTION_PATTERNS = [
     r._compiled for r in _NA0S_RULES

@@ -52,7 +52,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from ..layer0.safe_regex import safe_compile
+from ..input.safe_regex import safe_compile
 
 
 # ---------------------------------------------------------------------------

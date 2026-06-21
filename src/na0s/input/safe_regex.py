@@ -17,7 +17,7 @@ Provides three layers of defence against Regular Expression Denial of Service:
 
 Usage::
 
-    from layer0.safe_regex import safe_compile, safe_search, safe_match
+    from na0s.input.safe_regex import safe_compile, safe_search, safe_match
 
     # Compile-time safety check + optional RE2 backend
     pat = safe_compile(r"(a+)+b")           # raises ValueError (unsafe)
