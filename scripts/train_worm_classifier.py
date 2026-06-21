@@ -27,7 +27,7 @@ SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-from na0s.worm_detector import WormSignatureDetector, _WormCorpusClassifier
+from na0s.worm.detector import WormSignatureDetector, _WormCorpusClassifier
 
 DEFAULT_DATA = os.path.join(ROOT, "data", "raw", "morris2", "morris2_combined.jsonl")
 DEFAULT_HF_DIR = os.path.join(ROOT, "data", "raw", "hf")
