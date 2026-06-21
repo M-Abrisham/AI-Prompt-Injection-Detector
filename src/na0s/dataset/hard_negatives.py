@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from na0s.rules import rule_score
-from na0s.safe_pickle import safe_load
+from na0s.integrity.safe_pickle import safe_load
 
 # ---------------------------------------------------------------------------
 # Paths (relative to project root)
@@ -508,30 +508,65 @@ def phase4_merge(original_df, hard_neg_df):
 # ========================================================================== #
 
 
+def _resolve_model_artifacts():
+    """Return (model, vectorizer), or (None, None) on a cold start.
+
+    Uses the freshly-trained artifacts in ``data/processed/`` — the warm path,
+    when a previous training run has produced a model whose feature space
+    (pure TF-IDF from ``scripts/features.py``) matches what the diagnostic
+    phases below vectorize. Returns ``(None, None)`` when that pair is absent
+    (the fresh-CI-runner cold start: ``data/processed/`` is git-ignored and the
+    auto-retrain pipeline mines hard negatives BEFORE the model is trained), so
+    the model-dependent FP diagnostics are skipped without aborting
+    hard-negative generation.
+
+    NOTE: the bundled ``na0s.models/`` production model is deliberately NOT a
+    fallback here — it is trained on TF-IDF + structural features (10029 dims),
+    so feeding it the TF-IDF-only matrix (10000 dims) that ``phase1`` builds
+    raises ``ValueError: X has 10000 features ... expecting 10029``. The only
+    feature-compatible model is one freshly trained in this same pipeline.
+    """
+    if os.path.isfile(MODEL_PATH) and os.path.isfile(VECTORIZER_PATH):
+        print("Loading freshly-trained (data/processed/) model and vectorizer...")
+        return safe_load(MODEL_PATH), safe_load(VECTORIZER_PATH)
+
+    print(
+        "WARNING: no freshly-trained model in data/processed/; skipping "
+        "model-dependent FP diagnostics (cold start). Hard negatives will "
+        "still be generated and merged."
+    )
+    return None, None
+
+
 def main():
     print("Hard-Negative Mining for AI Prompt Injection Detector")
     print("=" * 70)
 
-    # Load model artefacts
-    print("Loading model and vectorizer...")
-    model = safe_load(MODEL_PATH)
-    vectorizer = safe_load(VECTORIZER_PATH)
+    model, vectorizer = _resolve_model_artifacts()
     print("Loading training data...")
     df = pd.read_csv(COMBINED_CSV)
     df["text"] = df["text"].fillna("").astype(str)
     print(f"Loaded {len(df)} samples ({int((df['label']==0).sum())} safe, "
           f"{int((df['label']==1).sum())} malicious)\n")
 
-    # Phase 1
-    phase1_identify_fps(model, vectorizer, df)
-
-    # Phase 2
+    # Phase 2 — model-independent; always runs
     hard_neg_df = phase2_generate_hard_negatives()
 
-    # Phase 3
-    hard_neg_df = phase3_analyse_and_save(model, vectorizer, hard_neg_df)
+    if model is not None and vectorizer is not None:
+        # Phases 1 & 3 are diagnostic and require the model/vectorizer.
+        phase1_identify_fps(model, vectorizer, df)
+        hard_neg_df = phase3_analyse_and_save(model, vectorizer, hard_neg_df)
+    else:
+        # Cold start: persist the raw hard negatives (mirroring phase 3's
+        # side-effect) so they are reviewable, then merge them in.
+        save_cols = ["text", "label", "technique_id", "category", "source"]
+        os.makedirs(os.path.dirname(HARD_NEG_CSV), exist_ok=True)
+        hard_neg_df[save_cols].to_csv(
+            HARD_NEG_CSV, index=False, quoting=csv.QUOTE_ALL
+        )
+        print(f"\n  Saved {len(hard_neg_df)} hard negatives -> {HARD_NEG_CSV}")
 
-    # Phase 4
+    # Phase 4 — model-independent; always runs
     phase4_merge(df, hard_neg_df)
 
     print("\n" + "=" * 70)

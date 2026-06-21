@@ -1,34 +1,25 @@
-"""Layer 1: Regex-based signature rule engine for prompt injection detection.
+# SHIM -- do not add new code here
+"""Backward-compat package shim. Canonical location: na0s.rules
 
-110 pre-compiled rules covering 30+ technique IDs with:
-- 4-level paranoia system (PL1-PL4, env-configurable via RULES_PARANOIA_LEVEL)
-- Context-aware suppression (25 suppressible rules)
-- Unicode evasion defenses (homoglyph folding, Zalgo stripping, IOC refanging)
-- Syllable-splitting de-hyphenation (25 Unicode dash chars, compound whitelist)
-- ReDoS-safe patterns (all validated with safe_compile)
-
-Public API:
-  rule_score(text)          -> list[str]
-  rule_score_detailed(text) -> list[RuleHit]
-  extract_iocs(text)        -> IocResult
-  refang(text)              -> str
-  dehyphenate_suspicious(t) -> SplittingResult
-  detect_ascii_art(text)    -> AsciiArtResult
-  detect_numeric(text)      -> NumericDecodeResult
+Aliases the package AND each submodule into sys.modules under the old
+``na0s.layer1`` name, so ``from na0s.layer1.context import X`` returns the SAME
+module object as ``na0s.rules.context`` (preserves identity for mock-patching).
 """
+import importlib as _importlib
+import pkgutil as _pkgutil
+import sys as _sys
+import warnings as _warnings
 
-from .result import Rule, RuleHit, SEVERITY_WEIGHTS
-from .paranoia import get_paranoia_level, set_paranoia_level
-from .rules_registry import RULES, ROLE_ASSIGNMENT_PATTERN, PERSONA_OVERRIDE_PATTERNS
-from .analyzer import rule_score, rule_score_detailed
-from .ioc_extractor import extract_iocs, refang, IocResult
-
-from ..layer2.whitespace_stego import detect_whitespace_stego, StegoResult  # noqa: F401
-from ..layer2.morse_code import detect_morse, MorseResult  # noqa: F401
-from ..layer2.numeric_decode import (  # noqa: F401
-    detect_numeric, detect_binary, detect_octal, detect_decimal,
-    NumericDecodeResult,
+_warnings.warn(
+    "na0s.layer1 is deprecated; use na0s.rules instead",
+    DeprecationWarning,
+    stacklevel=2,
 )
-
-from ..layer2.syllable_splitting import dehyphenate_suspicious, SplittingResult  # noqa: F401
-from ..layer2.ascii_art_detector import detect_ascii_art, AsciiArtResult  # noqa: F401
+_canonical = _importlib.import_module("na0s.rules")
+_sys.modules[__name__] = _canonical
+for _info in _pkgutil.iter_modules(_canonical.__path__):
+    try:
+        _sub = _importlib.import_module(f"na0s.rules.{_info.name}")
+    except Exception:
+        continue
+    _sys.modules[f"{__name__}.{_info.name}"] = _sub

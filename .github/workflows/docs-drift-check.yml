@@ -40,25 +40,14 @@ jobs:
       - name: Detect facts.yaml drift
         id: facts_drift
         run: |
-          if git diff --quiet -- docs/facts.yaml; then
+          # Tolerates the volatile test-count fields (test_files / test_count.count)
+          # as a floor (>= committed is fine) so test-adding PRs don't hard-fail,
+          # while keeping stable facts (rules, taxonomy, constants, exports) exact.
+          # See scripts/check_facts_drift.py (ISS-08).
+          if python3 scripts/check_facts_drift.py > facts_status.txt 2>&1; then
             echo "drift=false" >> "$GITHUB_OUTPUT"
-            printf 'clean — committed docs/facts.yaml matches what extract_facts.py produces from source.\n' > facts_status.txt
           else
             echo "drift=true" >> "$GITHUB_OUTPUT"
-            {
-              echo 'docs/facts.yaml regenerated to a different value than what is committed.'
-              echo 'Likely cause: source code changed (rules, taxonomy, constants, L16 detectors, …) without re-running scripts/extract_facts.py.'
-              echo
-              echo 'Fix locally:'
-              echo '    python3 scripts/extract_facts.py'
-              echo '    git add docs/facts.yaml'
-              echo '    git commit --amend --no-edit  # or as a new commit'
-              echo
-              echo 'Diff:'
-              echo '```diff'
-              git diff -- docs/facts.yaml
-              echo '```'
-            } > facts_status.txt
           fi
 
       - name: Verify README numbers against facts.yaml
@@ -106,7 +95,7 @@ jobs:
 
       - name: Upsert PR comment
         if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');

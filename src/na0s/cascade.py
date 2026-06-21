@@ -19,17 +19,28 @@ import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
-from .predict import _get_cached_models, _get_cached_scaler, _transform, _get_model_version
+from .predict import (
+    _get_cached_models, _get_cached_scaler, _transform, _get_model_version,
+    _chunk_text, _head_tail_extract, _CHUNK_WORD_THRESHOLD, MAX_CHUNKS,
+)
 from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
-from .config import THRESHOLDS, MAX_INPUT_LENGTH
-from .layer2 import obfuscation_scan
-from .layer0 import layer0_sanitize
-from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
+from .config import (
+    THRESHOLDS, MAX_INPUT_LENGTH,
+    PROMPTGUARD_WEIGHT as _PG_WEIGHT,
+    PROMPTGUARD_HIGH_THRESHOLD as _PG_HIGH,
+    PROMPTGUARD_MED_THRESHOLD as _PG_MED,
+    WHITELIST_CONFIDENCE as _WL_CONF,
+    WHITELIST_RISK_SCORE as _WL_RISK,
+)
+from .obfuscation import obfuscation_scan
+from .input import layer0_sanitize
+from .input.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult
 from .models import get_model_path
-from .signal_boost import calculate_boost
-from ._voting import weighted_decision as _voting_weighted_decision
-from .complexity_router import (
+from .fusion.signal_boost import calculate_boost
+from .fusion.voting import weighted_decision as _voting_weighted_decision
+from .fusion.uncertainty import assess_uncertainty as _assess_uncertainty
+from .fusion.complexity_router import (
     assess_complexity, get_pipeline_stages, is_adaptive_routing_enabled,
 )
 
@@ -38,20 +49,20 @@ import numpy as np
 _logger = logging.getLogger(__name__)
 
 # Layer 6: RRF fusion — optional alternative to linear weighted voting
-from .rrf_fusion import rrf_decision as _rrf_decision
+from .fusion.rrf import rrf_decision as _rrf_decision
 
 # Layer 6: Groundedness check
-from .groundedness import verify_verdict_grounded as _verify_grounded
+from .fusion.groundedness import verify_verdict_grounded as _verify_grounded
 
 # Layer 6: Performance SLO tracking
-from .performance_slo import SLOTracker
+from .fusion.performance_slo import SLOTracker
 
 # Layer 6: Evidence grading (imported for test-patchability)
-from .evidence_grading import filter_graded_hits
+from .fusion.evidence_grading import filter_graded_hits, grade_hits_detailed
 
 # N5: PromptGuard transformer classifier — optional
 try:
-    from .promptguard_classifier import (
+    from .ml.promptguard_classifier import (
         get_promptguard_score as _get_pg_classifier_score,
     )
     _HAS_PROMPTGUARD_CLASSIFIER = True
@@ -76,9 +87,8 @@ VALID_STAGES = [
 #: Default stage list (current behavior).
 DEFAULT_STAGES = ["whitelist", "weighted", "judge"]
 
-# Paranoid-mode uncertain zone boundaries.
-_PARANOID_LOWER = 0.35
-_PARANOID_UPPER = 0.65
+# Paranoid-mode uncertain zone boundaries (single source: config — GAP-13).
+from .config import PARANOID_LOWER as _PARANOID_LOWER, PARANOID_UPPER as _PARANOID_UPPER
 
 # Layer 3: Structural features — optional import
 try:
@@ -94,7 +104,7 @@ except ImportError:
 # ``enable_ensemble=True`` (Path A) which uses ensemble.py for a principled
 # weighted average of calibrated probabilities from both models.
 try:
-    from .predict_embedding import classify_prompt_embedding, load_models as _load_embedding_models
+    from .ml.predict_embedding import classify_prompt_embedding, load_models as _load_embedding_models
     _HAS_EMBEDDING = True
 except ImportError:
     _HAS_EMBEDDING = False
@@ -104,14 +114,45 @@ except ImportError:
 # signals.  Uses ensemble.py which does a proper weighted average of
 # calibrated P(malicious) from both models.
 try:
-    from .ensemble import ensemble_scan as _ensemble_scan
+    from .fusion.ensemble import ensemble_scan as _ensemble_scan
     _HAS_ENSEMBLE = True
 except ImportError:
     _HAS_ENSEMBLE = False
 
+# Layer 5: Centroid embedding classifier — PARITY with predict.py scan() path.
+# scan()/classify_prompt mixes a bounded semantic-similarity boost into its
+# composite via get_embedding_classifier(); the CascadeClassifier weighted path
+# historically omitted it, so the two public entry points could return
+# different verdicts for the same input.  get_embedding_classifier() degrades
+# gracefully (sentence-transformers -> TfidfCentroid -> NoOp) and the score is
+# capped (NA0S_EMBEDDING_MAX_SCORE, default 0.20), so this is safe to wire on
+# by default exactly like scan().
+try:
+    from .ml.embedding_classifier import get_embedding_classifier as _get_centroid_classifier
+    _HAS_EMBEDDING_CENTROID = True
+except ImportError:
+    _HAS_EMBEDDING_CENTROID = False
+
+
+def _embedding_enabled():
+    """Whether the Layer 5 centroid classifier should feed the cascade.
+
+    Parity with predict._embedding_enabled(): combines the import-time
+    availability flag (``_HAS_EMBEDDING_CENTROID``) with a RUNTIME read of
+    ``NA0S_EMBEDDING_ENABLED`` so the kill-switch is honored even when flipped
+    AFTER this module is imported.  Disabled when the centroid is unavailable
+    OR the env is "0"/"false" (case-insensitive); the import-time default is
+    preserved when the env is unset.
+    """
+    if not _HAS_EMBEDDING_CENTROID:
+        return False
+    return os.environ.get(
+        "NA0S_EMBEDDING_ENABLED", "",
+    ).strip().lower() not in ("0", "false")
+
 # Layer 7: LLM checker — optional import
 try:
-    from .llm_checker import LLMChecker
+    from .judge.checker import LLMChecker
     _HAS_LLM_CHECKER = True
 except ImportError:
     _HAS_LLM_CHECKER = False
@@ -450,11 +491,50 @@ class WeightedClassifier:
                     hit_names_seen.add(rh.name)
         hit_names = [h.name for h in detailed_hits]
 
-        # --- Evidence grading: remove false-positive rule hits ---
-        # filter_graded_hits uses CRAG-inspired context analysis to remove
-        # rule hits that appear inside code blocks (grade="incorrect") and
-        # keep ambiguous/correct hits.  This reduces FP from code examples.
-        hit_names = filter_graded_hits(hit_names, text)
+        # --- D8 long-input parity with scan() (G11) ---
+        # predict.scan() runs a chunked + head/tail rule pass on long inputs so
+        # a payload buried in a benign-padded body is caught.  The cascade path
+        # previously scored full-text only and missed those.  Mirror it here:
+        # merge any NEW rule hits found in the head/tail extract or overlapping
+        # chunks (real rules with proper severities feed the voting below).
+        _long_input_chunked = False
+        if len(text.split()) > _CHUNK_WORD_THRESHOLD:
+            _long_input_chunked = True
+            _seg_targets = [_head_tail_extract(text)] + _chunk_text(text)
+            for _seg in _seg_targets[:MAX_CHUNKS]:
+                for _rh in rule_score_detailed(_seg):
+                    if _rh.name not in hit_names_seen:
+                        detailed_hits.append(_rh)
+                        hit_names_seen.add(_rh.name)
+            hit_names = [h.name for h in detailed_hits]
+
+        # --- Evidence grading: span-aware FP reduction (Layer 6) ---
+        # grade_hits_detailed grades each RuleHit by OFFSET CONTAINMENT of its
+        # matched span inside benign contexts (code fence / inline code /
+        # quote / local academic-doc framing). It enforces the security hard
+        # rules: only LOW-severity hits can be removed; medium+ are at most
+        # down-weighted (ambiguous); matched spans that are themselves
+        # executable/injection content are NEVER discounted; it fails CLOSED
+        # (keeps the hit) on oversize/timeout/malformed-fence/exception, so it
+        # can never be the reason an attack passes.
+        #
+        # Returns surviving RuleHits + a per-name weight map (1.0 for
+        # "correct", AMBIGUOUS_WEIGHT for down-weighted "ambiguous"). The
+        # weight map is handed to the voting layer so ambiguous evidence votes
+        # at reduced strength instead of being silently dropped.
+        _graded_hits, hit_weights = grade_hits_detailed(detailed_hits, text)
+        # Backward-compatible path: filter_graded_hits is patched by some
+        # tests (name-based). When unpatched it agrees with grade_hits_detailed;
+        # when patched we honour its name-level decision for hit_names so those
+        # tests still drive the surviving-name set, while weights drive scoring.
+        surviving_names = filter_graded_hits(hit_names, text)
+        hit_names = surviving_names
+        # Only keep weights for surviving names; drop weights for any name the
+        # (possibly mocked) name-level filter removed.
+        _surviving_set = set(surviving_names)
+        hit_weights = {
+            n: w for n, w in hit_weights.items() if n in _surviving_set
+        }
 
         # --- Obfuscation flags ---
         obs = obfuscation_scan(text)
@@ -493,7 +573,7 @@ class WeightedClassifier:
             if obfuscation_flags:
                 rrf_signals["obfuscation"] = min(0.15 * len(obfuscation_flags), 0.3)
             if structural is not None:
-                from ._voting import STRUCTURAL_SIGNAL_WEIGHTS as _ssw
+                from .fusion.voting import STRUCTURAL_SIGNAL_WEIGHTS as _ssw
                 sw = sum(
                     w for feat, w in _ssw.items()
                     if structural.get(feat, 0)
@@ -512,6 +592,7 @@ class WeightedClassifier:
                 structural=structural,
                 threshold=self.threshold,
                 extra_severities=None,
+                hit_weights=hit_weights,
             )
 
         # --- N5: PromptGuard transformer classifier signal ---
@@ -522,11 +603,11 @@ class WeightedClassifier:
                 _pg_score = _get_pg_classifier_score(text)
                 _pg_failure_state["consecutive"] = 0  # reset on success
                 if _pg_score > 0:
-                    _pg_weight = 0.35 * _pg_score
+                    _pg_weight = _PG_WEIGHT * _pg_score
                     composite = min(composite + _pg_weight, 1.0)
-                    if _pg_score > 0.5:
+                    if _pg_score > _PG_HIGH:
                         hit_names.append("promptguard:high")
-                    elif _pg_score > 0.2:
+                    elif _pg_score > _PG_MED:
                         hit_names.append("promptguard:medium")
                     if composite >= self.threshold and label == "SAFE":
                         label = "MALICIOUS"
@@ -544,9 +625,33 @@ class WeightedClassifier:
                         _pg_failure_state["consecutive"],
                     )
 
+        # --- Layer 5: Centroid embedding classifier — parity with scan() ---
+        # predict.py blends a bounded semantic-similarity boost into its
+        # composite (get_embedding_classifier().classify()).  Mirror it here so
+        # CascadeClassifier and scan() agree on the embedding signal.  The score
+        # is capped inside the classifier (NA0S_EMBEDDING_MAX_SCORE, default
+        # 0.20) and the classifier degrades gracefully when embedding deps are
+        # absent, so this never raises in the default (no-extra) install.
+        if _embedding_enabled():
+            try:
+                _emb_score, _emb_matches = _get_centroid_classifier().classify(text)
+                if _emb_score > 0.0:
+                    composite = min(composite + _emb_score, 1.0)
+                    for _tid in _emb_matches:
+                        _emb_hit = "embedding:" + str(_tid)
+                        if _emb_hit not in hit_names_seen:
+                            hit_names.append(_emb_hit)
+                            hit_names_seen.add(_emb_hit)
+                    if composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Centroid embedding (Layer 5) failed", exc_info=True)
+
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
         hit_names.extend(obfuscation_flags)
+        if _long_input_chunked and "chunked_analysis" not in hit_names:
+            hit_names.append("chunked_analysis")  # reporting marker (parity w/ scan)
         _boost_score, boost_reasons = calculate_boost(
             detailed_hits, obfuscation_flags,
         )
@@ -867,7 +972,7 @@ class CascadeClassifier:
             if is_safe:
                 with self._stats_lock:
                     self._whitelisted += 1
-                return "SAFE", 0.99, [], "whitelist", l0, "", []
+                return "SAFE", _WL_CONF, [], "whitelist", l0, "", []
 
         # Stage 2: weighted classifier (operates on sanitized text)
         # FIX-5: Pass raw text so rules also run on pre-normalization input
@@ -1265,7 +1370,7 @@ class CascadeClassifier:
         if stage_tag not in technique_tags:
             technique_tags.append(stage_tag)
 
-        return ScanResult(
+        result = ScanResult(
             sanitized_text=l0.sanitized_text if l0 else "",
             is_malicious=is_mal,
             risk_score=round(confidence, 4),
@@ -1279,6 +1384,17 @@ class CascadeClassifier:
             model_version=_get_model_version(),
             judge_reasoning=judge_reasoning,
         )
+        # GAP-12: surface the abstain band for parity with predict.scan().  (The
+        # cascade path also ACTIVELY escalates uncertain verdicts to the judge
+        # band above; this flag marks residual borderline cases for the caller.)
+        try:
+            _p_mal = confidence if is_mal else (1.0 - confidence)
+            result.abstained, result.uncertainty = _assess_uncertainty(
+                _p_mal, self.threshold, [],
+            )
+        except Exception:
+            _logger.debug("uncertainty assessment failed", exc_info=True)
+        return result
 
     # ------------------------------------------------------------------
     # Layer 9: Output scanner — scan LLM output (post-processing)
@@ -1550,10 +1666,10 @@ class CascadeClassifier:
                 results[i] = ScanResult(
                     sanitized_text=l0.sanitized_text,
                     is_malicious=False,
-                    risk_score=0.01,
+                    risk_score=_WL_RISK,
                     label="safe",
                     technique_tags=["cascade:whitelist"],
-                    ml_confidence=0.99,
+                    ml_confidence=_WL_CONF,
                     ml_label="safe",
                     cascade_stage="whitelist",
                     model_version=_get_model_version(),

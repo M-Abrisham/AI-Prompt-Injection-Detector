@@ -659,7 +659,7 @@ def scan_image(image_bytes: bytes) -> VisualInjectionResult:
     # --- OCR text extraction ---
     ocr_text = ""
     try:
-        from na0s.layer0.ocr_extractor import extract_text_from_image
+        from na0s.input.ocr_extractor import extract_text_from_image
 
         ocr_result = extract_text_from_image(image_bytes)
         ocr_text = ocr_result.text
@@ -673,7 +673,7 @@ def scan_image(image_bytes: bytes) -> VisualInjectionResult:
     metadata_text = ""
     metadata_fields: list[str] = []
     try:
-        from na0s.layer0.ocr_extractor import extract_image_metadata
+        from na0s.input.ocr_extractor import extract_image_metadata
 
         meta_result = extract_image_metadata(image_bytes)
         metadata_text = meta_result.metadata_text

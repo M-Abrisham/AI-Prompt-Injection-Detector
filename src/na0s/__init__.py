@@ -58,7 +58,7 @@ from na0s.predict import scan, preload_models
 from na0s.cascade import CascadeClassifier
 
 try:
-    from na0s.ensemble import ensemble_scan, EnsembleClassifier
+    from na0s.fusion.ensemble import ensemble_scan, EnsembleClassifier
 except ImportError:
     pass  # Embedding dependency may not be installed
 from na0s.output import OutputScanner, OutputScanResult, StreamingOutputScanner
@@ -66,7 +66,7 @@ from na0s.validation import TrustBoundary
 from na0s.canary import CanaryManager, CanaryToken
 
 try:
-    from na0s.visual_injection_detector import (
+    from na0s.detectors.visual_injection import (
         scan_image,
         scan_image_file,
         scan_document_visual,

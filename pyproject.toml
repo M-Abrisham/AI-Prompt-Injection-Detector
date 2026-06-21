@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "na0s"
-version = "0.1.0"
+version = "0.2.0"
 description = "Multi-layer prompt injection detection for LLM applications"
 readme = "README.md"
 license = {text = "MIT"}
@@ -65,7 +65,7 @@ embedding = [
 ]
 ocr = [
     "easyocr>=1.7,<2",
-    "Pillow>=10.0,<12",
+    "Pillow>=10.0,<13",
 ]
 docs = [
     "pymupdf>=1.23,<2",

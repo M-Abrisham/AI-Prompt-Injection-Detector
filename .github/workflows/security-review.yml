@@ -1,0 +1,51 @@
+name: Security Review
+
+# Anthropic's official Claude Code Security Review action.
+# Runs an agentic security scan on PR diffs and comments findings inline.
+# Repo: https://github.com/anthropics/claude-code-security-review
+#
+# Setup: add a CLAUDE_API_KEY repo secret (Settings > Secrets and variables >
+# Actions). The key must be enabled for both Claude API and Claude Code usage.
+# Note: this action is not hardened against prompt injection — keep
+# "Require approval for all external contributors" enabled for fork PRs.
+
+permissions:
+  pull-requests: write   # leave inline review comments
+  contents: read
+
+on:
+  pull_request:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      # The Claude security scan is optional: it needs a CLAUDE_API_KEY repo
+      # secret. When that secret is absent the action hard-errors
+      # ("ANTHROPIC_API_KEY is not set") and reds every PR for a config reason,
+      # not a security finding. Gate the scan on the key's presence so it
+      # skips cleanly (neutral/green) when unconfigured and re-activates
+      # automatically once the secret is added in Settings > Secrets.
+      - name: Check for API key
+        id: preflight
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: |
+          if [ -n "$CLAUDE_API_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::CLAUDE_API_KEY secret not set — skipping Claude security review. Add it in Settings > Secrets and variables > Actions to enable."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.preflight.outputs.enabled == 'true'
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+
+      - uses: anthropics/claude-code-security-review@main
+        if: steps.preflight.outputs.enabled == 'true'
+        with:
+          comment-pr: true
+          claude-api-key: ${{ secrets.CLAUDE_API_KEY }}

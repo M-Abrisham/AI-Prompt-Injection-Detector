@@ -43,12 +43,13 @@ import threading
 
 import numpy as np
 
-from na0s.safe_pickle import safe_load
+from na0s.integrity.safe_pickle import safe_load
 from na0s.rules import rule_score
-from na0s.layer2 import obfuscation_scan
-from na0s.layer0 import layer0_sanitize
+from na0s.obfuscation import obfuscation_scan
+from na0s.input import layer0_sanitize
 from na0s.models import get_model_path
 from .faiss_classifier import get_faiss_classifier
+from na0s.ml._st_loader import load_pinned_sentence_transformer
 from na0s.scan_result import ScanResult
 from na0s.structural import extract_structural_features
 
@@ -189,7 +190,9 @@ def load_models():
         ``(embedding_model, classifier)``
     """
     print("Loading embedding model: {0}".format(DEFAULT_EMBEDDING_MODEL))
-    embedding_model = SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
+    embedding_model = load_pinned_sentence_transformer(
+        SentenceTransformer, DEFAULT_EMBEDDING_MODEL,
+    )
 
     print("Loading classifier from {0}".format(MODEL_PATH))
     classifier = safe_load(MODEL_PATH)

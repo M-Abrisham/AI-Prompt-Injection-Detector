@@ -916,27 +916,43 @@ def main():
     for cat, count in sorted(cats.items()):
         print(f"  {cat}: {count}")
 
-    # Generate safe holdout
-    safe = generate_safe_holdout()
-    with open(SAFE_PATH, "w", encoding="utf-8") as f:
-        for sample in safe:
-            f.write(json.dumps(sample, ensure_ascii=False) + "\n")
-    print(f"\nSafe holdout: {len(safe)} samples -> {SAFE_PATH}")
+    # Generate safe holdout.
+    # NOTE: scripts/generate_safe_holdout.py is the canonical safe generator
+    # (500+ samples, 5 categories, source="holdout") that tests/test_holdout_safe.py
+    # validates. The block below only emits 100 samples (S1-S4), so do NOT
+    # overwrite an existing canonical file — defer to generate_safe_holdout.py.
+    if os.path.isfile(SAFE_PATH):
+        print(f"\nSafe holdout: preserving existing {SAFE_PATH}")
+        print("  (regenerate via scripts/generate_safe_holdout.py for the canonical 500+ set)")
+    else:
+        safe = generate_safe_holdout()
+        with open(SAFE_PATH, "w", encoding="utf-8") as f:
+            for sample in safe:
+                f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+        print(f"\nSafe holdout: {len(safe)} samples -> {SAFE_PATH}")
 
-    safe_cats = Counter(s["category"] for s in safe)
-    for cat, count in sorted(safe_cats.items()):
-        print(f"  {cat}: {count}")
+        safe_cats = Counter(s["category"] for s in safe)
+        for cat, count in sorted(safe_cats.items()):
+            print(f"  {cat}: {count}")
 
-    # Generate adversarial evasion
-    adversarial = generate_adversarial_evasion()
-    with open(ADVERSARIAL_PATH, "w", encoding="utf-8") as f:
-        for sample in adversarial:
-            f.write(json.dumps(sample, ensure_ascii=False) + "\n")
-    print(f"\nAdversarial evasion: {len(adversarial)} samples -> {ADVERSARIAL_PATH}")
+    # Generate adversarial evasion.
+    # NOTE: scripts/generate_adversarial.py is the canonical evasion generator
+    # (9 evasion types incl. hex_encoding). This script only emits 7 types and
+    # would silently drop hex_encoding, so do NOT overwrite an existing
+    # canonical file — defer to generate_adversarial.py instead.
+    if os.path.isfile(ADVERSARIAL_PATH):
+        print(f"\nAdversarial evasion: preserving existing {ADVERSARIAL_PATH}")
+        print("  (regenerate via scripts/generate_adversarial.py for the canonical 9-type set)")
+    else:
+        adversarial = generate_adversarial_evasion()
+        with open(ADVERSARIAL_PATH, "w", encoding="utf-8") as f:
+            for sample in adversarial:
+                f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+        print(f"\nAdversarial evasion: {len(adversarial)} samples -> {ADVERSARIAL_PATH}")
 
-    evs = Counter(s["evasion_type"] for s in adversarial)
-    for ev, count in sorted(evs.items()):
-        print(f"  {ev}: {count}")
+        evs = Counter(s["evasion_type"] for s in adversarial)
+        for ev, count in sorted(evs.items()):
+            print(f"  {ev}: {count}")
 
 
 if __name__ == "__main__":

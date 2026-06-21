@@ -53,8 +53,19 @@ _mock_st_module = MagicMock()
 _MockSentenceTransformer = MagicMock()
 _mock_st_module.SentenceTransformer = _MockSentenceTransformer
 
-# Only inject the mock if the real package isn't available
-if "sentence_transformers" not in sys.modules:
+# Only inject the mock if the real package is genuinely NOT installed.
+# NOTE: an earlier ``"sentence_transformers" not in sys.modules`` check was a
+# latent process-pollution bug: in CI the real package IS installed but has not
+# been imported yet at collection time, so that check passed and the MagicMock
+# *shadowed the real package* for the rest of the run — poisoning
+# ``embedding_classifier.SentenceTransformer`` (-> 0.0 embedding scores) and
+# flipping ``benchmark_embeddings._HAS_SENTENCE_TRANSFORMERS``. ``find_spec``
+# inspects installation, not the import cache, so we never shadow a real dep.
+import importlib.util as _ilu
+
+# Order matters: short-circuit on sys.modules FIRST so we never call find_spec()
+# on an already-injected MagicMock (its mocked ``__spec__`` makes find_spec raise).
+if "sentence_transformers" not in sys.modules and _ilu.find_spec("sentence_transformers") is None:
     sys.modules["sentence_transformers"] = _mock_st_module
 
 # Now we can safely import the module under test
@@ -163,13 +174,23 @@ class TestLoadModels(unittest.TestCase):
     @patch("na0s.predict_embedding.SentenceTransformer")
     @patch("na0s.predict_embedding.safe_load")
     def test_load_models_uses_default_embedding_model(self, mock_safe_load, mock_st):
-        """load_models() should instantiate SentenceTransformer with DEFAULT_EMBEDDING_MODEL."""
+        """load_models() should instantiate SentenceTransformer with DEFAULT_EMBEDDING_MODEL.
+
+        Construction now routes through the shared pinned loader, so the model
+        name is passed positionally and the revision pin is threaded in as a
+        kwarg (deterministic snapshot across runs).
+        """
+        from na0s.ml._st_loader import DEFAULT_MODEL_REVISION
+
         mock_st.return_value = MagicMock()
         mock_safe_load.return_value = MagicMock()
 
         load_models()
 
-        mock_st.assert_called_once_with(DEFAULT_EMBEDDING_MODEL)
+        mock_st.assert_called_once()
+        args, kwargs = mock_st.call_args
+        assert args == (DEFAULT_EMBEDDING_MODEL,)
+        assert kwargs.get("revision") == DEFAULT_MODEL_REVISION
 
     @patch("na0s.predict_embedding.SentenceTransformer")
     @patch("na0s.predict_embedding.safe_load")

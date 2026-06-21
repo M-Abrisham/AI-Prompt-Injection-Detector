@@ -4,8 +4,16 @@ Identifies patterns in text (typically LLM output) that indicate the output
 is attempting to propagate itself by instructing recipients to copy, forward,
 or inject the payload into other conversations or systems.
 
-This is a critical defense against prompt injection worms that spread
-autonomously through LLM-to-LLM communication chains.
+It targets prompt injection worms that spread autonomously through
+LLM-to-LLM communication chains.
+
+Wiring status: this detector is NOT part of the default ``scan()`` pipeline.
+It is not referenced by ``predict.py`` or ``cascade.py``. It is reachable only
+via the opt-in output-scanning path (``na0s.output.propagation`` /
+``na0s.output.dual.DualDirectionScanner``), which is gated by the
+``NA0S_PROPAGATION_SCAN`` environment variable (default: off). The default
+output scanner instantiated by ``cascade.py`` is the basic ``OutputScanner``,
+which does not invoke this detector.
 """
 
 from __future__ import annotations
@@ -48,6 +56,10 @@ try:
     _HAS_SENTENCE_TRANSFORMERS = True
 except ImportError:
     pass
+
+# Shared pinned loader: revision-pins all-MiniLM-L6-v2 (the default model) so
+# the worm-template encoder snapshot is deterministic across runs.
+from na0s.ml._st_loader import load_pinned_sentence_transformer
 
 # ---------------------------------------------------------------------------
 # Optional: sklearn (for corpus classifier)
@@ -473,12 +485,15 @@ def _decode_standalone_blobs(text: str) -> List[str]:
 def _layer2_decoded_views(text: str) -> List[str]:
     """Return canonical L2-decoded views (leetspeak / ROT13 / zero-width).
 
-    Reuses the *exact* layer2 obfuscation decoders so the worm path inherits
+    Reuses the *exact* canonical obfuscation decoders so the worm path inherits
     their normalization instead of reinventing it.  Lazy-imported INSIDE the
     function (try/except ImportError) so there is no top-level circular import
-    and the worm path degrades gracefully when layer2 is unavailable.
+    and the worm path degrades gracefully when the module is unavailable.
 
-    Functions reused (verified by reading na0s/layer2/obfuscation.py):
+    Canonical path is ``na0s.obfuscation.obfuscation`` (the old ``na0s.layer2``
+    is a deprecated sys.modules-alias shim post v1.0.0 rename — do not import it).
+
+    Functions reused (verified by reading na0s/obfuscation/obfuscation.py):
       * ``_normalize_leetspeak``  — leetspeak de-substitution (digit/symbol->letter)
       * ``_decode_rot13``         — ROT13 decode (codecs.decode rot_13)
       * ``_ROT13_LABEL_RE``       — extract the payload after an explicit "ROT13:" label
@@ -490,14 +505,14 @@ def _layer2_decoded_views(text: str) -> List[str]:
     if not text:
         return []
     try:
-        from na0s.layer2.obfuscation import (
+        from na0s.obfuscation.obfuscation import (
             _ROT13_LABEL_RE,
             _ZERO_WIDTH_RE,
             _decode_rot13,
             _normalize_leetspeak,
         )
     except ImportError:
-        logger.debug("layer2 obfuscation decoders unavailable; skipping decoded views", exc_info=True)
+        logger.debug("obfuscation decoders unavailable; skipping decoded views", exc_info=True)
         return []
 
     views: List[str] = []
@@ -657,7 +672,9 @@ class _EmbeddingSimilarity:
             return
 
         try:
-            self._model = SentenceTransformer(model_name)
+            self._model = load_pinned_sentence_transformer(
+                SentenceTransformer, model_name,
+            )
             self._worm_embeddings = self._encode_normalized(
                 list(_WORM_TRAINING_TEXTS),
             )

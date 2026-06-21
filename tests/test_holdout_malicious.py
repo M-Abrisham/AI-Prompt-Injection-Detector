@@ -237,7 +237,7 @@ class TestCategoryCodes(unittest.TestCase):
 
     _VALID_CATEGORIES = {
         "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8",
-        "E1", "E2", "C1", "O1",
+        "E1", "E2", "C1", "O1", "P1",
         # Sub-categories are also acceptable
         "D1.1", "D1.2", "D1.3", "D2.1", "D2.2", "D3.1", "D3.2",
         "D4.1", "D4.2", "D4.3", "D4.4", "D4.5",
@@ -250,6 +250,7 @@ class TestCategoryCodes(unittest.TestCase):
         "C1.1", "C1.2", "C1.3", "C1.4", "C1.5",
         "O1.1", "O1.2", "O1.3", "O1.4", "O1.5",
         "O2.1", "O2.2", "O2.3",
+        "P1.1", "P1.2", "P1.3", "P1.4", "P1.5", "P1.6",
     }
 
     def test_all_categories_are_valid(self):
@@ -267,15 +268,22 @@ class TestCategoryCodes(unittest.TestCase):
 
 
 class TestSourceField(unittest.TestCase):
-    """Test 9: Source field is consistently 'holdout'."""
+    """Test 9: Source field is consistently 'generated'.
 
-    def test_source_is_holdout(self):
+    The malicious holdout corpus is produced by scripts/gen_all_datasets.py,
+    which (like gen_malicious_holdout.py) stamps every malicious record with
+    source="generated". This asserts that single canonical value; the earlier
+    expectation of "holdout" was stale — neither malicious-corpus generator
+    emits it.
+    """
+
+    def test_source_is_generated(self):
         records = _load_corpus()
         sources = {rec.get("source") for rec in records}
         self.assertEqual(
             sources,
-            {"holdout"},
-            f"Expected all sources to be 'holdout', got: {sources}",
+            {"generated"},
+            f"Expected all sources to be 'generated', got: {sources}",
         )
 
 

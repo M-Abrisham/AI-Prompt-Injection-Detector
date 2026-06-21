@@ -44,19 +44,57 @@ from typing import Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# numpy is a hard dependency of this module (used by every backend).  Import it
+# independently of sentence-transformers so the semantic centroid math always
+# has a real ``np`` even when sentence-transformers is mocked in tests.
+# ---------------------------------------------------------------------------
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - numpy is a baseline dependency
+    np = None  # type: ignore[assignment]
+
+# ---------------------------------------------------------------------------
 # Graceful import: sentence-transformers is an optional dependency
 # ---------------------------------------------------------------------------
 try:
     from sentence_transformers import SentenceTransformer
-    import numpy as np
     _HAS_SENTENCE_TRANSFORMERS = True
 except ImportError:
     _HAS_SENTENCE_TRANSFORMERS = False
+    # Define the name at module scope so tests can patch
+    # ``na0s.ml.embedding_classifier.SentenceTransformer`` without ``create=True``
+    # and so ``_load_sentence_transformer`` references a real attribute.
+    SentenceTransformer = None  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 DEFAULT_MODEL_NAME = "all-MiniLM-L6-v2"
+
+# Shared pinned loader (one place for revision pin + cache + offline mode).
+# ``DEFAULT_MODEL_REVISION`` is re-exported here for backward compatibility:
+# existing tests/callers reference ``embedding_classifier.DEFAULT_MODEL_REVISION``.
+from na0s.ml._st_loader import (  # noqa: E402
+    DEFAULT_MODEL_REVISION,
+    load_pinned_sentence_transformer,
+)
+
+
+def _load_sentence_transformer(
+    model_name: str,
+    revision: str = DEFAULT_MODEL_REVISION,
+):
+    """Construct a SentenceTransformer with deterministic, pinned settings.
+
+    Thin wrapper around the shared :func:`load_pinned_sentence_transformer`
+    that injects this module's own ``SentenceTransformer`` reference so tests
+    patching ``embedding_classifier.SentenceTransformer`` keep intercepting
+    construction.  Raises whatever ``SentenceTransformer(...)`` raises (caller
+    handles fallback).
+    """
+    return load_pinned_sentence_transformer(
+        SentenceTransformer, model_name, revision=revision,
+    )
 
 # Similarity thresholds per technique.  A technique "matches" when the
 # cosine similarity between the input embedding and the technique centroid
@@ -329,12 +367,40 @@ class EmbeddingClassifier:
         self._centroids: Optional[Dict[str, object]] = None
         self._lock = threading.Lock()
         self._init_failed = False
+        # Backend identity: the real semantic model is the "live" backend.
+        # ``available`` only becomes True once the model + at least one
+        # centroid have loaded successfully.  This disambiguates a (0.0, [])
+        # result that means "dead/degraded" from one that means "benign".
+        self._available = False
+
+    @property
+    def available(self) -> bool:
+        """True once the real semantic model has loaded successfully.
+
+        Mirrors ``worm/detector.py``'s ``available`` property.  When False,
+        this backend is dead/degraded and ``classify`` returns the (0.0, [])
+        sentinel for the "dead" reason, not the "benign" reason.
+        """
+        return self._available
+
+    @property
+    def is_degraded(self) -> bool:
+        """True when this backend is NOT a live semantic model."""
+        return not self._available
 
     def _ensure_loaded(self) -> bool:
         """Lazy-load model and compute centroids. Thread-safe.
 
         Returns True if model is ready, False if loading failed.
         Uses double-checked locking pattern (same as predict.py).
+
+        Two-stage construction (g2):
+          1. SentenceTransformer construction in its own try/except — this is
+             the ONLY failure that latches ``_init_failed`` and triggers the
+             fallback cascade in ``get_embedding_classifier``.
+          2. The centroid loop catches per-technique and continues, so a single
+             bad encode cannot nuke the whole backend; partial centroids are
+             retained.
         """
         if self._centroids is not None:
             return True
@@ -348,16 +414,30 @@ class EmbeddingClassifier:
             if self._init_failed:
                 return False
 
+            # --- Stage 1: model construction (the only fatal step) ---------
             try:
                 logger.info(
-                    "Loading embedding model '%s' for centroid classifier...",
-                    self._model_name,
+                    "Loading embedding model '%s' (revision %s) for "
+                    "centroid classifier...",
+                    self._model_name, DEFAULT_MODEL_REVISION,
                 )
-                self._model = SentenceTransformer(self._model_name)
+                self._model = _load_sentence_transformer(self._model_name)
+            except Exception as exc:
+                # Promote to error (warn-once via _init_failed latch) so the
+                # degradation is visible in CI logs, not buried as a warning.
+                logger.error(
+                    "Failed to construct embedding model '%s': %s — "
+                    "backend will fall back",
+                    self._model_name, exc,
+                )
+                self._init_failed = True
+                self._model = None
+                return False
 
-                # Compute centroids for each technique
-                centroids = {}
-                for technique_id, phrases in ATTACK_ANCHORS.items():
+            # --- Stage 2: centroid build (per-technique, non-fatal) --------
+            centroids: Dict[str, object] = {}
+            for technique_id, phrases in ATTACK_ANCHORS.items():
+                try:
                     embeddings = self._model.encode(
                         phrases,
                         show_progress_bar=False,
@@ -370,21 +450,33 @@ class EmbeddingClassifier:
                     if norm > 0:
                         centroid = centroid / norm
                     centroids[technique_id] = centroid
+                except Exception as exc:
+                    # One bad technique must not nuke the whole backend.
+                    logger.warning(
+                        "Skipping centroid for technique '%s' (encode failed): %s",
+                        technique_id, exc,
+                    )
+                    continue
 
-                self._centroids = centroids
-                logger.info(
-                    "Embedding classifier ready: %d technique centroids computed",
-                    len(centroids),
-                )
-                return True
-
-            except Exception as exc:
-                logger.warning(
-                    "Failed to load embedding model '%s': %s",
-                    self._model_name, exc,
+            if not centroids:
+                # Model loaded but every centroid failed — treat as degraded
+                # so we fall back rather than serving an empty classifier.
+                logger.error(
+                    "Embedding model '%s' loaded but no centroids could be "
+                    "computed — backend will fall back",
+                    self._model_name,
                 )
                 self._init_failed = True
+                self._model = None
                 return False
+
+            self._centroids = centroids
+            self._available = True
+            logger.info(
+                "Embedding classifier ready: %d/%d technique centroids computed",
+                len(centroids), len(ATTACK_ANCHORS),
+            )
+            return True
 
     def classify(self, text: str) -> Tuple[float, List[str]]:
         """Classify text by semantic similarity to attack pattern centroids.
@@ -540,6 +632,26 @@ class TfidfCentroidClassifier:
         self._centroids: Optional[Dict[str, object]] = None
         self._lock = threading.Lock()
         self._init_failed = False
+        # Whether the TF-IDF backend itself fitted successfully.  Distinct from
+        # ``available``: this backend is a fallback, so ``available`` (the live
+        # *semantic* model flag) is always False — but tests/callers can still
+        # ask ``is_loaded`` to know the fallback is functional.
+        self._loaded = False
+
+    @property
+    def available(self) -> bool:
+        """Always False: this is a fallback, not the live semantic model."""
+        return False
+
+    @property
+    def is_degraded(self) -> bool:
+        """Always True: the TF-IDF backend is a degraded (non-semantic) path."""
+        return True
+
+    @property
+    def is_loaded(self) -> bool:
+        """True once the TF-IDF vectorizer + centroids have been fitted."""
+        return self._loaded
 
     def _ensure_loaded(self) -> bool:
         if self._centroids is not None:
@@ -586,6 +698,7 @@ class TfidfCentroidClassifier:
                     centroids[tid] = centroid
 
                 self._centroids = centroids
+                self._loaded = True
                 logger.info(
                     "TF-IDF centroid classifier ready: %d technique centroids",
                     len(centroids),
@@ -663,6 +776,16 @@ class TfidfCentroidClassifier:
 class NoOpEmbeddingClassifier:
     """Placeholder classifier that always returns (0.0, [])."""
 
+    @property
+    def available(self) -> bool:
+        """Always False: no semantic model and no fallback are present."""
+        return False
+
+    @property
+    def is_degraded(self) -> bool:
+        """Always True: this is the most-degraded (no-op) backend."""
+        return True
+
     def classify(self, text: str) -> Tuple[float, List[str]]:
         return 0.0, []
 
@@ -676,18 +799,56 @@ class NoOpEmbeddingClassifier:
 _singleton: Optional[object] = None
 _singleton_lock = threading.Lock()
 
+# Warn-once latch so the degraded-load error is emitted exactly once per
+# process (visible in CI logs) rather than on every singleton rebuild.
+_degraded_logged = False
+
+
+def _probe_backend(backend) -> bool:
+    """Return True if *backend* actually works (loads + classifies).
+
+    A backend is only cached after this probe succeeds, so a transient load
+    failure can no longer latch a silently-zero classifier.  The probe runs a
+    trivial classify of a benign string and verifies the backend reports
+    itself as loaded (``available`` for the semantic model, ``is_loaded`` for
+    the TF-IDF fallback).  Any exception is treated as "not working".
+    """
+    try:
+        # EmbeddingClassifier.classify() lazily triggers _ensure_loaded; a
+        # working backend returns without raising.
+        backend.classify("hello world")
+    except Exception:
+        return False
+
+    # EmbeddingClassifier: ``available`` is True only after model + centroids
+    # loaded.  TfidfCentroidClassifier: it is intentionally not "available"
+    # (it's a fallback) but exposes ``is_loaded`` to confirm it fitted.
+    if getattr(backend, "available", False):
+        return True
+    if getattr(backend, "is_loaded", False):
+        return True
+    return False
+
 
 def get_embedding_classifier():
     """Return the module-level embedding classifier singleton.
 
-    Priority:
-    1. sentence-transformers → EmbeddingClassifier (best quality)
-    2. scikit-learn → TfidfCentroidClassifier (keyword-level similarity)
-    3. Neither → NoOpEmbeddingClassifier (returns 0.0 always)
+    Resilience ladder (g1): each backend is *probe-loaded* before being cached
+    — constructed AND verified to actually classify a trivial string.  On any
+    failure we cascade down to the next backend, so a transient model-load
+    failure can never latch a silently-zero classifier (the root "runtime
+    flaky" bug):
+
+        EmbeddingClassifier  (sentence-transformers, live semantic model)
+          → TfidfCentroidClassifier  (scikit-learn keyword similarity)
+            → NoOpEmbeddingClassifier  (always 0.0)
+
+    Only a *working* backend is cached.  Callers can inspect ``available`` to
+    tell whether the live semantic model is serving vs a degraded fallback.
 
     Thread-safe via double-checked locking.
     """
-    global _singleton
+    global _singleton, _degraded_logged
     if _singleton is not None:
         return _singleton
 
@@ -695,18 +856,57 @@ def get_embedding_classifier():
         if _singleton is not None:
             return _singleton
 
+        # Build the candidate ladder in priority order, gated by which
+        # dependencies are importable.
+        ladder = []
         if _HAS_SENTENCE_TRANSFORMERS:
-            _singleton = EmbeddingClassifier()
-        elif _HAS_SKLEARN:
-            _singleton = TfidfCentroidClassifier()
-        else:
-            _singleton = NoOpEmbeddingClassifier()
+            ladder.append(EmbeddingClassifier)
+        if _HAS_SKLEARN:
+            ladder.append(TfidfCentroidClassifier)
+
+        chosen = None
+        for backend_cls in ladder:
+            try:
+                candidate = backend_cls()
+            except Exception as exc:
+                logger.warning(
+                    "Could not construct %s: %s", backend_cls.__name__, exc,
+                )
+                continue
+            if _probe_backend(candidate):
+                chosen = candidate
+                break
+            logger.warning(
+                "%s constructed but failed probe; cascading to next backend",
+                backend_cls.__name__,
+            )
+
+        if chosen is None:
+            # Everything above failed (or no deps installed): no-op floor.
+            chosen = NoOpEmbeddingClassifier()
+
+        # Surface degradation once, at error level, so CI logs show it.
+        if not getattr(chosen, "available", False) and not _degraded_logged:
+            logger.error(
+                "Embedding classifier degraded: live semantic model "
+                "unavailable, serving fallback %s. Detection scores will "
+                "differ from the sentence-transformers backend.",
+                type(chosen).__name__,
+            )
+            _degraded_logged = True
+
+        _singleton = chosen
 
     return _singleton
 
 
 def reset_singleton() -> None:
-    """Reset the module-level singleton. Used in tests only."""
-    global _singleton
+    """Reset the module-level singleton. Used in tests only.
+
+    Also clears the warn-once latch so a subsequent degraded load is logged
+    again — keeps a degraded state recoverable across reset.
+    """
+    global _singleton, _degraded_logged
     with _singleton_lock:
         _singleton = None
+        _degraded_logged = False

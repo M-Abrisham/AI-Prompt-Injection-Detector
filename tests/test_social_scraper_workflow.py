@@ -184,7 +184,8 @@ class TestWorkflowRunsScraperScript(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestWorkflowPermissions(unittest.TestCase):
-    """The workflow must declare contents:write and pull-requests:write."""
+    """The workflow declares contents:write only (least-privilege; it commits to
+    a holding branch instead of opening a PR per run — see commit ecc2e1d)."""
 
     def test_workflow_has_permissions(self):
         data = _load_yaml(SCRAPER_YML)
@@ -196,14 +197,6 @@ class TestWorkflowPermissions(unittest.TestCase):
         self.assertEqual(
             permissions["contents"], "write",
             "Workflow must have 'contents: write' permission",
-        )
-        self.assertIn(
-            "pull-requests", permissions,
-            "Workflow must declare 'pull-requests' permission",
-        )
-        self.assertEqual(
-            permissions["pull-requests"], "write",
-            "Workflow must have 'pull-requests: write' permission",
         )
 
 
@@ -264,31 +257,32 @@ class TestWorkflowName(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 11. Creates PR when new data found
+# 11. Commits new data to the data/scraped-raw holding branch
 # ---------------------------------------------------------------------------
 
-class TestWorkflowCreatesPR(unittest.TestCase):
-    """The workflow must create a pull request when new data is found."""
+class TestWorkflowCommitsToHoldingBranch(unittest.TestCase):
+    """When new data is found the workflow commits it to the data/scraped-raw
+    holding branch (replaces the old PR-per-run flow — see commit ecc2e1d)."""
 
-    def test_workflow_creates_pr(self):
+    def test_workflow_pushes_to_holding_branch(self):
         data = _load_yaml(SCRAPER_YML)
         runs = _step_runs(data)
         self.assertIn(
-            "gh pr create", runs,
-            "Workflow must use 'gh pr create' to open a pull request",
+            "data/scraped-raw", runs,
+            "Workflow must push new data to the 'data/scraped-raw' holding branch",
         )
 
-    def test_pr_step_is_conditional(self):
-        """The PR creation step must be conditional on new_count."""
+    def test_commit_step_is_conditional(self):
+        """The data-export step must be conditional on new_count."""
         data = _load_yaml(SCRAPER_YML)
         steps = _all_steps(data)
-        pr_steps = [s for s in steps if "gh pr create" in s.get("run", "")]
-        self.assertTrue(len(pr_steps) > 0, "Must have a PR creation step")
-        for s in pr_steps:
+        commit_steps = [s for s in steps if "data/scraped-raw" in s.get("run", "")]
+        self.assertTrue(len(commit_steps) > 0, "Must have a holding-branch commit step")
+        for s in commit_steps:
             condition = s.get("if", "")
             self.assertIn(
                 "new_count", condition,
-                "PR step must be conditional on 'new_count'",
+                "Holding-branch commit step must be conditional on 'new_count'",
             )
 
 

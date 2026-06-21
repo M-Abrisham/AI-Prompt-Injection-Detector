@@ -1,53 +1,25 @@
-"""Layer 2: Obfuscation Detection & Decoding for prompt injection detection.
+# SHIM -- do not add new code here
+"""Backward-compat package shim. Canonical location: na0s.obfuscation
 
-Recursive multi-layer obfuscation scanner handling 10+ encoding types:
-- Base64, hex, URL-encoding (with embedded substring extraction)
-- ROT13/Caesar cipher, leetspeak normalization, reversed text
-- Morse code (ITU-R M.1677 with Unicode dot/dash normalization)
-- Binary/octal/decimal ASCII decoding
-- Whitespace steganography (SNOW-style, 4 detection methods)
-- Shannon entropy + KL-divergence + compression ratio composite scoring
-- Matryoshka recursive unwrapping with encoding chain provenance
-
-Public API:
-  obfuscation_scan(text)            -> dict
-  detect_morse(text)                -> MorseResult
-  detect_numeric(text)              -> NumericDecodeResult
-  detect_binary(text)               -> NumericDecodeResult
-  detect_octal(text)                -> NumericDecodeResult
-  detect_decimal(text)              -> NumericDecodeResult
-  detect_whitespace_stego(text)     -> StegoResult
-  detect_ascii_art(text)            -> AsciiArtResult
-  dehyphenate_suspicious(text)      -> SplittingResult
+Aliases the package AND each submodule into sys.modules under the old
+``na0s.layer2`` name, so ``from na0s.layer2.obfuscation import X`` returns the
+SAME module object as ``na0s.obfuscation.obfuscation`` (mock-patching safe).
 """
+import importlib as _importlib
+import pkgutil as _pkgutil
+import sys as _sys
+import warnings as _warnings
 
-from .obfuscation import (
-    obfuscation_scan,
-    shannon_entropy,
-    DecodedView,
-    # Externalized named constants (for testing and env var override)
-    PUNCTUATION_FLOOD_RATIO,
-    CASING_TRANSITION_THRESHOLD,
-    CASING_TRANSITION_RATIO,
-    DEFAULT_MAX_DECODES,
-    MIN_BASE64_LENGTH,
-    MIN_HEX_LENGTH,
-    MIN_PRINTABLE_CHARS,
-    MIN_PRINTABLE_RATIO,
-    MIN_CANDIDATE_ALPHA,
-    MIN_ENTROPY_TEXT_LENGTH,
-    MIN_KL_LETTERS,
-    MIN_DECODED_STRIP_LENGTH,
-    ZLIB_COMPRESSION_LEVEL,
+_warnings.warn(
+    "na0s.layer2 is deprecated; use na0s.obfuscation instead",
+    DeprecationWarning,
+    stacklevel=2,
 )
-from .morse_code import detect_morse, MorseResult
-from .numeric_decode import (
-    detect_numeric,
-    detect_binary,
-    detect_octal,
-    detect_decimal,
-    NumericDecodeResult,
-)
-from .whitespace_stego import detect_whitespace_stego, StegoResult
-from .ascii_art_detector import detect_ascii_art, AsciiArtResult
-from .syllable_splitting import dehyphenate_suspicious, SplittingResult
+_canonical = _importlib.import_module("na0s.obfuscation")
+_sys.modules[__name__] = _canonical
+for _info in _pkgutil.iter_modules(_canonical.__path__):
+    try:
+        _sub = _importlib.import_module(f"na0s.obfuscation.{_info.name}")
+    except Exception:
+        continue
+    _sys.modules[f"{__name__}.{_info.name}"] = _sub

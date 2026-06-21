@@ -19,7 +19,7 @@ _logger = logging.getLogger(__name__)
 
 # Optional layer2 import for obfuscation scanning
 try:
-    from na0s.layer2 import obfuscation_scan
+    from na0s.obfuscation import obfuscation_scan
     _HAS_LAYER2 = True
 except ImportError:
     _HAS_LAYER2 = False

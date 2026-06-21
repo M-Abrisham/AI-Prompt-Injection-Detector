@@ -21,6 +21,11 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Deterministic embedding (g6): pin the HF cache dir so the warm step and
+    # the test run share one model copy, fetched once at the pinned revision.
+    env:
+      HF_HOME: ${{ github.workspace }}/.hf-cache
+      SENTENCE_TRANSFORMERS_HOME: ${{ github.workspace }}/.hf-cache
     strategy:
       fail-fast: false
       matrix:
@@ -43,18 +48,23 @@ jobs:
             ${{ runner.os }}-pip-${{ matrix.python-version }}-
             ${{ runner.os }}-pip-
 
+      - name: Cache HuggingFace embedding model
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.hf-cache
+          key: ${{ runner.os }}-hf-minilm-${{ hashFiles('src/na0s/ml/embedding_classifier.py') }}
+          restore-keys: |
+            ${{ runner.os }}-hf-minilm-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      # Pre-download the all-MiniLM-L6-v2 weights so the worm-embedding "Live"
-      # tests (tests/worm/test_worm_embedding.py::TestEmbeddingSimilarityLive)
-      # actually execute instead of skipping. sentence-transformers is already
-      # installed via dev -> all -> embedding, but the model weights are not
-      # cached by default, so _scorer_available() is False and the calibration
-      # assertions never run. These cache paths match WormSignatureDetector's
-      # _EmbeddingSimilarity._is_model_cached() lookup.
+      # Cache the all-MiniLM-L6-v2 weights so the warm step below restores them
+      # fast and the worm-embedding "Live" tests execute instead of skipping.
+      # These cache paths match WormSignatureDetector's _EmbeddingSimilarity
+      # ._is_model_cached() lookup.
       - name: Cache sentence-transformer model weights
         uses: actions/cache@v5
         with:
@@ -63,21 +73,19 @@ jobs:
             ~/.cache/torch/sentence_transformers
           key: ${{ runner.os }}-st-model-all-MiniLM-L6-v2-v1
 
-      - name: Pre-download embedding model (all-MiniLM-L6-v2)
+      - name: Warm + verify embedding model (fail-fast)
         run: |
-          # Hard-fail on persistent failure (so a broken download is visible
-          # instead of silently re-skipping the live tests), but retry first so
-          # a single transient network blip does not break the build.
-          for attempt in 1 2 3; do
-            if python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"; then
-              echo "Model cached on attempt $attempt"
-              exit 0
-            fi
-            echo "Model download attempt $attempt failed; retrying..." >&2
-            sleep 15
-          done
-          echo "Failed to download all-MiniLM-L6-v2 after 3 attempts" >&2
-          exit 1
+          # Fetch the pinned MiniLM revision ONCE into the HF cache and verify
+          # it actually serves. A model-load failure reds THIS setup step
+          # instead of randomly failing detection tests mid-suite (g6 — the
+          # runtime-flaky root fix). The loader (g1/g3) pins the revision and
+          # cascades to a deterministic fallback, so `available` is the signal.
+          python - <<'PY'
+          from na0s.ml.embedding_classifier import get_embedding_classifier
+          clf = get_embedding_classifier()
+          assert clf.available, "embedding model failed to load; failing setup"
+          print("embedding warm OK:", type(clf).__name__)
+          PY
 
       - name: Lint with flake8
         run: |
@@ -133,3 +141,20 @@ jobs:
           name: regression-report-${{ github.run_id }}
           path: data/evaluation/regression_history.jsonl
         if: always()
+
+      # Single source of truth for per-technique recall + benign FPR.
+      # Non-blocking for now: the gate legitimately fails on known coverage
+      # gaps (e.g. E2 recon ~0%). Ratchet the floors in `make recall-gate`
+      # as those gaps close, then drop continue-on-error to make it blocking.
+      - name: Recall harness (single source of truth)
+        if: matrix.python-version == '3.12'
+        continue-on-error: true
+        run: make recall-gate
+
+      - name: Upload recall harness artifact
+        if: always() && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: recall-harness-${{ github.run_id }}
+          path: benchmarks/results/technique_analysis.json
+          retention-days: 30

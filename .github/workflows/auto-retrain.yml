@@ -6,13 +6,23 @@ on:
     - cron: '0 8 * * 2'
 
   workflow_run:
+    # Retrain after the WEEKLY harvest only. The 3-hourly "Social Scraper"
+    # trigger was removed: it fired this ~45-min job ~8x/day (the ROADMAP's
+    # "constant red-noise generator"), far more often than a TF-IDF model needs
+    # retraining and with runs piling up. Weekly cadence is plenty.
     workflows:
       - "Weekly Dataset Harvest"
-      - "Social Scraper (3h)"
     types: [completed]
     branches: [main]
 
   workflow_dispatch:  # Manual trigger
+
+# Never run two retrains at once: a new trigger queues (at most one pending)
+# instead of overlapping. cancel-in-progress: false so a long retrain that is
+# already running always finishes rather than being killed by the next trigger.
+concurrency:
+  group: auto-retrain
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -21,6 +31,11 @@ permissions:
 jobs:
   retrain:
     runs-on: ubuntu-latest
+    # Cap the whole job so a hang (e.g. an OOM-bound feature-extraction step
+    # that the runner silently kills after ~28 min) FAILS CLEANLY with a clear
+    # "exceeded the maximum execution time" signal instead of a silent cancel.
+    # Generous enough for sync + ingest + gen + features + train + gates.
+    timeout-minutes: 60
     # Skip if triggered by a failed upstream workflow
     if: >-
       github.event_name != 'workflow_run' ||
@@ -28,6 +43,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      # Free ~20-25 GB on the runner. The pipeline accumulates large
+      # intermediate data (data/raw + data/staging + data/aggregated + a
+      # ~2.2M-row combined_data.csv) plus the TF-IDF/feature .pkl artifacts;
+      # the default ubuntu-latest disk (~14 GB free) fills near the end and the
+      # runner is lost mid-write — surfacing as a silent "The operation was
+      # canceled" at the feature-save step. Removing preinstalled toolchains we
+      # do not use (dotnet, android SDK, GHC, prebuilt CodeQL) and the cached
+      # docker images gives the final save room. Inline rm (no third-party
+      # action) to avoid adding a supply-chain dependency to a security project.
+      - name: Free up disk space
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/.ghcup \
+                      /usr/local/share/boost || true
+          sudo docker image prune --all --force || true
+          echo "After:"; df -h /
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v6
@@ -80,6 +113,13 @@ jobs:
 
       - name: Train model
         run: python -m scripts.model
+
+      - name: Calibrate decision threshold (GAP-03)
+        # Re-fit the decision threshold on the (decontaminated) data after every
+        # retrain and ship data/processed/optimal_threshold.json, so the runtime
+        # never silently falls back to the uncalibrated 0.55.  NA0S_TARGET_FPR
+        # anchors the operating point to the deployment false-positive budget.
+        run: NA0S_TARGET_FPR=0.012 python scripts/optimize_threshold.py
 
       - name: Run canary evaluation
         id: canary
@@ -183,11 +223,32 @@ jobs:
             "status": "pending"
           }
 
+          # Sign the request with HMAC-SHA256 over its canonical JSON (excluding
+          # the signature field) IF the shared secret is configured. This mirrors
+          # na0s.agents.approvals_sync.sign_request exactly. No-op when the secret
+          # is absent, so the workflow stays green before the secret is deployed;
+          # the local daemon then runs in backward-compatible unsigned mode.
+          import hmac, hashlib, os
+          _key = os.environ.get("NA0S_AGENT_APPROVAL_HMAC_KEY")
+          if _key:
+            _canon = json.dumps(
+              {k: v for k, v in approval_queue.items() if k != "signature"},
+              sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")
+            approval_queue["signature"] = hmac.new(
+              _key.encode("utf-8"), _canon, hashlib.sha256
+            ).hexdigest()
+            print("Approval request signed (HMAC-SHA256).")
+          else:
+            print("NA0S_AGENT_APPROVAL_HMAC_KEY not set; writing UNSIGNED request.")
+
           with open("data/approval_queue/pending_deploy.json", "w") as f:
             json.dump(approval_queue, f, indent=2)
 
           print("Approval request written to data/approval_queue/pending_deploy.json")
           EOF
+        env:
+          NA0S_AGENT_APPROVAL_HMAC_KEY: ${{ secrets.NA0S_AGENT_APPROVAL_HMAC_KEY }}
 
       - name: Publish approval request to mail-drop branch
         id: maildrop

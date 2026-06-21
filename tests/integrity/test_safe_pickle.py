@@ -19,6 +19,7 @@ from unittest.mock import patch
 os.environ["SCAN_TIMEOUT_SEC"] = "0"
 
 from na0s.safe_pickle import (
+    _atomic_write_binary,
     _get_signing_key,
     _hash_path,
     _hmac_path,
@@ -253,6 +254,92 @@ class TestBackwardCompatibility(unittest.TestCase):
             self.assertEqual(loaded, self.test_obj)
             self.assertTrue(any("plain SHA-256 sidecar" in msg
                                 for msg in cm.output))
+
+
+class TestLargeObjectTruncation(unittest.TestCase):
+    """Regression tests for the 'pickle data was truncated' bug.
+
+    Root cause: ``_atomic_write_binary`` issued a single ``os.write`` and
+    discarded its return value. ``write(2)`` is capped at INT_MAX (2 GiB - 1)
+    per call and may short-write, so any pickle larger than ~2 GiB (e.g. the
+    400k x 15029 sparse ``features.pkl``) landed on disk truncated, and
+    ``safe_load`` later raised ``pickle data was truncated``. These tests
+    pin the fix without requiring a multi-GiB object in CI.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmpdir = self._tmpdir.name
+        self.pkl_path = os.path.join(self.tmpdir, "features.pkl")
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_atomic_write_handles_short_writes(self):
+        """_atomic_write_binary writes every byte even when os.write short-writes.
+
+        Simulates the POSIX short-write that caused the production truncation:
+        a real ``os.write`` that never transfers more than 1 MiB per call.
+        The file on disk must still contain the complete buffer.
+        """
+        real_os_write = os.write
+        chunk_cap = 1 << 20  # 1 MiB — force many partial writes
+
+        def short_write(fd, data):
+            return real_os_write(fd, bytes(data[:chunk_cap]))
+
+        payload = os.urandom(5 * chunk_cap + 123)  # not a clean multiple
+        out = os.path.join(self.tmpdir, "short.bin")
+        with patch("na0s.integrity.safe_pickle.os.write", side_effect=short_write):
+            _atomic_write_binary(out, payload)
+
+        with open(out, "rb") as f:
+            written = f.read()
+        self.assertEqual(len(written), len(payload))
+        self.assertEqual(written, payload)
+
+    @patch.dict(os.environ, {"NA0S_PICKLE_KEY": "testsecret"})
+    def test_sparse_matrix_roundtrip_with_simulated_short_write(self):
+        """A scipy sparse (X, y) tuple round-trips even under short writes.
+
+        This is the exact shape of ``features.pkl``. With os.write capped at
+        64 KiB per call (so the multi-hundred-KiB pickle needs many writes),
+        safe_dump/safe_load must still produce an equal matrix and the HMAC
+        sidecar must validate.
+        """
+        import numpy as np
+        import scipy.sparse as sp
+
+        X = sp.random(2000, 1500, density=0.05, format="csr", random_state=7)
+        y = np.array([0, 1] * 1000, dtype=np.int64)
+
+        real_os_write = os.write
+
+        def short_write(fd, data):
+            return real_os_write(fd, bytes(data[: 1 << 16]))  # 64 KiB cap
+
+        with patch("na0s.integrity.safe_pickle.os.write", side_effect=short_write):
+            safe_dump((X, y), self.pkl_path)
+
+        # Sidecar is the HMAC variant and the file is whole.
+        self.assertTrue(os.path.exists(_hmac_path(self.pkl_path)))
+
+        X2, y2 = safe_load(self.pkl_path)
+        self.assertEqual(X2.shape, X.shape)
+        self.assertEqual(X2.nnz, X.nnz)
+        self.assertTrue(np.array_equal(X2.indices, X.indices))
+        self.assertTrue(np.allclose(X2.data, X.data))
+        self.assertTrue(np.array_equal(y2, y))
+
+    @patch.dict(os.environ, {"NA0S_PICKLE_KEY": "testsecret"})
+    def test_dump_uses_high_pickle_protocol(self):
+        """safe_dump pins HIGHEST_PROTOCOL (>=4) for >4 GiB-capable framing."""
+        safe_dump({"a": 1}, self.pkl_path)
+        with open(self.pkl_path, "rb") as f:
+            head = f.read(2)
+        # Protocol 2+ files start with the PROTO opcode (0x80) + version byte.
+        self.assertEqual(head[0], 0x80)
+        self.assertGreaterEqual(head[1], 4)
 
 
 if __name__ == "__main__":

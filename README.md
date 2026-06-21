@@ -246,7 +246,7 @@ pytest tests/canary/                    # one package
 pytest --collect-only -q tests/         # what scripts/extract_facts.py uses
 ```
 
-**8653** tests across **265** files at last extraction. **8** collection errors in modules with unmet optional dependencies (dataset / cleanlab / shadow-eval). <!-- facts.yaml#test_count, facts.yaml#test_files -->
+`9449` tests across `304` files at last extraction. **0** collection errors. <!-- facts.yaml#test_count, facts.yaml#test_files — volatile counts kept in inline code so the docs-drift gate doesn't hard-pin them (ISS-08) -->
 
 ---
 

@@ -70,7 +70,7 @@ def _load_handler_patterns() -> Dict[str, List[Tuple[str, str, List[str]]]]:
 
     Returns dict: lang -> list of (pattern_name, severity, literal_phrases).
     """
-    from na0s.multilingual_handler import _MULTILINGUAL_PATTERNS
+    from na0s.detectors.multilingual_handler import _MULTILINGUAL_PATTERNS
 
     by_lang: Dict[str, List[Tuple[str, str, List[str]]]] = {}
     for lang, name, severity, technique_ids, compiled_re in _MULTILINGUAL_PATTERNS:

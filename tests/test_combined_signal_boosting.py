@@ -197,11 +197,21 @@ class TestCombinedSignalBoostingCascade:
         from na0s.cascade import WeightedClassifier
         assert WeightedClassifier is not None
 
-    def test_cascade_has_combined_boost_constant(self):
-        """Verify the combined boost constant exists in cascade classify."""
+    def test_cascade_combined_boost_wired(self):
+        """Verify the combined-signal boost is wired into cascade's voting path.
+
+        The inline ``_COMBINED_SIGNAL_BOOST`` block was refactored out of
+        ``WeightedClassifier.classify`` into ``fusion/signal_boost.py`` +
+        ``fusion/voting.weighted_decision`` (which ``classify()`` delegates to),
+        so this asserts the *behavior* (persona+encoding co-occurrence yields a
+        boost, and cascade routes scoring through the voting helper) rather than
+        grepping for a removed source identifier.
+        """
+        from na0s.fusion.signal_boost import calculate_boost_from_names
+        score, reasons = calculate_boost_from_names(["roleplay"], ["base64"])
+        assert score > 0.0
+        assert reasons
         import inspect
         from na0s.cascade import WeightedClassifier
-        source = inspect.getsource(WeightedClassifier.classify)
-        assert "_COMBINED_SIGNAL_BOOST" in source
-        assert "has_persona_signal" in source
-        assert "has_encoding_signal" in source
+        src = inspect.getsource(WeightedClassifier.classify)
+        assert "weighted_decision" in src

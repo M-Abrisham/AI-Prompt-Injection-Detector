@@ -18,7 +18,7 @@ from sklearn.preprocessing import StandardScaler
 from na0s.safe_pickle import safe_dump
 from na0s.structural import extract_structural_features_batch
 
-__all__ = ["load_training_data"]
+__all__ = ["load_training_data", "apply_stratified_cap", "resolve_max_train_rows"]
 
 # Paths
 INPUT_PATH = "data/processed/combined_data.csv"
@@ -33,6 +33,112 @@ _MIN_SAMPLES = 10
 _MAX_FEATURES = 10000
 # Character-level TF-IDF vocabulary ceiling (supplementary, smaller)
 _CHAR_MAX_FEATURES = 5000
+# Drop n-grams that appear in only one document. For a multi-million-row
+# corpus the vast majority of word-(1,3) and char_wb-(3,5) n-grams are
+# singletons (typos, one-off tokens) that never survive the max_features
+# prune anyway, but they still inflate the *intermediate* vocabulary the
+# vectorizer materialises before pruning. min_df=2 trims that intermediate
+# vocab — standard practice for large corpora, negligible quality impact.
+_MIN_DF = 2
+
+# ---------------------------------------------------------------------------
+# Memory-safe training-set ceiling (OOM mitigation)
+# ---------------------------------------------------------------------------
+# The Auto-Retrain GitHub runner OOMs during feature extraction on the full
+# ~2.2M-row combined_data.csv: word TfidfVectorizer(1,3) + char_wb(3,5) build
+# large intermediate n-gram vocabularies, and extract_structural_features_batch
+# materialises a dense (N x len(FEATURE_NAMES)) float64 array — all in RAM at
+# once. Peak memory scales ~linearly with row count.
+#
+# Why 400,000 (not arbitrary): a linear TF-IDF + LogisticRegression model
+# saturates on lexical n-gram signal well before millions of rows — the
+# marginal AUC gain from 400k -> 2.2M rows of the same distribution is tiny,
+# while peak memory keeps climbing. 400k rows keeps word(1,3) + char(3,5) +
+# the dense structural array comfortably under a 7-16GB runner with headroom,
+# while still being ~4x the rebalanced minority-driven set in practice.
+# This is a *deliberate, reversible* model trade-off: set NA0S_MAX_TRAIN_ROWS
+# to a larger value (or 0 to disable the cap entirely) on a bigger runner to
+# train on the full set. Maintainer should tune to the runner's RAM.
+# Lowered 400k -> 150k: 400k still pushed Train model (calibrated LogReg over a
+# 150k+ x 15029 matrix) and the 2.3GB features.pkl over a standard runner's
+# limits, and the >2GB pickle tripped the os.write truncation boundary (see
+# safe_pickle fix). 150k keeps feature extraction + calibrated training fast and
+# the features.pkl well under 2GB, while a linear TF-IDF+LogReg saturates far
+# below this. Reversible: NA0S_MAX_TRAIN_ROWS=<n> (or 0 to disable) on a bigger
+# runner trains on more/all rows.
+_DEFAULT_MAX_TRAIN_ROWS = 150000
+# Env var that overrides the default ceiling. "0" (or any value <= 0)
+# disables the cap entirely (use the full dataset).
+_MAX_TRAIN_ROWS_ENV = "NA0S_MAX_TRAIN_ROWS"
+# Fixed seed so the downsample is reproducible across runs (matches the
+# rebalancing block above, which also uses random_state=42).
+_CAP_RANDOM_STATE = 42
+
+
+def resolve_max_train_rows():
+    """Return the effective training-row ceiling.
+
+    Reads ``NA0S_MAX_TRAIN_ROWS`` from the environment; falls back to
+    ``_DEFAULT_MAX_TRAIN_ROWS`` when unset or unparseable. A resolved value
+    of ``0`` (or any non-positive integer) means *no cap*.
+    """
+    raw = os.environ.get(_MAX_TRAIN_ROWS_ENV)
+    if raw is None or raw == "":
+        return _DEFAULT_MAX_TRAIN_ROWS
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        print(
+            f"WARNING: {_MAX_TRAIN_ROWS_ENV}={raw!r} is not an integer; "
+            f"falling back to default cap {_DEFAULT_MAX_TRAIN_ROWS}."
+        )
+        return _DEFAULT_MAX_TRAIN_ROWS
+
+
+def apply_stratified_cap(dataset, max_rows):
+    """Stratified-downsample *dataset* to at most *max_rows* rows.
+
+    Preserves each class's proportion (stratified on ``label``) and is
+    deterministic (``random_state=42``). Returns ``dataset`` unchanged when
+    ``max_rows`` is non-positive (cap disabled) or when the dataset already
+    fits within the ceiling — both no-ops.
+
+    The per-class allocation floors then distributes any rounding remainder
+    to the largest classes, so the result has exactly ``min(len(dataset),
+    max_rows)`` rows and every class that had >=1 row keeps >=1 row.
+    """
+    n = len(dataset)
+    if max_rows is None or max_rows <= 0 or n <= max_rows:
+        return dataset
+
+    # Per-class target counts proportional to class size, summing to max_rows.
+    counts = dataset["label"].value_counts()
+    targets = {}
+    allocated = 0
+    for lbl, cnt in counts.items():
+        # Floor of the proportional share, but never drop a class to zero.
+        share = int(cnt * max_rows // n)
+        targets[lbl] = max(1, min(cnt, share))
+        allocated += targets[lbl]
+
+    # Distribute the remainder (max_rows - allocated) to the largest classes
+    # that still have spare rows, so the totals land exactly on max_rows.
+    remainder = max_rows - allocated
+    for lbl in counts.index:  # value_counts() is sorted desc by count
+        if remainder <= 0:
+            break
+        spare = int(counts[lbl]) - targets[lbl]
+        take = min(spare, remainder)
+        targets[lbl] += take
+        remainder -= take
+
+    sampled_parts = [
+        dataset[dataset["label"] == lbl].sample(
+            n=targets[lbl], random_state=_CAP_RANDOM_STATE
+        )
+        for lbl in counts.index
+    ]
+    return pd.concat(sampled_parts, ignore_index=True)
 
 
 def load_training_data():
@@ -96,6 +202,36 @@ def load_training_data():
         else:
             print("Rebalancing skipped (SKIP_REBALANCE=1).")
 
+        # --- Memory-safe training-set cap (stratified downsample) ---
+        # Applied AFTER rebalancing so the class proportions we preserve are
+        # the rebalanced ones. Keeps feature extraction tractable on a
+        # standard runner; see _DEFAULT_MAX_TRAIN_ROWS for the justification
+        # and the NA0S_MAX_TRAIN_ROWS override (0 = disabled).
+        max_train_rows = resolve_max_train_rows()
+        rows_before_cap = len(dataset)
+        if max_train_rows <= 0:
+            print(
+                f"Training-set cap disabled ({_MAX_TRAIN_ROWS_ENV}=0); "
+                f"using all {rows_before_cap} rows."
+            )
+        elif rows_before_cap > max_train_rows:
+            dataset = apply_stratified_cap(dataset, max_train_rows)
+            print(
+                f"Stratified cap: downsampled from {rows_before_cap} to "
+                f"{len(dataset)} rows (ceiling={max_train_rows}, "
+                f"{_MAX_TRAIN_ROWS_ENV} override available)."
+            )
+            capped_counts = dataset["label"].value_counts()
+            for lbl in sorted(capped_counts.index):
+                cnt = capped_counts[lbl]
+                pct = cnt / len(dataset) * 100
+                print(f"  Label {lbl}: {cnt} ({pct:.1f}%)")
+        else:
+            print(
+                f"No training-set cap applied ({rows_before_cap} rows "
+                f"<= ceiling {max_train_rows})."
+            )
+
         # --- Guard: both class labels must be present ---
         unique_labels = set(dataset['label'].dropna().unique())
         if not {0, 1}.issubset(unique_labels):
@@ -125,6 +261,7 @@ def load_training_data():
         vec = TfidfVectorizer(
             lowercase=True,
             max_features=_MAX_FEATURES,
+            min_df=_MIN_DF,
             ngram_range=(1, 3),
             sublinear_tf=True,
         )
@@ -136,6 +273,7 @@ def load_training_data():
             analyzer='char_wb',
             ngram_range=(3, 5),
             max_features=_CHAR_MAX_FEATURES,
+            min_df=_MIN_DF,
             sublinear_tf=True,
         )
         X_char_tfidf = char_vec.fit_transform(dataset['text'])

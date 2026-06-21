@@ -487,7 +487,7 @@ from na0s.layer1.ascii_art_detector import *  # noqa: F401,F403
 
 #### Tests to verify
 ```bash
-python3 -m pytest tests/test_ascii_art_detector.py tests/test_morse_code.py tests/test_numeric_decode.py tests/test_syllable_splitting.py tests/test_whitespace_stego.py tests/test_l2_coverage_gaps.py -v
+python3 -m pytest tests/obfuscation/test_ascii_art_detector.py tests/obfuscation/test_morse_code.py tests/obfuscation/test_numeric_decode.py tests/obfuscation/test_syllable_splitting.py tests/obfuscation/test_whitespace_stego.py tests/obfuscation/test_l2_coverage_gaps.py -v
 ```
 
 **Commit message:** `refactor(layer2): deduplicate 5 detectors shared with layer1`
