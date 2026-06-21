@@ -63,9 +63,20 @@ class TestTransformHelper(unittest.TestCase):
         self.assertEqual(result.shape[0], 1)
         self.assertEqual(result.shape[1], 3 + n_features)
 
-    def test_transform_with_broken_scaler_falls_back(self):
-        """If scaler.transform raises, falls back to TF-IDF only."""
+    def test_transform_with_broken_scaler_raises(self):
+        """F-AR8: a PROVIDED scaler that fails to transform is a real
+        model/scaler mismatch, not graceful degradation, so _transform must fail
+        loud instead of silently dropping structural features (which would build
+        a feature vector that doesn't match the trained model). The old "fall
+        back to TF-IDF only" was illusory in the real pipeline: predict() calls
+        model.predict(X) on the very next line, which rejects the wrong feature
+        dimension anyway — failing at the source just gives a clear error. The
+        legitimate skip is the scaler-is-None case (covered separately)."""
         from na0s.predict import _transform
+        from na0s import predict as _p
+
+        if not _p._HAS_STRUCTURAL_FEATURES:
+            self.skipTest("structural features unavailable in this build")
 
         mock_vec = MagicMock()
         mock_vec.transform.return_value = scipy.sparse.csr_matrix(
@@ -75,8 +86,8 @@ class TestTransformHelper(unittest.TestCase):
         mock_scaler = MagicMock()
         mock_scaler.transform.side_effect = ValueError("shape mismatch")
 
-        result = _transform("test", mock_vec, scaler=mock_scaler)
-        self.assertEqual(result.shape, (1, 2))  # TF-IDF only
+        with self.assertRaises(ValueError):
+            _transform("test", mock_vec, scaler=mock_scaler)
 
     def test_transform_sparse_output(self):
         """Result is always a sparse CSR matrix."""
