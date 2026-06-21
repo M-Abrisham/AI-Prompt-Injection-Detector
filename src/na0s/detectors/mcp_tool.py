@@ -652,6 +652,80 @@ def scan_tool_manifest(
     return results
 
 
+def scan_tool_result(result_text: str, tool_name: Optional[str] = None):
+    """Scan the *content returned by a tool / function call* for injection.
+
+    The existing :func:`scan_tool_manifest` / :func:`detect_tool_shadowing`
+    only inspect a tool's declared *name* and *description*.  They never look
+    at what a tool *returns* — yet tool/function RESULT text is an indirect
+    prompt-injection channel: an attacker-controlled API, file, or MCP
+    resource can return a worm or jailbreak payload that the model then
+    ingests.  This helper closes that ingestion-channel gap by routing the
+    result content through the full :func:`na0s.predict.scan` pipeline (the
+    same rule stack that scores user input, including the worm / IM1.6
+    self-replication signal).
+
+    Parameters
+    ----------
+    result_text : str
+        The text content returned by the tool / function call.
+    tool_name : str or None
+        Optional name of the tool that produced the result; recorded on the
+        returned result for attribution (does not affect scoring).
+
+    Returns
+    -------
+    na0s.scan_result.ScanResult
+        The pipeline verdict.  ``rule_hits`` / ``technique_tags`` /
+        ``is_malicious`` / ``risk_score`` are populated exactly as for a
+        direct ``scan()`` call.  When *tool_name* is given it is stored in
+        ``result.anomaly_flags`` as ``"tool_result:<name>"`` for provenance.
+
+    Notes
+    -----
+    Lazy-imports :func:`na0s.predict.scan` inside the function to avoid an
+    import cycle, and is fail-safe: any pipeline error degrades to a benign
+    result rather than crashing the host.
+
+    EMAIL/WEB ingestion is the integrator's responsibility — Na0S holds no
+    email or web content; inbound message bodies and fetched pages must be
+    passed through ``scan()`` / these helpers by the host.
+    """
+    # Lazy import to avoid an import cycle: predict imports detectors.
+    from na0s.scan_result import ScanResult
+
+    if not result_text or not str(result_text).strip():
+        sr = ScanResult(label="safe")
+        if tool_name:
+            sr.anomaly_flags.append("tool_result:{}".format(tool_name))
+        return sr
+
+    try:
+        from na0s.predict import scan as na0s_scan
+
+        sr = na0s_scan(str(result_text))
+    except Exception as exc:
+        logger.debug(
+            "scan_tool_result: scan() failed for tool %r: %s",
+            tool_name, exc,
+        )
+        sr = ScanResult(label="safe")
+
+    if tool_name:
+        flag = "tool_result:{}".format(tool_name)
+        if flag not in sr.anomaly_flags:
+            sr.anomaly_flags.append(flag)
+
+    if sr.is_malicious:
+        logger.warning(
+            "scan_tool_result: tool %r returned flagged content "
+            "(risk=%.2f, hits=%s)",
+            tool_name, sr.risk_score, sr.rule_hits,
+        )
+
+    return sr
+
+
 def get_mcp_tool_weight(result: McpToolResult) -> float:
     """Compute rule weight contribution from MCP tool detection.
 

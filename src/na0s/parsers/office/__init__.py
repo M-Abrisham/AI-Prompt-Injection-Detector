@@ -21,6 +21,11 @@ from na0s.parsers.office.base import (
     detect_format,
 )
 from na0s.parsers.office.router import extract
+from na0s.parsers.office.scan import (
+    ArtifactFinding,
+    DocumentScanResult,
+    scan_document,
+)
 
 __all__ = [
     "ExtractedArtifact",
@@ -28,4 +33,7 @@ __all__ = [
     "UnsupportedDocumentError",
     "detect_format",
     "extract",
+    "scan_document",
+    "DocumentScanResult",
+    "ArtifactFinding",
 ]
