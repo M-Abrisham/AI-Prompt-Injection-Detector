@@ -38,7 +38,10 @@ Several Claude agents may operate on this repo at once (check `git worktree list
   - `integrity/` — supply chain integrity, model security, validation
   - `judge/` — LLM judge-based classification
   - `ml/` — ML classifiers, embeddings, model inference
-  - `rag/` — RAG pipeline security, output scanning, propagation detection
+  - `rag/` — RAG pipeline security: poisoning detection + positional scanning
+  - `output/` — LLM output scanning, propagation/worm detection, segment grading (Layer 9)
+  - `structural/` — non-lexical structural feature extraction (Layer 3)
+  - `validation/` — trust-boundary / positive validation
   - `worm/` — worm signature detection
   - `parsers/office/` — office document parsing (DOCX/XLSX/PPTX/ODF/OLE)
   - detection layers (numbered→semantic rename in progress, v1.0.0 Step 12): `input/` (was `layer0/`), `rules/` (was `layer1/`), `obfuscation/` (was `layer2/`), `threat_intel/` (was `layer15/`), `conversation/` (was `layer16/`). Old `layer0/`/`layer1/`/`layer2/`/`layer15/`/`layer16/` paths remain as deprecated sys.modules-alias shims.
