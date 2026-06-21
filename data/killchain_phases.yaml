@@ -1,0 +1,203 @@
+# Kill-chain phase anchors for the goal-decomposition / kill-chain-coverage
+# detector (na0s.conversation.detectors.goal_decomposition).
+#
+# WHAT THIS IS
+# ------------
+# A small, human-reviewable lexicon mapping each cyber kill-chain phase to a
+# handful of anchor phrases. The detector tags each conversation turn with the
+# phase(s) it touches (regex match first; an all-MiniLM-L6-v2 centroid-cosine
+# fallback uses these same phrases when sentence-transformers is installed).
+#
+# These anchors are PARAPHRASED operational phrasing, not verbatim from any
+# single source. They are deliberately phase-DISCRIMINATIVE: the early phases
+# (RECON_INVENTORY / SERVICE_FINGERPRINT / VULN_MAP) describe read-only
+# discovery that authorized pentests legitimately perform, while the TERMINAL
+# phases (EXPLOIT / CRED_HARVEST / EXFIL) describe the actions that an
+# authorized, in-scope engagement explicitly does NOT take (proof-of-vuln only,
+# aggregates only, no external endpoints). The order-aware trigger in the
+# detector — terminal AFTER recon — is what separates the GTG-1002 attacks from
+# their benign twins, NOT the mere presence of any one phrase.
+#
+# WHY YAML / WHY EXTERNAL
+# -----------------------
+# Anchors are policy data, reviewed in PRs, and re-used by Build-3 calibration
+# against the benign siblings. Keeping them out of the .py source means tuning
+# the lexicon does not require a code change.
+#
+# FP-SAFETY NOTE (load-bearing)
+# -----------------------------
+# Anchors are matched as whole phrases / word-boundary regex (see the detector),
+# NOT bare substrings, so "no external endpoints" in a benign ROE turn does not
+# match the EXFIL anchor "send to external". The benign suppressor in the
+# detector is the second line of defense.
+
+version: 1
+
+# Order in which phases progress along the kill chain. The detector uses this
+# to decide "terminal-after-recon" pivots. PERSONA is phase 0 (rapport / trust
+# establishment) and is intentionally NON-triggering on its own — the benign
+# twins share the exact same persona.
+phase_order:
+  - PERSONA
+  - RECON_INVENTORY
+  - SERVICE_FINGERPRINT
+  - VULN_MAP
+  - EXPLOIT
+  - CRED_HARVEST
+  - EXFIL
+
+# Phases whose appearance AFTER an earlier recon/fingerprint phase constitutes a
+# kill-chain PIVOT (the malicious tell). These are the actions an in-scope
+# authorized engagement does not perform.
+terminal_phases:
+  - EXPLOIT
+  - CRED_HARVEST
+  - EXFIL
+
+# Phases that count as "recon/fingerprint" for the pivot-ordering check: a
+# terminal phase is only a pivot if one of these appeared in an EARLIER turn.
+recon_phases:
+  - RECON_INVENTORY
+  - SERVICE_FINGERPRINT
+  - VULN_MAP
+
+phases:
+  # ---------------------------------------------------------------------------
+  # PERSONA — trust / authority / rapport establishment. NON-triggering alone.
+  # ---------------------------------------------------------------------------
+  PERSONA:
+    - security firm
+    - security consultancy
+    - security researcher
+    - i'm an engineer at
+    - authorized assessment
+    - pre-approved assessment
+    - contracted to test
+    - routine testing
+    - we're authorized
+    - on an engagement
+    - red team engagement
+    - everything below is in scope
+
+  # ---------------------------------------------------------------------------
+  # RECON_INVENTORY — host / asset discovery (read-only enumeration).
+  # ---------------------------------------------------------------------------
+  RECON_INVENTORY:
+    # --- network / host discovery ---
+    - list reachable hosts
+    - list every reachable host
+    - enumerate live hosts
+    - enumerate hosts
+    - list live hosts
+    - which hosts respond
+    - inventory of hosts
+    - asset discovery
+    - collect dns records
+    - public dns records
+    - map the network
+    - list responding services
+    # --- data inventory (the attacker enumerates a data store before exfil) ---
+    - query the customer table
+    - count rows by region
+    - enumerate the tables
+    - list the records
+    - pull the full customer records
+    - pull the records
+    # --- tool / account / agent inventory (precedes privileged-tool or
+    #     credential pivots; the benign twins use the same verbs but never
+    #     pivot, so the order-aware terminal gate keeps them allowed) ---
+    - list the tools you have available
+    - list the tools available
+    - show me the service accounts
+    - enumerate service accounts
+    - account review
+    - collect the recon findings
+    - the recon findings
+    - format the recon results
+    - the recon summary
+
+  # ---------------------------------------------------------------------------
+  # SERVICE_FINGERPRINT — identify running services / versions / ports.
+  # ---------------------------------------------------------------------------
+  SERVICE_FINGERPRINT:
+    - fingerprint the running services
+    - fingerprint services
+    - fingerprint service versions
+    - identify the services
+    - service versions
+    - banner grab
+    - port scan
+    - list open ports
+    - which ports are open
+    - detect the operating system
+    - os fingerprint
+    - capture its request format
+    - identify the login portal
+
+  # ---------------------------------------------------------------------------
+  # VULN_MAP — map services to known vulnerabilities (still read-only). This is
+  # the typical STOPPING point for an authorized proof-of-vulnerability scope.
+  # ---------------------------------------------------------------------------
+  VULN_MAP:
+    - cross-reference against known cves
+    - known cves
+    - map them to known cves
+    - which hosts are unpatched
+    - unpatched hosts
+    - vulnerability mapping
+    - identify vulnerabilities
+    - missing patches
+    - cve list
+    - proof-of-vulnerability
+    - vulnerability assessment
+
+  # ---------------------------------------------------------------------------
+  # EXPLOIT — TERMINAL. Active compromise: weaponize a vuln, gain access.
+  # ---------------------------------------------------------------------------
+  EXPLOIT:
+    - write a working exploit
+    - write an exploit
+    - run the exploit
+    - get a shell
+    - gain a shell
+    - drop a reverse shell
+    - remote code execution
+    - brute-force valid credentials
+    - brute force the login
+    - exploit every host
+    - chain it end to end
+    - pop the box
+    - grant my account admin
+
+  # ---------------------------------------------------------------------------
+  # CRED_HARVEST — TERMINAL. Steal authentication material.
+  # ---------------------------------------------------------------------------
+  CRED_HARVEST:
+    - credential dump
+    - credential_dump
+    - dump credentials
+    - password hash
+    - password hashes
+    - /etc/shadow
+    - dump the sam
+    - harvest credentials
+    - extract the passwords
+    - steal the tokens
+    - pull the auth token
+
+  # ---------------------------------------------------------------------------
+  # EXFIL — TERMINAL. Stage / send data to an attacker-controlled destination.
+  # ---------------------------------------------------------------------------
+  EXFIL:
+    - destination_url
+    - send to external
+    - send it to my endpoint
+    - exfiltrate
+    - exfiltrate the loot
+    - external collector
+    - external endpoint
+    - upload it to
+    - push the data out
+    - copy the data to my
+    - to my external
+    - attacker-controlled destination
