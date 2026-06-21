@@ -151,27 +151,15 @@ def _benign_fp_rate(samples):
 
 
 class TestZeroRecallDetection:
-    """RED until the matching layer lands.
+    """STRICT since the matching layer landed (Build-3).
 
-    The stub flags nothing, so recall is 0.0 < RECALL_TARGET and this
-    fails on RECALL (not on import).  The benign-FP test passes now (the
-    stub also flags no benign sample) and must keep passing after the
-    matching layer is implemented.
+    The self-anchored co-occurrence matcher table in
+    ``na0s.detectors.inter_model`` now flags the eight former zero-recall
+    techniques at well above the 60% target while holding the 55 benign
+    siblings at/below the 5% FP bound. The xfail marker has been removed:
+    these are regression tests.
     """
 
-    @pytest.mark.xfail(
-        strict=False,
-        reason=(
-            "INJ-0007/INJ-0017 inter-model detector is a documented SCOPING STUB "
-            "(commit 99f265b 'stub + failing test + design'; see "
-            "docs/INJ0017_DETECTOR_SCOPE.md and na0s.detectors.inter_model). "
-            "detect_inter_model() implements no matching layer yet and always "
-            "returns an empty result, so recall on the zero-recall techniques is "
-            "0% < the 60% target. RED-by-design TDD test; it flips to XPASS with "
-            "NO change to the assertion once the matching layer lands (then remove "
-            "this marker)."
-        ),
-    )
     def test_recall_on_zero_recall_techniques(self, zero_recall_samples):
         recall = _recall(zero_recall_samples)
         assert recall >= RECALL_TARGET, (
