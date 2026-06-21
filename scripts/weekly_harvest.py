@@ -72,18 +72,39 @@ HF_QUERIES = [
     "prompt security",
     "guardrail bypass",
     "LLM safety",
+    # Adversarial-suffix / gradient-optimized jailbreak family (D7.5/A1.1) — the
+    # coverage gap the static list missed; needed to discover datasets for the
+    # GCG/AdvBench retrain path.
+    "GCG adversarial suffix",
+    "AdvBench harmful behaviors",
+    "AutoDAN jailbreak",
+    "HarmBench",
+    "universal adversarial trigger",
+    # Indirect / RAG-poisoning ingestion attacks (I1/IG).
+    "indirect prompt injection",
+    "RAG poisoning",
+    "retrieval augmented generation attack",
 ]
 
 ARXIV_QUERIES = [
     "all:prompt+injection+LLM",
     "all:jailbreak+large+language+model",
     "all:adversarial+prompt+attack",
+    "all:GCG+adversarial+suffix+language+model",
+    "all:AutoDAN+jailbreak",
+    "all:universal+adversarial+trigger+LLM",
+    "all:retrieval+augmented+generation+poisoning",
 ]
 
 GITHUB_QUERIES = [
     "prompt+injection+dataset",
     "jailbreak+LLM+dataset",
     "adversarial+prompt+dataset",
+    "GCG+adversarial+suffix",
+    "llm-attacks",
+    "AutoDAN+jailbreak",
+    "HarmBench+behaviors",
+    "RAG+poisoning+dataset",
 ]
 
 # Dataset IDs already used in Na0S (pre-populated for known_datasets.txt)
