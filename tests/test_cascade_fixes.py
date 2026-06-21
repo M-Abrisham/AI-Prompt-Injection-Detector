@@ -257,105 +257,6 @@ class TestBugL6_4_ConfidenceSemantics(unittest.TestCase):
 class TestBugL6_5_JudgeBlending(unittest.TestCase):
     """Judge blending must convert both signals to P(malicious) before mixing."""
 
-    def _make_cascade_with_judge(self, judge_label, judge_confidence,
-                                  ml_predict=1, ml_proba_mal=0.7):
-        """Helper to create a CascadeClassifier with a mock LLM judge.
-
-        Returns the CascadeClassifier with mocked internals.
-        """
-        vec = _make_mock_vectorizer()
-        model = _make_mock_model(
-            predict_label=ml_predict,
-            proba_safe=1.0 - ml_proba_mal,
-            proba_mal=ml_proba_mal,
-        )
-
-        # Create mock LLM checker that returns an LLMCheckResult-like object
-        @dataclass
-        class MockCheckResult:
-            label: str
-            confidence: float
-            rationale: str = "test"
-
-        mock_checker = MagicMock()
-        mock_checker.classify_prompt.return_value = MockCheckResult(
-            label=judge_label,
-            confidence=judge_confidence,
-        )
-
-        clf = CascadeClassifier(vectorizer=vec, model=model)
-        # Inject the mock checker so it's used as the LLM judge
-        clf._llm_checker = mock_checker
-        clf._llm_checker_init_attempted = True
-
-        return clf
-
-    @patch("na0s.cascade._HAS_LLM_CHECKER", True)
-    @patch("na0s.cascade.LLMChecker", MagicMock)
-    def test_judge_malicious_blends_correctly(self):
-        """When judge says MALICIOUS with 0.9 confidence, blend on P(mal) axis."""
-        clf = self._make_cascade_with_judge(
-            judge_label="MALICIOUS",
-            judge_confidence=0.9,
-            ml_predict=1,
-            ml_proba_mal=0.7,
-        )
-
-        # Mock layer0_sanitize, rule_score_detailed, obfuscation_scan, whitelist
-        @dataclass
-        class FakeL0:
-            sanitized_text: str = "test"
-            rejected: bool = False
-            anomaly_flags: list = None
-            rejection_reason: str = ""
-            def __post_init__(self):
-                if self.anomaly_flags is None:
-                    self.anomaly_flags = []
-
-        @dataclass
-        class FakeRuleHit:
-            name: str
-            severity: str
-            technique_ids: list
-
-        fake_hits = [
-            FakeRuleHit(name="test_rule", severity="medium", technique_ids=[])
-        ]
-
-        with patch("na0s.cascade.layer0_sanitize", return_value=FakeL0()), \
-             patch("na0s.cascade.rule_score_detailed", return_value=fake_hits), \
-             patch("na0s.cascade.obfuscation_scan", return_value={"evasion_flags": []}), \
-             patch.object(clf._whitelist, "is_whitelisted", return_value=(False, "not safe")), \
-             patch("na0s.cascade.isinstance", side_effect=lambda obj, cls: type(obj).__name__ == "MagicMock", create=True):
-
-            # Override isinstance check for LLMChecker
-            # Since we can't easily mock isinstance, patch the code path:
-            # The check is `_HAS_LLM_CHECKER and isinstance(judge, LLMChecker)`.
-            # We need LLMChecker to be something our mock IS an instance of.
-            # Easiest: make the mock's __class__ match LLMChecker.
-            clf._llm_checker.__class__ = type(clf._llm_checker)
-
-            label, confidence, hits, stage = clf.classify("test prompt")
-
-        # Stage 2: ML prob malicious = 0.7, composite = 0.6*0.7 + 0.1 = 0.52
-        # Since composite 0.52 < threshold 0.55, label would be SAFE,
-        # confidence = 1.0 - 0.52 = 0.48.
-        # But confidence 0.48 >= JUDGE_LOWER_THRESHOLD(0.25) and
-        # <= JUDGE_UPPER_THRESHOLD(0.85), so judge is invoked.
-        #
-        # In the LLMChecker path (isinstance check), if it doesn't match
-        # LLMChecker type, falls to the else branch (LLMJudge interface).
-        # Let's verify the stage is "judge" or "weighted" based on which
-        # branch was taken.
-
-        # The result depends on which branch the isinstance check takes.
-        # Since our mock is a MagicMock, not an LLMChecker instance, it
-        # goes to the else branch (original LLMJudge interface), which
-        # expects .classify() -> verdict with .error, .verdict, .confidence.
-        # That won't match, so judge is skipped and we get weighted result.
-        # Let me fix the test to use the LLMJudge interface instead.
-
-    @patch("na0s.cascade._HAS_LLM_CHECKER", False)
     def test_judge_safe_blending_flips_confidence(self):
         """When judge says SAFE with 0.85 confidence, P(mal) = 0.15.
 
@@ -422,7 +323,6 @@ class TestBugL6_5_JudgeBlending(unittest.TestCase):
         expected_confidence = round(1.0 - expected_blended_p_mal, 4)
         self.assertAlmostEqual(confidence, expected_confidence, places=3)
 
-    @patch("na0s.cascade._HAS_LLM_CHECKER", False)
     def test_judge_malicious_blending_correct_axis(self):
         """When judge says MALICIOUS with 0.9 confidence, P(mal) = 0.9.
 
@@ -479,7 +379,6 @@ class TestBugL6_5_JudgeBlending(unittest.TestCase):
         expected = round(0.3 * 0.3 + 0.7 * 0.9, 4)
         self.assertAlmostEqual(confidence, expected, places=3)
 
-    @patch("na0s.cascade._HAS_LLM_CHECKER", False)
     def test_old_blending_would_give_wrong_result(self):
         """Demonstrate the old bug: naive blending of mixed metrics.
 
@@ -536,10 +435,26 @@ class TestBugL6_5_JudgeBlending(unittest.TestCase):
         # Should be the correct value
         self.assertEqual(label, "SAFE")
 
+    def test_llm_judge_fallback_no_key_is_noop(self):
+        """Layer-7 fallback stays no-throw and returns None without an API key.
+
+        Regression for the LLMChecker->LLMJudge migration: _ensure_llm_checker()
+        must absorb LLMJudge()'s ValueError (no key) and degrade to no judge.
+        """
+        clf = CascadeClassifier(
+            vectorizer=_make_mock_vectorizer(), model=_make_mock_model(),
+        )
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("GROQ_API_KEY", None)
+            # No injected judge + no key -> fallback builds nothing, returns None.
+            self.assertIsNone(clf._ensure_llm_checker())
+
 
 # ---------------------------------------------------------------------------
 # BUG-L6-6: WhitelistFilter MAX_LENGTH raised to 1000
 # ---------------------------------------------------------------------------
+
 
 class TestBugL6_6_MaxLength(unittest.TestCase):
     """WhitelistFilter.MAX_LENGTH should be 1000, not 500."""

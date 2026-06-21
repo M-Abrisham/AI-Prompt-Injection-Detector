@@ -150,12 +150,15 @@ def _embedding_enabled():
         "NA0S_EMBEDDING_ENABLED", "",
     ).strip().lower() not in ("0", "false")
 
-# Layer 7: LLM checker — optional import
+# Layer 7: LLM judge — optional import (replaces the deprecated LLMChecker).
+# LLMJudge imports its backends (openai/groq) lazily, so the class imports
+# even with no backend installed; a missing backend/key surfaces at construction
+# and is absorbed by _ensure_llm_checker()'s try/except.
 try:
-    from .judge.checker import LLMChecker
-    _HAS_LLM_CHECKER = True
+    from .judge.llm_judge import LLMJudge
+    _HAS_LLM_JUDGE = True
 except ImportError:
-    _HAS_LLM_CHECKER = False
+    _HAS_LLM_JUDGE = False
 
 # Layer 8: Positive validation — optional import
 try:
@@ -822,9 +825,10 @@ class CascadeClassifier:
         return True
 
     def _ensure_llm_checker(self) -> Optional[object]:
-        """Lazy-initialise the LLM checker if possible.
+        """Lazy-initialise the fallback LLM judge if possible.
 
-        Returns the checker instance or None.
+        Returns the injected judge, a lazily-built LLMJudge fallback, or None
+        (no API key / backend available, or init failed — stays no-throw).
         """
         if self._judge is not None:
             return self._judge
@@ -833,13 +837,22 @@ class CascadeClassifier:
         if self._llm_checker_init_attempted:
             return None
         self._llm_checker_init_attempted = True
-        if not _HAS_LLM_CHECKER:
+        if not _HAS_LLM_JUDGE:
+            return None
+        # Pick the backend from whichever API key is present — this preserves the
+        # Groq-only deployments the former Groq-based LLMChecker supported, and
+        # degrades to no judge (None) when neither key is set.
+        if os.environ.get("OPENAI_API_KEY"):
+            backend = "openai"
+        elif os.environ.get("GROQ_API_KEY"):
+            backend = "groq"
+        else:
             return None
         try:
-            self._llm_checker = LLMChecker()
+            self._llm_checker = LLMJudge(backend=backend)
             return self._llm_checker
         except Exception:
-            _logger.warning("Failed to init LLMChecker (Layer 7)", exc_info=True)
+            _logger.warning("Failed to init LLMJudge (Layer 7)", exc_info=True)
             return None
 
     def classify(self, text: str) -> Tuple[str, float, List[str], str]:
@@ -1099,44 +1112,24 @@ class CascadeClassifier:
             if needs_judge:
                 _t0_judge = time.monotonic()
                 try:
-                    # Layer 7: LLM checker uses classify_prompt() and
-                    # returns LLMCheckResult(label, confidence, rationale).
-                    # The original judge interface uses .classify(text) ->
-                    # verdict with .error / .verdict / .confidence attrs.
-                    # Handle both interfaces.
-                    if _HAS_LLM_CHECKER and isinstance(judge, LLMChecker):
-                        result = judge.classify_prompt(clean)
-                        self._record_slo("judge", (time.monotonic() - _t0_judge) * 1000)
-                        with self._stats_lock:
-                            self._judged += 1
-                        if result.label in ("SAFE", "MALICIOUS"):
-                            original_label = label
-                            label, confidence = _blend_verdicts(
-                                label, confidence, result.label, result.confidence,
-                            )
-                            if label != original_label:
-                                with self._stats_lock:
-                                    self._judge_overrides += 1
-                            judge_reasoning = getattr(result, "rationale", "")
-                            return label, confidence, hits, "judge", l0, judge_reasoning, technique_tags
-                    else:
-                        # Original LLMJudge interface
-                        verdict = judge.classify(clean)
-                        self._record_slo("judge", (time.monotonic() - _t0_judge) * 1000)
-                        with self._stats_lock:
-                            self._judged += 1
-                        if (hasattr(verdict, "error") and verdict.error is None
-                                and hasattr(verdict, "verdict")
-                                and verdict.verdict != "UNKNOWN"):
-                            original_label = label
-                            label, confidence = _blend_verdicts(
-                                label, confidence, verdict.verdict, verdict.confidence,
-                            )
-                            if label != original_label:
-                                with self._stats_lock:
-                                    self._judge_overrides += 1
-                            judge_reasoning = getattr(verdict, "reasoning", "")
-                            return label, confidence, hits, "judge", l0, judge_reasoning, technique_tags
+                    # Layer 7: the judge exposes .classify(text) -> JudgeVerdict
+                    # with .error / .verdict / .confidence / .reasoning.
+                    verdict = judge.classify(clean)
+                    self._record_slo("judge", (time.monotonic() - _t0_judge) * 1000)
+                    with self._stats_lock:
+                        self._judged += 1
+                    if (hasattr(verdict, "error") and verdict.error is None
+                            and hasattr(verdict, "verdict")
+                            and verdict.verdict != "UNKNOWN"):
+                        original_label = label
+                        label, confidence = _blend_verdicts(
+                            label, confidence, verdict.verdict, verdict.confidence,
+                        )
+                        if label != original_label:
+                            with self._stats_lock:
+                                self._judge_overrides += 1
+                        judge_reasoning = getattr(verdict, "reasoning", "")
+                        return label, confidence, hits, "judge", l0, judge_reasoning, technique_tags
                 except Exception:
                     _logger.debug("LLM judge (Layer 7) failed", exc_info=True)
                     with self._stats_lock:
