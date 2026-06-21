@@ -75,10 +75,10 @@ taxonomy:
     C1MT: 6
     BEN: 2
 test_count:
-  count: 9449
+  count: 9611
   collection_errors: 0
   pytest_exit_code: 0
-test_files: 304
+test_files: 311
 detection_signals_in_scan:
   filter_doc: Names matching prefixes (detect_, scan_, analyze_, extract_, score_,
     compute_, classify*, predict*, get_, sniff_) plus an exact-match allowlist for
@@ -108,6 +108,8 @@ detection_signals_in_scan:
   - detect_fragmented_payload
   - detect_harmful_intent
   - detect_rag_poisoning
+  - detect_inter_model
+  - detect_tool_abuse
   - analyze_intent
   - _get_pg_classifier_score
   - compute_perplexity
@@ -119,6 +121,8 @@ detection_signals_in_scan:
   - get_fragment_weight
   - get_harmful_intent_weight
   - get_rag_poison_weight
+  - get_inter_model_weight
+  - get_tool_abuse_weight
   - get_intent_guard_weight
   - register_malicious
 constants:
@@ -143,9 +147,12 @@ L16_detectors:
 - name: FabricatedHistoryDetector
   file: src/na0s/conversation/detectors/fabricated_history.py
   line: 44
+- name: GoalDecompositionDetector
+  file: src/na0s/conversation/detectors/goal_decomposition.py
+  line: 267
 - name: PayloadSplittingDetector
   file: src/na0s/conversation/detectors/payload_splitting.py
-  line: 224
+  line: 266
 - name: SchemingDetector
   file: src/na0s/conversation/detectors/scheming.py
   line: 298
