@@ -49,7 +49,11 @@ class PropagationScanner:
         # auto_adapt=False: attacker-controlled output must NOT train the
         # detector — that's a poisoning vector.  Auto-adapt should only run
         # on *confirmed* malicious input after human review.
-        self._worm_detector = WormSignatureDetector(auto_adapt=False)
+        # reconstruction_window=1 (stateless, _history_limit==0): consistent
+        # with the input-path get_worm_detector() singleton (WD-3) so a prior
+        # output-scan turn cannot poison a later benign output-scan via the
+        # cross-turn reconstruction buffer.
+        self._worm_detector = WormSignatureDetector(auto_adapt=False, reconstruction_window=1)
 
     # ---- public API -------------------------------------------------------
 

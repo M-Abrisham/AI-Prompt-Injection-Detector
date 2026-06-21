@@ -130,6 +130,17 @@ try:
 except ImportError:
     _HAS_OUTPUT_SCANNER = False
 
+# Layer 9b: Propagation scanner — OUTPUT-side worm-spread guard, optional import.
+# Runs the input classifier + worm detector on LLM *output* to catch the
+# defining indirect-propagation step (output re-emits a self-replicating payload
+# that lands in the next model's input).  Gated behind NA0S_PROPAGATION_SCAN
+# (default OFF) inside scan_output, so default behaviour is unchanged.
+try:
+    from .output.propagation import PropagationScanner
+    _HAS_PROPAGATION_SCANNER = True
+except ImportError:
+    _HAS_PROPAGATION_SCANNER = False
+
 # Layer 10: Canary token detection — optional import
 try:
     from .canary import CanaryManager
@@ -662,6 +673,12 @@ class CascadeClassifier:
                 _logger.warning("Failed to init OutputScanner (Layer 9)", exc_info=True)
                 self._output_scanner = None
 
+        # Layer 9b: Propagation scanner — OUTPUT-side worm-spread guard.
+        # Constructed lazily on first use (only when NA0S_PROPAGATION_SCAN is on)
+        # to avoid paying the import/init cost when the gate is off.  Cached on
+        # the instance so it is built at most once per cascade.
+        self._propagation_scanner = None
+
         # Layer 10: Canary token manager — optional
         self._canary_manager = None
         if enable_canary and _HAS_CANARY:
@@ -693,6 +710,7 @@ class CascadeClassifier:
             "judge": 0,
             "positive_validation": 0,
             "output_scanner": 0,
+            "propagation_scanner": 0,
             "canary": 0,
             "worm": 0,
         }
@@ -1291,7 +1309,7 @@ class CascadeClassifier:
         if self._output_scanner is None:
             return None
         try:
-            return self._output_scanner.scan(
+            result = self._output_scanner.scan(
                 output_text=output_text,
                 original_prompt=original_prompt,
                 system_prompt=system_prompt,
@@ -1301,6 +1319,63 @@ class CascadeClassifier:
             with self._stats_lock:
                 self._layer_failures["output_scanner"] += 1
             return None
+
+        # Layer 9b: OUTPUT-side worm-spread guard.  Gated behind
+        # NA0S_PROPAGATION_SCAN (default OFF) so default behaviour is unchanged.
+        # Runs the input classifier + worm detector on the OUTPUT text — the
+        # defining indirect-propagation step where the model re-emits a
+        # self-replicating payload destined for the next model's input.  The
+        # original prompt is passed as the replication source so the
+        # input<->output similarity head can fire.  Fail-safe: any error here
+        # is non-fatal and leaves the OutputScanner result untouched.
+        self._merge_propagation_scan(result, output_text, original_prompt)
+        return result
+
+    def _merge_propagation_scan(self, result, output_text, original_prompt):
+        """Run the OUTPUT-side propagation/worm guard and fold it into *result*.
+
+        No-op unless ``NA0S_PROPAGATION_SCAN`` is enabled and the
+        PropagationScanner module is importable.  Mutates *result* in place,
+        following the OutputScanner's own reporting contract:
+
+        * a propagation hit raises ``is_suspicious`` to True,
+        * lifts ``risk_score`` to the higher of the two scores, and
+        * extends ``flags`` / ``technique_ids`` with the propagation technique
+          tags (including ``worm_propagation`` and the IM1.6 worm taxonomy code).
+
+        Fail-safe: any exception is swallowed (logged at debug) so the
+        OutputScanner result is never corrupted by a propagation-scan failure.
+        """
+        if not _HAS_PROPAGATION_SCANNER or not PropagationScanner.is_enabled():
+            return
+        try:
+            if self._propagation_scanner is None:
+                self._propagation_scanner = PropagationScanner()
+            prop = self._propagation_scanner.scan(
+                output_text, source_input_text=original_prompt,
+            )
+            if not prop.get("is_propagation_risk"):
+                return
+
+            # Lift the suspicion flag and risk score (never lower them).
+            result.is_suspicious = True
+            result.risk_score = round(
+                max(result.risk_score, float(prop.get("risk_score", 0.0))), 4,
+            )
+
+            # Fold propagation technique tags into flags + technique_ids,
+            # preserving order and de-duplicating against existing entries.
+            tags = prop.get("technique_tags", []) or []
+            for tag in tags:
+                if tag not in result.technique_ids:
+                    result.technique_ids.append(tag)
+            prop_flag = "propagation: " + ", ".join(tags) if tags else "propagation risk"
+            if prop_flag not in result.flags:
+                result.flags.append(prop_flag)
+        except Exception:
+            _logger.debug("Propagation scanner (Layer 9b) failed", exc_info=True)
+            with self._stats_lock:
+                self._layer_failures["propagation_scanner"] += 1
 
     # ------------------------------------------------------------------
     # Layer 10: Canary token management
