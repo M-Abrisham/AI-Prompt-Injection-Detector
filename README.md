@@ -77,7 +77,7 @@ ScanResult
 
 <!-- src: src/na0s/layer0/__init__.py:2 (sanitize), src/na0s/layer1/analyzer.py:53 (rules), src/na0s/layer2/__init__.py:25 (obfuscation), src/na0s/structural/__init__.py:22 (structural), src/na0s/predict.py:578 (ML), src/na0s/embedding_classifier.py (embedding), src/na0s/_voting.py (cascade), src/na0s/judge/llm_judge.py (judge) -->
 
-`classify_prompt()` performs **36** named detection calls per input — full ordered list in [`docs/facts.yaml`](docs/facts.yaml). <!-- src: src/na0s/predict.py:640; facts.yaml#detection_signals_in_scan -->
+`classify_prompt()` performs **37** named detection calls per input — full ordered list in [`docs/facts.yaml`](docs/facts.yaml). <!-- src: src/na0s/predict.py:640; facts.yaml#detection_signals_in_scan -->
 
 Default decision threshold is **0.55**, configurable via `DECISION_THRESHOLD` env var or per-call `threshold=` argument. <!-- src: src/na0s/_voting.py:118; facts.yaml#constants.DECISION_THRESHOLD -->
 
@@ -87,7 +87,7 @@ Full architecture diagram and per-layer notes: [docs/ARCHITECTURE.md](docs/ARCHI
 
 ## Library API
 
-`from na0s import …` — **18** public symbols. <!-- facts.yaml#public_exports --> The three most commonly used:
+`from na0s import …` — **23** public symbols. <!-- facts.yaml#public_exports --> The three most commonly used:
 
 **Direct scan**
 
