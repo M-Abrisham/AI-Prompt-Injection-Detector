@@ -123,7 +123,12 @@ class Scenario:
     source : str
         Where the scenario came from (``"manual"``, ``"shade_arena"``,
         ``"harmbench"``, ``"layer16_fixtures"``, ``"llm_generated"``,
-        ``"matrix_composed"``, ``"harvest_pipeline"``).
+        ``"matrix_composed"``, ``"harvest_pipeline"``, ``"synthesized"``).
+        ``"synthesized"`` marks scenarios that are deliberately paraphrased /
+        re-authored from a public incident report (never copied verbatim) to
+        cover a taxonomy gap the report describes; provenance (origin URL +
+        retrieval date) is folded into ``description`` exactly as for
+        ``"harvest_pipeline"``.
     tags : list[str]
         Multi-label technique tags (e.g. ``["roleplay", "base64-encode"]``).
     difficulty : Optional[int]
