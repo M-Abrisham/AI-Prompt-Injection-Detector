@@ -11,7 +11,7 @@ Audit-ready, two-dimensional mapping of Na0S's internal injection taxonomy to th
 | Field | Value |
 |-------|-------|
 | **Version** | v2.1 (2D, measured-grounded) |
-| **Last reviewed** | 2026-06-20 (T/INJ-0026 & IM/INJ-0017 rows: GTG-1002 synthesized scenarios now present, detection RED/xfail, per-category TPR still 0%) · 2026-06-16 (harness-grounded rebuild on branch `feat/inj0017-inter-model-detector`; D8 hardening in-flight) |
+| **Last reviewed** | 2026-06-20 (T/INJ-0026 & IM/INJ-0017: detector LANDED on branch `hardening/decompose-im-detection` — IM matchers + free-text tool-abuse + goal-decomposition wired into `scan()`/`cascade.py`; GTG-1002 xfails flipped to strict, 6/6 attacks BLOCK, 6/6 benign siblings ALLOWED, IM 100% recall on 8 zero-recall techniques / 0% benign FP) · 2026-06-16 (harness-grounded rebuild on branch `feat/inj0017-inter-model-detector`; D8 hardening in-flight) |
 | **Owner** | @M-Abrisham |
 | **Coverage source of truth** | `scripts/technique_analysis.py` → `benchmarks/results/technique_analysis.json` (schema v2; threshold **0.55**; measured 2026-06-17, uncommitted). **Not** the per-row "samples" columns and **not** `BENCHMARK_RESULTS.md` (whose 100% D8 row is known-mislabeled and unfixed). |
 | **Source catalog — MITRE ATLAS** | v2026.05 (format-version 6.0.0; collection 2026.05; modified 2026-05-27) — https://github.com/mitre-atlas/atlas-data/releases/download/v2026.05/ATLAS-2026.05.yaml |
@@ -59,7 +59,7 @@ Each class is scored 0–100 on how completely Na0S **detects it at runtime toda
 | **INJ-0014** | S, IG | LLM03 | T0010.002 Supply Chain: Data | Supply-chain / ETL ingestion compromise | mixed | **52** | estimated | — | `supply_chain.py`, `ingestion_manipulation.py`, `safe_pickle.py`+`KNOWN_HASHES` (load-time) | high | Load-time integrity only; IG1.x no `src/` detector; unmeasured. |
 | **INJ-0015** | D1.20 | LLM01 | T0080.001 Thread | Context-memory poisoning via prior output | mixed | **86** | estimated | — (not in harness) | `layer16/detectors/context_poisoning.py` (WIRED) | high | Dedicated detector + 40-test suite; **unmeasured by the recall harness** — only Validated row not measured. |
 | **INJ-0016** | I1.6, IG1.8 | LLM01 | T0080.000 Memory | Persistent agent-memory poisoning | agent-tool | **40** | estimated | — | taxonomy-only (I1.6/IG1.8) | high | No detector, no test. |
-| **INJ-0017** | IM, IG, AD | LLM06 | T0080.000 Memory *(dual: T0061)* | Inter-model / cross-system propagation | agent-tool | **44** | measured (scenarios present; detection RED/xfail) | — (TPR 0%) | `inter_model_propagation.py` probe; `detectors/inter_model.py` is a **non-wired stub** (returns empty; recall test RED). GTG-1002 IM scenarios now exist (`data/eval/scenarios/_drafts/2025-11-gtg-1002-synthesized.yaml`: IM3.1/IM3.4/IM5.3, admission-gate-passed; detection `xfail` in `tests/conversation/test_gtg1002_detection.py`) | critical | Stub present, functional detection absent. Scenarios are now present (RED) but **per-category IM TPR reads 0% until the detector lands** (ROADMAP follow-up: wire `detect_inter_model` + net-new semantic goal-composition detector). |
+| **INJ-0017** | IM, IG, AD | LLM06 | T0080.000 Memory *(dual: T0061)* | Inter-model / cross-system propagation | agent-tool | **60** | measured (GTG IM 3/3 block; matchers 100% on 8 zero-recall / ~33% broad; 0% benign FP) | GTG IM 3/3; 100% (144/144) on 8 zero-recall techniques | `detectors/inter_model.py` now implements 24 self-anchored co-occurrence matchers across 6 `FAMILIES`, WIRED into `scan()`+`cascade.py` behind `_HAS_INTER_MODEL` (capped, corroborating); GTG-1002 IM scenarios (IM3.1/IM3.4/IM5.3) BLOCK via IM + goal-decomposition; xfail flipped strict | critical | Wired + GTG-blocked. Residual: broad IM recall ~33% across all 516 IM samples (matchers target the co-occurrence families); benign FP 0%. |
 | **INJ-0018** | D2 | LLM01 | T0054 Jailbreak | Persona / roleplay jailbreak (DAN) | input | **57** | measured | **56.7%** (17/30) | `persona_roleplay.py` (D2), rules + `structural/` (role→D2.1) — WIRED | high | **Gate FAILS** (CI-low 0.39); estimate (70) was +13 optimistic. |
 | **INJ-0019** | E | LLM07 | T0056 Extract System Prompt; T0057 Data Leakage | Exfiltration / system-prompt & secret extraction | mixed | **48** | measured | **E1 48%** (12/25); **E2 0%** (0/20) | `detectors/extraction.py` (WIRED), E1/E2 rules, `output/scanner.py`, `canary/` | critical | **E2 active-recon measured 0%** — wired but ineffective (gate FAILS). Estimate (78) was +30 optimistic. |
 | **INJ-0020** | P, P2 | LLM02 | T0057 Data Leakage; T0024 Exfil via API | Privacy / PII / training-data extraction | input | **35** | measured | **P1 35%** (7/20) | `detectors/privacy_probe.py` (WIRED), P1 rules | high | **Gate FAILS**; P2 membership-inference untagged. Estimate (74) was +39 optimistic. |
@@ -68,7 +68,7 @@ Each class is scored 0–100 on how completely Na0S **detects it at runtime toda
 | **INJ-0023** | A | LLM01 | T0054 Jailbreak *(automated)* | Adversarial-ML / automated jailbreak (GCG/PAIR/TAP) | input | **48** | estimated | — | `layer0/tokenization.py` (A1.1), `perplexity.py` (gated) — PARTIAL | high | GCG-suffix only; PAIR/TAP/AutoDAN/LatentBreak (fluent, evade perplexity) undetected. |
 | **INJ-0024** | P3 | LLM05 *(adjacent)* | *no clean ATLAS* | Malicious code generation | input | **42** | estimated | — | `malicious_code_gen.py` (P3); overlaps `harmful_intent.py` O1.2 only | high | No P3 detector; samples-only for the named technique. |
 | **INJ-0025** | R | LLM10 | T0034 Cost Harvesting; T0029 DoS | Resource exhaustion / DoS / cost-amplification | mixed | **46** | estimated | — | `layer0/resource_guard.py`, length/chunk caps, R1 rules — PARTIAL | medium | Input-side R1.1 only; output-side recursive/cost not detected. |
-| **INJ-0026** | T | LLM06 | T0053 Tool Invocation; T0011.002 Poisoned Tool | Agent / tool / MCP abuse | agent-tool | **50** | measured (scenarios present; detection RED/xfail) | — (TPR 0%) | `detectors/mcp_tool.py` reachable only via unexported `scan_tools()` (not default `scan()`); T1 text rules fire. GTG-1002 T scenarios now exist (`data/eval/scenarios/_drafts/2025-11-gtg-1002-synthesized.yaml`: T1.1/T1.3/T2.3, admission-gate-passed; detection `xfail` in `tests/conversation/test_gtg1002_detection.py`) | critical | Manifest analysis off the default path; not benchmarked vs MCPTox/MCPSecBench. Scenarios are now present (RED) but **per-category T TPR reads 0% until the detector lands** (ROADMAP follow-up: auto-route tool traces through `scan()` + net-new semantic goal-composition detector). |
+| **INJ-0026** | T | LLM06 | T0053 Tool Invocation; T0011.002 Poisoned Tool | Agent / tool / MCP abuse | agent-tool | **62** | measured (GTG T 3/3 block; benign 0 FP) | GTG T 3/3 | New `detectors/tool_abuse.py` (in-prose T1.x free-text matcher) + `scan(tool_calls=…)` autoroute through `mcp_tool` manifest scan, WIRED behind `_HAS_TOOL_ABUSE` into `scan()`+`cascade.py`; GTG-1002 T scenarios (T1.1/T1.3/T2.3) BLOCK via tool-abuse + goal-decomposition; xfail flipped strict | critical | On the default path now. Residual: not yet benchmarked vs MCPTox/MCPSecBench; manifest path needs structured tool traces supplied via `tool_calls=`. |
 
 ---
 
@@ -109,8 +109,8 @@ The mean fell from v2.0's 61.8% **because measurement replaced optimistic estima
 |------|-------|------|
 | Validated (85–100) | 1 | INJ-0015 *(estimated — only Validated row not yet harness-measured)* |
 | Asserted (70–84) | 8 | INJ-0001, INJ-0002, INJ-0008, INJ-0009, INJ-0010, INJ-0011, INJ-0012, INJ-0013 |
-| Partial (45–69) | 10 | INJ-0003, INJ-0006, INJ-0007, INJ-0014, INJ-0018, INJ-0019, INJ-0022, INJ-0023, INJ-0025, INJ-0026 |
-| Taxonomy-only (15–44) | 5 | INJ-0016, INJ-0017, INJ-0020, INJ-0021, INJ-0024 |
+| Partial (45–69) | 11 | INJ-0003, INJ-0006, INJ-0007, INJ-0014, INJ-0017, INJ-0018, INJ-0019, INJ-0022, INJ-0023, INJ-0025, INJ-0026 |
+| Taxonomy-only (15–44) | 4 | INJ-0016, INJ-0020, INJ-0021, INJ-0024 |
 | Not modeled (0–14) | 2 | INJ-0004, INJ-0005 |
 
 **Measured vs estimated — the honesty gap.** Where both exist: D1 92→**72.5**, D3 88→**83.3**, D2 70→**56.7**, exfil 78→**48** (E2 **0**), privacy 74→**35**, compliance 72→**24**. The 8 estimated Asserted rows (INJ-0008…0013 indirect-injection, all unmeasured) are the **highest-risk overstatements** — by the observed pattern they likely measure 15–25 points lower; adding I1 to the holdout is the top measurement priority.
@@ -119,7 +119,7 @@ The mean fell from v2.0's 61.8% **because measurement replaced optimistic estima
 1. **INJ-0021 compliance (24%)** and **INJ-0019 E2 recon (0%)** — lowest measured, gate-failing, wired-but-ineffective. Detection logic, not wiring, is the gap.
 2. **INJ-0020 privacy (35%)**, **INJ-0018 jailbreak (57%)**, **O1 (30%)** — gate-failing measured slices.
 3. **Evasion stacking (33%)** — keyword-gated chaining; affects every class.
-4. **INJ-0017 (44, stub)** and **INJ-0026 (50, unexported entrypoint)** — agent-tool surface, structurally unwired.
+4. **INJ-0017 (60)** and **INJ-0026 (62)** — agent-tool surface, now WIRED (2026-06-20, branch `hardening/decompose-im-detection`): IM matchers + free-text tool-abuse + goal-decomposition on the default `scan()` path; GTG-1002 6/6 block, 0 benign FP. Residual: broad IM recall ~33%; MCPTox/MCPSecBench benchmarking pending.
 
 ---
 
