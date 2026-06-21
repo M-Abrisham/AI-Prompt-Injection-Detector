@@ -74,6 +74,11 @@ try:
 except ImportError:  # pragma: no cover
     SchemingDetector = None  # type: ignore[misc,assignment]
 
+try:
+    from na0s.conversation.detectors.goal_decomposition import GoalDecompositionDetector
+except ImportError:  # pragma: no cover
+    GoalDecompositionDetector = None  # type: ignore[misc,assignment]
+
 
 def _compute_recommendation(alerts: List[Alert]) -> str:
     """Derive a recommendation string from a list of alerts.
@@ -141,6 +146,8 @@ class ConversationSecurityMonitor:
             detectors.append(CoTComplianceDetector())
         if SchemingDetector is not None:
             detectors.append(SchemingDetector())
+        if GoalDecompositionDetector is not None:
+            detectors.append(GoalDecompositionDetector())
         return detectors
 
     # ------------------------------------------------------------------
