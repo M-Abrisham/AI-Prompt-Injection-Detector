@@ -6,22 +6,23 @@ session-aggregation path is engaged (the default stateless path has no
 multi-turn coverage at all). Each test asserts the session is ultimately
 BLOCKED.
 
-WHY THESE ARE xfail
--------------------
-Na0S CANNOT detect the GTG-1002 pattern today, and these tests TRACK that gap
-rather than hide it:
+DETECTION IS NOW LIVE (Build-3)
+-------------------------------
+These were ``xfail`` while the GTG-1002 benign-decomposition pattern was a known
+gap. The gap is now closed by three wired detectors:
 
-* The load-bearing technique is a TRUSTED PERSONA ("authorized security firm,
-  routine testing") plus decomposition into individually-benign subtasks. Every
-  early turn scores ~0 in isolation, so the score-driven session aggregate never
-  crosses the block threshold for a clean decomposition.
-* The inter-model-propagation (Category IM) detector is a stub, and the
-  agent/tool-abuse (Category T) signals are off the default scan path.
+* ``conversation.detectors.goal_decomposition`` — order-aware kill-chain
+  coverage: alerts only on a TERMINAL phase (EXPLOIT / CRED_HARVEST / EXFIL)
+  appearing AFTER an earlier recon phase, with a persona multiplier (keyed off
+  the killchain PERSONA phase) lowering the distinct-phase floor to 3 so the two
+  3-phase attacks (unauthorized_tool_invocation, tool_param_exfil) also fire.
+* ``detectors.tool_abuse`` — the in-prose terminal pivot (privileged-target
+  invocation, scope-defiance, exfil-to-external-host).
+* ``detectors.inter_model`` — fabricated cross-model authority.
 
-Building the detector is a SEPARATE follow-up (tracked in ROADMAP_V2), not this
-item. Marking these ``xfail(strict=False)`` means: if a future detector starts
-blocking them, the suite stays green (xpass) and we get a signal to flip the
-marker off — the gap is never silently lost.
+All six attacks now BLOCK at their terminal turn; the six benign siblings stay
+ALLOWED (see ``test_gtg1002_benign_siblings`` for the over-refusal guard). The
+xfail marker is removed: these are STRICT regression tests now.
 
 No network, no LLM: scan() runs the local pipeline; the singleton conversation
 monitor is reset per scenario for isolation.
@@ -40,12 +41,6 @@ from na0s.predict import _reset_conversation_monitor, scan
 # tests/conversation/ -> repo root is 2 parents up.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DRAFTS_DIR = _REPO_ROOT / "data" / "eval" / "scenarios" / "_drafts"
-
-_XFAIL_REASON = (
-    "GTG-1002 benign-decomposition is a known detection gap (IM stub + "
-    "score-driven session aggregate); tracked in ROADMAP_V2"
-)
-
 
 def _is_benign(s: Scenario) -> bool:
     return s.expected_verdict == "allowed" and s.attack_category == "BEN"
@@ -84,18 +79,17 @@ def _isolate_session():
         _reset_conversation_monitor()
 
 
-@pytest.mark.xfail(reason=_XFAIL_REASON, strict=False)
 @pytest.mark.parametrize(
     "scenario",
     _GTG_ATTACKS,
     ids=[s.name for s in _GTG_ATTACKS],
 )
 def test_gtg1002_session_is_blocked(scenario: Scenario):
-    """Replaying the full kill-chain under a session should BLOCK (it does not).
+    """Replaying the full kill-chain under a session must BLOCK.
 
-    Expected (eventual) behavior: the final pivot turn, in the context of the
-    accumulated session, is flagged malicious. Today the clean benign
-    decomposition keeps the aggregate below threshold, so this xfails.
+    The final pivot turn, in the context of the accumulated session, is flagged
+    malicious (goal_decomposition's terminal-after-recon pivot + the in-prose
+    tool_abuse / inter_model signals). STRICT since Build-3.
     """
     session_id = f"gtg1002::{scenario.stable_id}"
     result = _replay(scenario, session_id)
