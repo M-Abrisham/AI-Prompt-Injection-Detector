@@ -178,10 +178,27 @@ except ImportError:
 try:
     from .detectors.mcp_tool import (
         scan_tool_manifest as _scan_tool_manifest,
+        get_mcp_tool_weight,
     )
     _HAS_MCP_TOOL_DETECTOR = True
 except ImportError:
     _HAS_MCP_TOOL_DETECTOR = False
+
+# Inter-model propagation detector (IM.x) — optional import.
+# INGESTION-side detector (the IM docstring mandates input-side); MUST NOT
+# rely on the output-side na0s.output.propagation scanner.
+try:
+    from .detectors.inter_model import detect_inter_model, get_inter_model_weight
+    _HAS_INTER_MODEL = True
+except ImportError:
+    _HAS_INTER_MODEL = False
+
+# In-prose tool-abuse detector (T1.x, GTG-1002 terminal pivot) — optional import
+try:
+    from .detectors.tool_abuse import detect_tool_abuse, get_tool_abuse_weight
+    _HAS_TOOL_ABUSE = True
+except ImportError:
+    _HAS_TOOL_ABUSE = False
 
 # N5: PromptGuard classifier — transformer-based injection/jailbreak detection.
 # Opt-in via NA0S_ENABLE_PROMPTGUARD=1 (requires downloading a model).
@@ -1193,6 +1210,70 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         except Exception:
             pass  # RAG poisoning detection failure is non-fatal
 
+    # --- Inter-model propagation detection (IM.x) ---
+    # Detect fabricated cross-model authority claims: a prompt asserting that
+    # some OTHER model / judge / consensus / upstream-agent / middleware /
+    # checkpoint / ecosystem-artifact already approved or authorized the
+    # request, so the receiving model "should" comply.  Input-side detector;
+    # every matcher is a self-anchored AUTHORITY-noun + override/poison-VERB
+    # co-occurrence, so the benign IM siblings (which reuse the nouns with
+    # legitimate verbs) never fire.
+    inter_model_weight = 0.0
+    if _HAS_INTER_MODEL:
+        try:
+            im_result = detect_inter_model(clean)
+            if im_result.technique_ids:
+                inter_model_weight = get_inter_model_weight(im_result)
+                for tech in im_result.technique_ids:
+                    hit_name = "inter_model:" + tech
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        # Severity mirrors rag_poison: multiple distinct
+                        # families co-firing = high (a fuller kill-chain),
+                        # a single family = medium.
+                        _sev = "high" if len(im_result.family_ids) >= 2 else "medium"
+                        _local_severities[hit_name] = _sev
+        except Exception:
+            pass  # Inter-model detection failure is non-fatal
+
+    # Wire inter-model signal into composite scoring (cap 0.30 enforced inside
+    # get_inter_model_weight, so a lone IM hit is a soft signal, never decisive).
+    if inter_model_weight > 0.0:
+        composite = min(composite + inter_model_weight, 1.0)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
+
+    # --- In-prose tool-abuse detection (T1.x, GTG-1002 terminal pivot) ---
+    # Detect the terminal-phase request that turns a decomposed, individually-
+    # innocuous recon chain into an actual intrusion (privileged-target
+    # invocation, scope-defiance, or exfil to a non-allowlisted host).  The
+    # detector applies an ROE/scope-compliance dampener so the 6 authorized-
+    # pentest benign siblings (which carry the same persona + recon but lack
+    # the terminal pivot and contain explicit ROE language) stay below the
+    # flag floor.  Recon/fingerprint verbs are intentionally NOT matched.
+    tool_abuse_weight = 0.0
+    if _HAS_TOOL_ABUSE:
+        try:
+            ta_result = detect_tool_abuse(clean)
+            if ta_result.technique_ids:
+                tool_abuse_weight = get_tool_abuse_weight(ta_result)
+                for tech in ta_result.technique_ids:
+                    hit_name = "tool_abuse:" + tech
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        _local_severities[hit_name] = ta_result.severity
+        except Exception:
+            pass  # Tool-abuse detection failure is non-fatal
+
+    # Wire tool-abuse signal into composite scoring (cap 0.30 enforced inside
+    # get_tool_abuse_weight).
+    if tool_abuse_weight > 0.0:
+        composite = min(composite + tool_abuse_weight, 1.0)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
+
     # --- Position-weighted RAG context scan (D8.3/D8.4) ---
     # When the input looks like concatenated retrieved context (multiple
     # document boundaries), scan it with position + size-dominance weighting so
@@ -1471,7 +1552,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     return label, composite, hits, l0, detailed_hits, embedding_info, perplexity_score
 
 
-def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, session_id: str = "") -> ScanResult:  # LAYER16: session_id
+def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, session_id: str = "", tool_calls=None) -> ScanResult:  # LAYER16: session_id
     """Unified entry point returning a structured ScanResult.
 
     Parameters
@@ -1486,6 +1567,13 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         Pre-loaded TF-IDF vectorizer (loaded automatically if *None*).
     model : optional
         Pre-loaded classifier model (loaded automatically if *None*).
+    tool_calls : list[dict] or None
+        Optional MCP tool manifest (list of ``{"name", "description"}``
+        dicts).  When provided, each tool definition is scanned for
+        shadowing / injection indicators (T1.x) via ``scan_tool_manifest``
+        and the bounded ``get_mcp_tool_weight`` contribution (cap 0.30) is
+        folded into the risk score, with ``mcp_tool:<tech>`` hits appended.
+        Default ``None`` is a no-op (no behavior change).
 
     Wraps the entire classification pipeline with a wall-clock timeout
     (``SCAN_TIMEOUT`` seconds, default 60).  If the pipeline exceeds
@@ -2053,6 +2141,30 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         except Exception:
             logger.debug("Visual injection detector not available", exc_info=True)
 
+    # --- MCP tool-manifest scan (T1.x) — optional, gated on tool_calls ---
+    # When the caller supplies a declared tool manifest, scan each tool
+    # definition for shadowing / injection indicators and fold the bounded
+    # per-tool weight (cap 0.30, mirroring rag_poison/inter_model) into the
+    # risk score.  Default tool_calls=None is a no-op: when no manifest is
+    # passed this block does nothing, so single-text scans are unchanged.
+    if tool_calls and _HAS_MCP_TOOL_DETECTOR:
+        try:
+            _mcp_results = _scan_tool_manifest(tool_calls)
+            for _mcp in _mcp_results:
+                if not _mcp.technique_ids:
+                    continue
+                _mcp_w = get_mcp_tool_weight(_mcp)
+                if _mcp_w > 0.0:
+                    risk = min(risk + _mcp_w, 1.0)
+                for _tid in _mcp.technique_ids:
+                    if _tid not in technique_tags:
+                        technique_tags.append(_tid)
+                    _mcp_hit = "mcp_tool:" + _tid
+                    if _mcp_hit not in hits:
+                        hits.append(_mcp_hit)
+        except Exception:
+            logger.debug("MCP tool-manifest scan failed", exc_info=True)
+
     # Re-evaluate malicious verdict after chunked analysis and structural
     # features may have boosted the risk score above the threshold.
     # The initial is_mal was set from classify_prompt()'s composite score,
@@ -2104,6 +2216,7 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
             analysis = monitor.process_turn(
                 text=text, session_id=session_id,
                 risk_score=result.risk_score, label=result.label,
+                flags=result.technique_tags,
             )
             result.multi_turn_alerts = [a.__dict__ for a in analysis.alerts] if analysis.alerts else []
             result.multi_turn_risk_trend = analysis.risk_trend

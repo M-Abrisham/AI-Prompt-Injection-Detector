@@ -178,6 +178,22 @@ try:
 except ImportError:
     _HAS_CANARY = False
 
+# Inter-model propagation detector (IM.x) — optional import (parity w/ scan()).
+# INGESTION-side detector; the IM docstring mandates input-side and forbids
+# relying on the output-side na0s.output.propagation scanner.
+try:
+    from .detectors.inter_model import detect_inter_model, get_inter_model_weight
+    _HAS_INTER_MODEL = True
+except ImportError:
+    _HAS_INTER_MODEL = False
+
+# In-prose tool-abuse detector (T1.x, GTG-1002 terminal pivot) — optional import
+try:
+    from .detectors.tool_abuse import detect_tool_abuse, get_tool_abuse_weight
+    _HAS_TOOL_ABUSE = True
+except ImportError:
+    _HAS_TOOL_ABUSE = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 
@@ -616,6 +632,48 @@ class WeightedClassifier:
                         label = "MALICIOUS"
             except Exception:
                 _logger.debug("Centroid embedding (Layer 5) failed", exc_info=True)
+
+        # --- Inter-model propagation (IM.x) — parity with scan() ---
+        # Self-anchored cross-model-authority fabrication (judge/consensus/
+        # upstream-agent/middleware/checkpoint/ecosystem override).  Input-side
+        # detector; weight capped at 0.30 inside get_inter_model_weight.
+        if _HAS_INTER_MODEL:
+            try:
+                _im = detect_inter_model(text)
+                if _im.technique_ids:
+                    _im_w = get_inter_model_weight(_im)
+                    if _im_w > 0.0:
+                        composite = min(composite + _im_w, 1.0)
+                    for _tech in _im.technique_ids:
+                        _im_hit = "inter_model:" + _tech
+                        if _im_hit not in hit_names_seen:
+                            hit_names.append(_im_hit)
+                            hit_names_seen.add(_im_hit)
+                    if composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Inter-model detection failed", exc_info=True)
+
+        # --- In-prose tool-abuse (T1.x, GTG-1002 pivot) — parity with scan() ---
+        # Terminal-phase tool-abuse pivot (privileged-target invocation,
+        # scope-defiance, exfil-to-external-host) with an ROE/scope-compliance
+        # dampener so authorized-pentest benign siblings stay below the floor.
+        if _HAS_TOOL_ABUSE:
+            try:
+                _ta = detect_tool_abuse(text)
+                if _ta.technique_ids:
+                    _ta_w = get_tool_abuse_weight(_ta)
+                    if _ta_w > 0.0:
+                        composite = min(composite + _ta_w, 1.0)
+                    for _tech in _ta.technique_ids:
+                        _ta_hit = "tool_abuse:" + _tech
+                        if _ta_hit not in hit_names_seen:
+                            hit_names.append(_ta_hit)
+                            hit_names_seen.add(_ta_hit)
+                    if composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Tool-abuse detection failed", exc_info=True)
 
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
