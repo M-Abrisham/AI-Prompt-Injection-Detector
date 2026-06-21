@@ -47,6 +47,48 @@ _ASSEMBLY_INSTRUCTIONS = re.compile(
     re.IGNORECASE,
 )
 
+
+def _roe_scoped_benign_reassembly(turn_texts: List[str], combined: str) -> bool:
+    """True when a reassembled candidate is an authorized-pentest benign twin.
+
+    FP-safety guard (Build-3, GTG-1002). The authorized-pentest benign siblings
+    carry the SAME persona and the SAME read-only recon/inventory verbs as the
+    attacks; concatenating their innocuous turns ("read-only inventory tool ...
+    enumerate service accounts ... read-only tools") can reassemble to a risk
+    that crosses the malicious line in the degraded-embedding fallback even
+    though no turn is an attack and no terminal pivot ever occurs. This is a
+    pure over-refusal: the benign twin must stay ALLOWED.
+
+    The guard suppresses an assembly alert only when BOTH hold:
+      (a) the session carries explicit rules-of-engagement / scope-limitation
+          markers (the benign-twin fingerprint), AND
+      (b) the reassembled candidate contains NO terminal tool-abuse HARD cue
+          (a privileged-target invocation such as ``credential_dump`` /
+          ``/etc/shadow`` / exfil-to-external-host) — those have no benign
+          reading even under an ROE.
+
+    The attack twins' reassembly DOES contain a hard cue (e.g. "invoke the
+    credential_dump tool"), so (b) fails and the attack is NOT suppressed. Both
+    signals reuse single sources of truth already maintained elsewhere
+    (goal_decomposition's ROE lexicon and the tool_abuse hard-cue matcher), so
+    this guard cannot drift away from the detectors it must stay consistent
+    with. Imports are local so payload_splitting keeps no hard dependency on the
+    optional T-category detector.
+    """
+    try:
+        from na0s.conversation.detectors.goal_decomposition import _has_roe_markers
+        from na0s.detectors.tool_abuse import detect_tool_abuse
+    except ImportError:  # pragma: no cover - optional detectors absent
+        return False
+
+    if not _has_roe_markers(turn_texts):
+        return False
+    # A hard tool-abuse cue anywhere in the reassembled candidate means a real
+    # terminal pivot was smuggled across the turns — never suppress that.
+    if detect_tool_abuse(combined).details.get("has_hard_cue", False):
+        return False
+    return True
+
 # Regex-based attack patterns for the existing Na0S integration path
 _ATTACK_PATTERNS = re.compile(
     r"(?:ignore\s+(?:all\s+)?(?:previous\s+)?instructions|"
@@ -385,6 +427,20 @@ class PayloadSplittingDetector(MultiTurnDetector):
                     and has_assembly
                 )
                 if not (strong or borderline):
+                    continue
+
+                # FP-safety (Build-3, GTG-1002): an authorized-pentest benign
+                # twin's innocuous recon turns can reassemble above the line in
+                # the degraded-embedding fallback. Suppress the alert ONLY when
+                # the session carries explicit ROE markers AND the reassembled
+                # candidate has no terminal tool-abuse hard cue. The attack
+                # twins' reassembly carries a hard cue (e.g. credential_dump),
+                # so they are never suppressed by this guard.
+                if _roe_scoped_benign_reassembly(turn_texts, candidate_text):
+                    logger.debug(
+                        "payload_splitting: ROE-scoped benign reassembly "
+                        "suppressed (no terminal tool-abuse hard cue)"
+                    )
                     continue
 
                 # --------------------------------------------------

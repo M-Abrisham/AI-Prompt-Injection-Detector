@@ -80,24 +80,22 @@ The scenarios above are regression *cases*; this item is the *detector* that
 makes them go green. This is deliberately a SEPARATE work item — building the
 detector was explicitly out of scope for the incident-to-scenario item.
 
-- [ ] **Wire `detect_inter_model` into `scan()` behind a flag** — `detectors/inter_model.py`
-  defines the `FAMILIES` but `detect()` returns an empty stub today (recall test
-  is RED; see COVERAGE_MATRIX INJ-0017). Wire it onto the default scan path under
-  a feature flag (mirror the `_HAS_*` try/except pattern in `predict.py`), so
-  Category IM has a live signal instead of a probe-only path.
-- [ ] **Auto-route tool traces through `scan()`** — `detectors/mcp_tool.py` is
-  reachable only via the unexported `scan_tools()` (COVERAGE_MATRIX INJ-0026):
-  Category T manifest/tool-call analysis never runs on the default path. Route
-  tool/MCP traces (manifests, tool-call params) through `scan()` so T signals
-  fire without a separate entrypoint.
-- [ ] **NET-NEW semantic goal-composition detector** — the only thing that can
-  catch a *clean* decomposition. Per-turn scores are ~0 by construction (each
-  subtask is genuinely benign), so neither the rule path nor the additive session
-  aggregate ever crosses threshold. Needs a session-scoped detector that reasons
-  about the *composed goal* across turns (e.g. recon → CVE-map → exploit →
-  exfil chains, or a trusted-persona + scope-expansion trajectory), not the
-  per-turn text. This is the load-bearing piece that flips the GTG-1002 xfails to
-  xpass.
+- [x] **Wire `detect_inter_model` into `scan()` behind a flag** — DONE 2026-06-20
+  (branch `hardening/decompose-im-detection`). Implemented 24 self-anchored
+  co-occurrence matchers across the 6 `FAMILIES` (authority-noun AND override-verb;
+  bare noun never fires) → **100% recall on the 8 formerly-zero-recall techniques
+  (144/144), 0% benign FP (0/55)**; wired into `scan()` + `cascade.py` behind
+  `_HAS_INTER_MODEL` (weight capped, corroborating). Local/no-API.
+- [x] **Auto-route tool traces through `scan()`** — DONE 2026-06-20. Added
+  `tool_calls=` kwarg to `scan()` (folds `mcp_tool` manifest scan) + a new
+  `detectors/tool_abuse.py` free-text in-prose matcher (T1.x) wired behind
+  `_HAS_TOOL_ABUSE`, so Category T fires on the default path. Local/no-API.
+- [x] **NET-NEW semantic goal-composition detector** — DONE 2026-06-20.
+  `conversation/detectors/goal_decomposition.py` (+ `data/killchain_phases.yaml`):
+  order-aware kill-chain phase coverage (regex + offline `all-MiniLM-L6-v2`
+  fallback) that fires on a terminal-phase pivot AFTER recon, with an ROE/scope
+  suppressor + persona multiplier for FP-safety. **Flips the GTG-1002 xfails to
+  strict: 6/6 attacks BLOCKED, 6/6 benign siblings ALLOWED (FPR=0).** No API key.
 
 ---
 
