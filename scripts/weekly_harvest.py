@@ -64,6 +64,10 @@ GITHUB_SEARCH_API = (
     "?q={query}+pushed:>{since_date}&sort=updated&per_page=20"
 )
 
+# NOTE: the worm / self-replication queries below target taxonomy leaf
+# IM1.6 (MITRE ATLAS AML.T0061, "LLM Prompt Self-Replication"). The harvester
+# has no technique-tagging mechanism (see integrate_harvest.py), so these are
+# discovery queries only; classification to IM1.6 happens downstream.
 HF_QUERIES = [
     "prompt injection",
     "jailbreak",
@@ -72,18 +76,31 @@ HF_QUERIES = [
     "prompt security",
     "guardrail bypass",
     "LLM safety",
+    # Worm / self-replication (IM1.6 / AML.T0061)
+    "self-replicating prompt",
+    "LLM prompt worm",
+    "Morris II worm",
+    "agentic AI worm",
+    "prompt propagation",
 ]
 
 ARXIV_QUERIES = [
     "all:prompt+injection+LLM",
     "all:jailbreak+large+language+model",
     "all:adversarial+prompt+attack",
+    # Worm / self-replication (IM1.6 / AML.T0061)
+    "all:self-replicating+prompt",
+    "all:Morris+II+worm+LLM",
+    "all:prompt+infection+multi-agent",
 ]
 
 GITHUB_QUERIES = [
     "prompt+injection+dataset",
     "jailbreak+LLM+dataset",
     "adversarial+prompt+dataset",
+    # Worm / self-replication (IM1.6 / AML.T0061)
+    "self-replicating+prompt+dataset",
+    "LLM+worm+dataset",
 ]
 
 # Dataset IDs already used in Na0S (pre-populated for known_datasets.txt)

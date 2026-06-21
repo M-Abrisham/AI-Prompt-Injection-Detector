@@ -137,6 +137,25 @@ try:
 except ImportError:
     _HAS_CANARY = False
 
+# Worm / self-replication detector — optional import.
+# Mirrors the predict.py INPUT-path wiring so CascadeClassifier().scan()
+# behaves identically to predict.scan() for self-replicating prompts.
+# get_worm_detector() returns a STATELESS WormSignatureDetector
+# (reconstruction_window=1): scan(clean) is single-input, no source_text, so
+# the cross-turn reconstruction buffer is never consulted.  Opt out via
+# NA0S_WORM_INPUT_SCAN=0.  Bounds/threshold constants are reused from
+# predict.py (single source of truth) rather than redefined here.
+try:
+    from .worm import get_worm_detector
+    from .predict import (
+        _WORM_INPUT_CONFIDENCE,
+        _WORM_INPUT_HIGH_SEVERITY,
+        _WORM_INPUT_MAX_WEIGHT,
+    )
+    _HAS_WORM = True
+except ImportError:
+    _HAS_WORM = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 
@@ -675,6 +694,7 @@ class CascadeClassifier:
             "positive_validation": 0,
             "output_scanner": 0,
             "canary": 0,
+            "worm": 0,
         }
         # Layer 6: SLO tracker — enabled by NA0S_SLO_TRACKING=1
         self._slo_enabled = os.environ.get("NA0S_SLO_TRACKING") == "1"
@@ -967,6 +987,78 @@ class CascadeClassifier:
                 with self._stats_lock:
                     self._layer_failures["embedding"] += 1
 
+        # ---------------------------------------------------------------
+        # Worm / self-replication input signal — MIRRORS predict.py.
+        # Placed AFTER the ML/embedding stages and BEFORE the judge so the
+        # worm-influenced verdict flows through judge / positive validation /
+        # paranoid mode (defense-in-depth), exactly as predict.py applies its
+        # worm block before its downstream stages.
+        #
+        # _classify_full carries `confidence` in P(label-correct) semantics
+        # (for SAFE: P(safe) = 1 - P(malicious); for MALICIOUS: P(malicious)),
+        # whereas predict.py works in a composite-malicious score.  We bridge
+        # by deriving p_mal, applying the SAME bounded nudge + high-severity
+        # floor as predict.py, then converting back.  Constants are imported
+        # from predict.py (single source of truth).
+        #
+        # FP control is the detector's own is_worm + confidence gate: benign
+        # "forward/send/copy/repeat" phrasings score is_worm=False conf=0.0 so
+        # they never contribute.  The weight cap bounds the nudge; only the
+        # high-severity tier (conf >= _WORM_INPUT_HIGH_SEVERITY = 0.75) promotes
+        # via the floor.  Fail-safe (never raises).  Opt out: NA0S_WORM_INPUT_SCAN=0.
+        _worm_floor_promoted = False
+        if _HAS_WORM and os.environ.get(
+            "NA0S_WORM_INPUT_SCAN", "1"
+        ).strip().lower() not in ("0", "false", "no"):
+            try:
+                _worm = get_worm_detector().scan(clean)
+                _worm_is = bool(_worm.get("is_worm"))
+                _worm_conf = float(_worm.get("confidence", 0.0))
+                if _worm_is and _worm_conf >= _WORM_INPUT_CONFIDENCE:
+                    # Decision threshold for label promotion.  The outer
+                    # CascadeClassifier has no per-instance threshold (only the
+                    # inner WeightedClassifier does), so use the canonical
+                    # THRESHOLDS.DEFAULT_THRESHOLD — the same value the inner
+                    # WeightedClassifier and predict.py compare against.
+                    _worm_threshold = THRESHOLDS.DEFAULT_THRESHOLD
+                    # Derive P(malicious) in cascade's confidence semantics.
+                    p_mal = confidence if label == "MALICIOUS" else 1.0 - confidence
+                    # Bounded additive nudge (same cap as predict.py).
+                    p_mal = min(p_mal + _WORM_INPUT_MAX_WEIGHT * _worm_conf, 1.0)
+                    _wsev = "high" if _worm_conf >= _WORM_INPUT_HIGH_SEVERITY else "medium"
+                    # WD-4: stable hit name mapped to IM1.6 (AML.T0061).
+                    _whit = "worm:self_replication"
+                    if _whit not in hits:
+                        hits.append(_whit)
+                    if _whit not in technique_tags:
+                        technique_tags.append(_whit)
+                    if "IM1.6" not in technique_tags:
+                        technique_tags.append("IM1.6")
+                    # Degraded observability: surface lexical-only fallback.
+                    if not bool(_worm.get("embedding_available", False)):
+                        _dhit = "worm:degraded_no_embedding"
+                        if _dhit not in hits:
+                            hits.append(_dhit)
+                    # High-severity promotion floor — a standalone self-
+                    # replication instruction IS the attack.  Conservative:
+                    # only conf >= 0.75 promotes a SAFE base to MALICIOUS even
+                    # from a low base; the 0.55-0.75 tier keeps the bounded
+                    # nudge.  Mirrors predict.py's worm floor (and the E1 floor).
+                    if _worm_conf >= _WORM_INPUT_HIGH_SEVERITY and label == "SAFE":
+                        p_mal = max(p_mal, _worm_threshold + 0.01)
+                        _worm_floor_promoted = True
+                    # Crossing the decision threshold promotes the label.
+                    if label == "SAFE" and p_mal >= _worm_threshold:
+                        label = "MALICIOUS"
+                    # Convert p_mal back to P(label-correct) semantics.
+                    confidence = round(
+                        p_mal if label == "MALICIOUS" else 1.0 - p_mal, 4
+                    )
+            except Exception:
+                _logger.debug("Worm input signal failed", exc_info=True)
+                with self._stats_lock:
+                    self._layer_failures["worm"] += 1
+
         # Layer 7: LLM judge for ambiguous cases
         # Only run if "judge" is in the active stage list.
         if "judge" not in active_stages:
@@ -1041,7 +1133,16 @@ class CascadeClassifier:
         # If the classifier says MALICIOUS but positive validation says
         # the input IS a legitimate prompt, downgrade to SAFE.  This
         # catches benign prompts that mention injection-related vocabulary.
-        if label == "MALICIOUS" and self._positive_validator is not None:
+        #
+        # EXCEPTION: a high-severity worm floor promotion (conf >= 0.75) is
+        # terminal and must NOT be downgraded here.  A standalone self-
+        # replication instruction IS the attack, not a benign prompt that
+        # merely mentions injection vocabulary, so positive validation's
+        # FP-reduction premise does not apply.  This keeps cascade.scan() in
+        # parity with predict.scan(), whose worm floor has no downstream
+        # positive-validation override.
+        if (label == "MALICIOUS" and not _worm_floor_promoted
+                and self._positive_validator is not None):
             try:
                 # BUG-L8-2 fix: pass L0-sanitized text instead of raw input
                 # so positive validation sees the same normalized form as

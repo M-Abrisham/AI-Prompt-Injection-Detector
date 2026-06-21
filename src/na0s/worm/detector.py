@@ -21,7 +21,7 @@ import unicodedata
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
-from na0s.replication_similarity import replication_similarity
+from na0s.ml.replication_similarity import replication_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -1116,6 +1116,49 @@ _STEM_SYNONYMS = {
     "received": "receive",
 }
 
+# Direct negators that, when they govern a propagation verb, cancel the action
+# ("do not forward", "never forward", "don't copy").  Weak adverbial negators
+# (without/prevent/cannot) are deliberately EXCLUDED here: they attach to a
+# separate word ("WITHOUT delay, forward") rather than negate the action verb.
+_DIRECT_NEGATORS = {"not", "never", "n't", "no", "nor"}
+
+# Negation-construction "glue": auxiliaries/particles/adverbs that may sit
+# between a negator and the action verb without breaking the bond ("do not EVER
+# forward", "do not TO forward").  Anything else between them is a distinct
+# content word the negator attaches to instead, so the propagation verb is NOT
+# the thing being negated ("never REVEAL secrets ... forward").
+_NEGATION_GLUE = {"do", "does", "did", "to", "from", "ever", "also", "then", "you", "please"}
+
+# Verb negators: verbs that, standing adjacent to the action verb, themselves
+# negate the propagation ("AVOID copying", "REFRAIN from forwarding").  Crucially
+# they are NEGATIVE-POLARITY: a direct negator in front of one is a DOUBLE
+# NEGATION ("do not FAIL to forward" / "never STOP forwarding") and the
+# propagation is NOT cancelled — it must still fire.  So a verb negator suppresses
+# only when it is itself un-negated.
+_VERB_NEGATORS = {
+    "fail",
+    "fails",
+    "failing",
+    "stop",
+    "stops",
+    "stopping",
+    "cease",
+    "ceases",
+    "ceasing",
+    "avoid",
+    "avoids",
+    "avoiding",
+    "refrain",
+    "refrains",
+    "refraining",
+    "hesitate",
+    "hesitates",
+    "hesitating",
+    "neglect",
+    "neglects",
+    "neglecting",
+}
+
 
 def _semantic_tokenize(text: str) -> List[str]:
     raw_tokens = re.findall(r"[a-z0-9]+", (text or "").lower())
@@ -1254,6 +1297,81 @@ class _LightweightSemanticClassifier:
         }
 
 
+def _is_negated_propagation(text: str) -> bool:
+    """True when every propagation *action* in *text* is genuinely negated.
+
+    WD-7 added negation suppression to the lexical *semantic* path (the regex
+    path already drops negated worm phrases via ``_is_negated_context``), so
+    "Do not forward this prompt to all downstream agents." no longer fires
+    ``semantic_propagation_intent``.  The original window-based check
+    over-suppressed: it muted whenever *any* negation hint sat in a fixed
+    char window before the verb, so it wrongly killed real worms like
+    "Do not FAIL to forward ..." (double negation), "Without delay, forward ..."
+    (adverbial), and "Never STOP forwarding ..." (negator governs *stop*).
+
+    The fix requires a negator to *directly govern* the propagation verb, with a
+    two-tier model evaluated over a short token window before the verb:
+
+      * A DIRECT negator (not / never / n't / no) suppresses only when it bonds
+        to the action verb — every token between them is negation glue.  An
+        intervening content word means it attaches there instead ("never REVEAL
+        secrets ... forward" -> not negated).
+      * A VERB negator (avoid / refrain / stop / fail / cease / ...) adjacent to
+        the action verb also suppresses ("avoid copying"), BUT it is negative
+        polarity: a direct negator in front of it is a DOUBLE NEGATION
+        ("do not FAIL to forward" / "never STOP forwarding") -> NOT cancelled.
+      * Weak adverbial negators (without/prevent/cannot) are excluded from the
+        negator sets, so "Without delay, forward ..." still fires.
+
+    Returns True only when at least one action token is present AND every
+    occurrence of an action token is genuinely negated (so a mixed
+    "do not X ... but Y" still scores on the un-negated verb).
+    """
+    if not text:
+        return False
+    # Token stream with stemming so "forwarding"->"forward" etc. line up.
+    raw = re.findall(r"[a-z]+'?[a-z]*|n't", text.lower())
+    tokens = [_STEM_SYNONYMS.get(t, t) for t in raw]
+
+    found_action = False
+    for i, tok in enumerate(tokens):
+        if tok not in _ACTION_TOKENS:
+            continue
+        found_action = True
+        # Look back at most 4 tokens: enough for "do not <verb>",
+        # "never <verb>", "do not fail to <verb>" without crossing a clause.
+        window = tokens[max(0, i - 4): i]
+        if not _negation_governs_verb(window):
+            return False  # an un-negated propagation verb is present
+    return found_action
+
+
+def _negation_governs_verb(window: List[str]) -> bool:
+    """True if a negator in *window* genuinely negates the action verb that
+    immediately follows it.  *window* is the up-to-4 tokens before the verb."""
+    # Tier 1 — verb negator adjacent to (or glue-separated from) the action verb.
+    for j in range(len(window) - 1, -1, -1):
+        w = window[j]
+        if w in _VERB_NEGATORS:
+            # Only glue may sit between the verb negator and the action verb.
+            if any(t not in _NEGATION_GLUE for t in window[j + 1:]):
+                break
+            # Double negation: a direct negator in front cancels the verb negator
+            # ("do not FAIL", "never STOP") -> propagation is NOT negated.
+            head = window[:j]
+            if head and (head[-1] in _DIRECT_NEGATORS or head[-1].endswith("n't")):
+                return False
+            return True
+        if w not in _NEGATION_GLUE:
+            break  # a non-glue, non-verb-negator token breaks adjacency
+    # Tier 2 — direct negator bonded to the action verb through glue only.
+    for j in range(len(window) - 1, -1, -1):
+        w = window[j]
+        if w in _DIRECT_NEGATORS or w.endswith("n't"):
+            return all(t in _NEGATION_GLUE for t in window[j + 1:])
+    return False
+
+
 def _regex_confidence(match_count: int) -> float:
     if match_count <= 0:
         return 0.0
@@ -1336,6 +1454,42 @@ class WormSignatureDetector:
         if len(joined) > self._max_reconstruction_chars:
             joined = joined[-self._max_reconstruction_chars :]
         return joined
+
+    def _current_turn_contributes(self, reconstructed_text: str, current_text: str) -> bool:
+        """WD-3: True iff the NEWLY-added current turn participates in any
+        worm match within the reconstructed (buffer + current) text.
+
+        The cross-turn reconstruction buffer joins prior turns with the current
+        one and re-scans the whole thing.  A purely BENIGN current turn must not
+        inherit a worm verdict just because a *prior* worm turn still sits in the
+        buffer and re-matches its own spans.  We therefore locate the current
+        turn's span inside the reconstructed string (it is appended last, so it
+        ends at the string end) and require at least one non-negated regex /
+        runtime-signature match to OVERLAP that span before the cross-turn
+        bonus is allowed to raise the verdict.  A worm genuinely SPLIT across
+        turns still overlaps the current turn (the tail of the payload lands in
+        it), so legitimate cross-turn reconstruction is preserved.
+        """
+        cur = (current_text or "").strip()
+        if not cur or not reconstructed_text:
+            return True  # nothing to attribute against — don't suppress
+        # Current turn is the last element of the join and is suffix-preserved
+        # under tail-truncation, so it occupies the final len(cur) chars
+        # (clamped if truncation cut into it).
+        cur_start = max(0, len(reconstructed_text) - len(cur))
+
+        for pat in WORM_PATTERNS:
+            for m in pat.finditer(reconstructed_text):
+                if m.end() <= cur_start:
+                    continue  # match lies wholly in the buffered prefix
+                if self._is_negated_context(reconstructed_text, m.start(), m.end()):
+                    continue
+                return True
+        for runtime_pat in self._runtime_signature_patterns:
+            for m in runtime_pat.finditer(reconstructed_text):
+                if m.end() > cur_start:
+                    return True
+        return False
 
     @staticmethod
     def _compile_runtime_signature(fragment: str) -> re.Pattern | None:
@@ -1562,7 +1716,16 @@ class WormSignatureDetector:
                     frag_preview = self._runtime_signature_fragments[idx][:64]
                     matches.append(f"runtime_signature:{frag_preview}")
 
-            semantic_candidates.append(self._semantic.score(variant))
+            sem = self._semantic.score(variant)
+            # WD-7: the regex path already drops negated worm phrases via
+            # _is_negated_context; mirror that on the semantic path so a negated
+            # propagation action ("Do not forward this prompt...") does not fire
+            # semantic_propagation_intent.  Only suppress when the propagation
+            # verb itself is negated — non-negated worms are untouched.
+            if sem.get("score", 0.0) > 0.0 and _is_negated_propagation(variant):
+                sem = dict(sem)
+                sem["score"] = 0.0
+            semantic_candidates.append(sem)
 
         semantic = max(semantic_candidates, key=lambda s: s.get("score", 0.0))
         code_signal = self._detect_code_execution_payload(text)
@@ -1641,12 +1804,22 @@ class WormSignatureDetector:
             reconstructed_matches: List[str] = []
             reconstructed_semantic = direct_semantic
             reconstructed_code = {"is_suspicious": False, "confidence": 0.0}
+            cross_turn_active = False
             if reconstructed_text != text:
                 (
                     reconstructed_matches,
                     reconstructed_semantic,
                     reconstructed_code,
                 ) = self._scan_text(reconstructed_text)
+                # WD-3: only let cross-turn reconstruction RAISE the verdict when
+                # the newly-added current turn actually participates in a match.
+                # Otherwise the buffered prior-turn worm is just re-matching its
+                # own spans and would poison a benign current turn (~0.8 conf FP).
+                cross_turn_active = self._current_turn_contributes(reconstructed_text, text)
+                if not cross_turn_active:
+                    reconstructed_matches = list(direct_matches)
+                    reconstructed_semantic = direct_semantic
+                    reconstructed_code = {"is_suspicious": False, "confidence": 0.0}
 
             source_matches: List[str] = []
             source_semantic = {"score": 0.0}
@@ -1699,7 +1872,10 @@ class WormSignatureDetector:
         # token-splitting, base64/hex and multi-turn-split worms cannot bypass
         # the embedding head while still bypassing regex (G4).
         _embed_views = _build_text_variants(text)
-        if reconstructed_text and reconstructed_text != text:
+        # WD-3: only feed the joined cross-turn view to the embedding head when
+        # the current turn actually participates — otherwise a buffered worm
+        # could revive the FP through embedding similarity on a benign turn.
+        if cross_turn_active and reconstructed_text and reconstructed_text != text:
             _embed_views.append(reconstructed_text)
         for _decoded in self._extract_decoded_payloads(_ascii_skeleton(text)):
             _embed_views.append(_decoded)

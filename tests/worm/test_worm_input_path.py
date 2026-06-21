@@ -75,22 +75,33 @@ class TestWormEmbeddingSignal:
 
 
 class TestInputPathWiring:
-    """The signal must actually reach predict.scan()."""
+    """The FULL worm scan (WD-1) must actually reach predict.scan().
+
+    predict.scan() now calls ``get_worm_detector().scan()`` (the full stateless
+    detector) rather than the light ``worm_embedding_signal()``, and surfaces a
+    stable ``worm:self_replication`` hit (WD-4) mapped to IM1.6.
+    """
 
     @pytest.mark.parametrize("text", WORM_TEMPLATES)
     def test_scan_surfaces_worm_hit(self, text):
         result = p.scan(text)
-        assert any("worm_embedding" in str(h) for h in result.rule_hits), result.rule_hits
+        assert "worm:self_replication" in result.rule_hits, result.rule_hits
+
+    @pytest.mark.parametrize("text", WORM_TEMPLATES)
+    def test_scan_maps_worm_hit_to_im16(self, text):
+        """WD-4: the worm hit is attributed to IM1.6 (AML.T0061)."""
+        result = p.scan(text)
+        assert "IM1.6" in result.technique_tags, result.technique_tags
 
     @pytest.mark.parametrize("text", BENIGN_TEXTS)
     def test_scan_no_worm_hit_on_benign(self, text):
         result = p.scan(text)
-        assert not any("worm_embedding" in str(h) for h in result.rule_hits)
+        assert "worm:self_replication" not in result.rule_hits
 
     def test_env_toggle_disables_signal(self, monkeypatch):
         monkeypatch.setenv("NA0S_WORM_INPUT_SCAN", "0")
         result = p.scan(WORM_TEMPLATES[0])
-        assert not any("worm_embedding" in str(h) for h in result.rule_hits)
+        assert "worm:self_replication" not in result.rule_hits
 
     def test_bounded_weight_cannot_flip_clear_benign(self):
         """The bounded worm weight must not, on its own, flip a benign prompt."""
