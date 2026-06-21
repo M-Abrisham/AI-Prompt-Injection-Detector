@@ -3,11 +3,13 @@
 When multiple independent attack signals co-occur in the same input
 (e.g., persona hijack + encoded payload), the combination is far more
 suspicious than either signal alone. This module computes an additive
-boost_score that is added to the cascade/predict composite score.
+boost_score that is added to the cascade composite score.
 
 Integration:
     cascade.py:  composite = ML_weight + rule_weight + obf_weight + boost_score
-    predict.py:  composite = ml_weight + rule_weight + obf_weight + structural + boost_score
+
+    Consumed only by cascade.py (via ``calculate_boost``). predict.py does
+    not import this module or fold its boost_score into its composite.
 
 Contract guarantees:
   - boost_score is in [0.0, MAX_BOOST]

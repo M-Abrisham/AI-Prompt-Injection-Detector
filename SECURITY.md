@@ -10,7 +10,8 @@ This policy is informed by [ISO/IEC 29147:2018](https://www.iso.org/standard/723
 
 | Version | Supported          | Notes                        |
 |---------|--------------------|------------------------------|
-| 0.1.x   | Yes                | Current release, actively maintained |
+| 0.2.x   | Yes                | Current release, actively maintained |
+| 0.1.x   | No                 | Previous release; no longer maintained |
 | < 0.1.0 | No                 | Pre-release; no security patches |
 
 As new minor or major versions are released, this table will be updated. Only the latest patch release within a supported minor version receives security fixes.
@@ -188,4 +189,4 @@ To maximize the effectiveness of Na0S in your deployment:
 
 ---
 
-*This security policy is effective as of February 2026 and applies to Na0S v0.1.x. It will be reviewed and updated with each minor version release.*
+*This security policy is effective as of February 2026 and applies to Na0S v0.2.x. It will be reviewed and updated with each minor version release.*

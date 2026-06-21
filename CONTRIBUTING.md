@@ -50,7 +50,7 @@ false positives, or expand coverage of the
 
 ## Development Setup
 
-Na0S requires **Python 3.9 or later** (tested on 3.9, 3.10, 3.11, and 3.12).
+Na0S requires **Python 3.10 or later** (tested on 3.10, 3.11, and 3.12).
 
 ### Create a virtual environment
 
@@ -87,56 +87,51 @@ pip install -e ".[all,dev]"
 python -c "from na0s import scan; print(scan('hello world').label)"
 # Expected output: safe
 
-python -m unittest discover -s tests -v
+pytest tests/ -q
 ```
 
 ---
 
 ## Project Structure
 
+Most detection logic now lives in sub-packages. Several old top-level
+modules (`rules.py`, `obfuscation.py`, `output_scanner.py`,
+`safe_pickle.py`, `structural_features.py`, `llm_judge.py`, …) are
+backward-compat shims that re-export from the canonical package; add new
+code to the package, never to the shim.
+
 ```
-Na0S/
-|-- src/na0s/                  # Main package (source layout)
-|   |-- __init__.py            # Public API: scan(), CascadeClassifier, etc.
-|   |-- _version.py            # Package version
-|   |-- predict.py             # scan() entry point, ML pipeline, weighted voting
-|   |-- cascade.py             # CascadeClassifier: whitelist filter + weighted classifier
-|   |-- rules.py               # Rule dataclass and RULES list (regex-based detection)
-|   |-- obfuscation.py         # Decodes base64, URL encoding, unicode tricks
-|   |-- structural_features.py # Structural feature extraction for ML
-|   |-- scan_result.py         # ScanResult dataclass (unified output)
-|   |-- output_scanner.py      # Scans LLM outputs for data leakage
-|   |-- canary.py              # Canary token injection and detection
-|   |-- positive_validation.py # Trust boundary validation
-|   |-- predict_embedding.py   # Layer 5: embedding-based classifier
-|   |-- llm_checker.py         # Layer 7: LLM-as-judge checker
-|   |-- llm_judge.py           # LLM judge implementation
-|   |-- safe_pickle.py         # Safe model deserialization with hash verification
-|   |-- models/                # Bundled ML model weights (.pkl + .sha256)
-|   |-- layer0/                # Layer 0: input preprocessing and sanitization
-|       |-- input_loader.py    # Multi-format input loading
-|       |-- mime_parser.py     # MIME type detection
-|       |-- content_type.py    # Content type classification
-|       |-- encoding.py        # Character encoding detection and normalization
-|       |-- normalization.py   # Text normalization
-|       |-- sanitizer.py       # Input sanitization
-|       |-- validation.py      # Input validation rules
-|       |-- safe_regex.py      # Timeout-guarded regex execution
-|       |-- resource_guard.py  # Memory and CPU resource guards
-|       |-- timeout.py         # Scan timeout management
-|       |-- tokenization.py    # Token counting
-|       |-- doc_extractor.py   # Document text extraction (PDF, DOCX, etc.)
-|       |-- ocr_extractor.py   # OCR-based text extraction from images
-|       |-- html_extractor.py  # HTML content extraction
-|       |-- pii_detector.py    # PII detection in inputs
-|       |-- language_detector.py # Language identification
-|       |-- result.py          # Layer 0 result dataclass
+src/na0s/
+|-- __init__.py            # Public API: scan(), CascadeClassifier, etc.
+|-- _version.py            # Package version
+|-- predict.py, cascade.py # core pipeline (scan -> ScanResult)
+|-- _voting.py             # weighted composite scoring
+|-- config.py              # configuration / weights
+|-- scan_result.py         # ScanResult dataclass (unified output)
+|-- cli.py                 # CLI entry point
+|-- layer0/  layer1/  layer2/  # always-on: sanitize, rules, obfuscation
+|-- structural/            # L3 non-lexical feature extraction
+|-- ml/                    # ML classifiers, embeddings, model inference
+|-- embedding_classifier.py # L5 embedding classifier (optional)
+|-- judge/                 # L7 LLM second opinion (optional)
+|-- output/               # L9 output scanning, propagation detection
+|-- canary/                # L10 canary tokens
+|-- detectors/             # specialized signal detectors
+|-- fusion/                # ensemble fusion, complexity routing, scoring
+|-- integrity/             # safe pickle, model provenance, SBOM
+|-- validation/            # trust-boundary / positive validation
+|-- rag/                   # RAG poisoning + positional scanners
+|-- worm/                  # worm / self-replication signatures
+|-- parsers/office/        # DOCX/XLSX/PPTX/ODF/OLE parsing
+|-- layer15/               # threat-intel feed sync
+|-- layer16/               # multi-turn / session detection
+|-- models/                # Bundled ML model weights (.pkl + .sha256)
 |
-|-- tests/                     # Test suite (1680+ tests)
-|-- data/                      # Training data and processed datasets
-|-- scripts/                   # Data generation and utility scripts
-|-- THREAT_TAXONOMY.md         # 19 categories, 103+ attack techniques
-|-- pyproject.toml             # Build config, dependencies, tool settings
+|-- tests/                 # Test suite (9449 tests)
+|-- data/                  # Training data and processed datasets
+|-- scripts/               # Data generation and utility scripts
+|-- THREAT_TAXONOMY.md     # 30 categories, 278 attack techniques
+|-- pyproject.toml         # Build config, dependencies, tool settings
 ```
 
 ---
@@ -145,9 +140,10 @@ Na0S/
 
 ### Python version compatibility
 
-All code must be compatible with **Python 3.9+**. Do not use features
-introduced in 3.10 or later (e.g., `match` statements, `X | Y` union types
-in annotations) without a 3.9-compatible fallback.
+All code must be compatible with **Python 3.10+** (the floor declared by
+`requires-python` in `pyproject.toml`). Features introduced in 3.10, such
+as `match` statements and `X | Y` union types in annotations, are fine.
+Do not rely on features that require 3.11 or later.
 
 ### Linting
 
@@ -214,13 +210,15 @@ A PR without tests will not be merged.
 ### Running the test suite
 
 ```bash
-python -m unittest discover -s tests -v
+make test-fast          # full suite, fail-fast, no coverage
+pytest tests/canary/    # one package
+pytest tests/ -q        # full suite, concise output
 ```
 
 To run with coverage reporting:
 
 ```bash
-coverage run -m unittest discover -s tests -v
+make test               # coverage run -m pytest tests/
 coverage report --show-missing --fail-under=50
 ```
 
@@ -307,7 +305,7 @@ will flag it, reminding you to remove the decorator.
 4. **CI must pass**. The GitHub Actions pipeline runs on every PR:
    - Syntax check (all `.py` files compile)
    - Lint (flake8 -- blocking on `E9`, `F63`, `F7`, `F82`)
-   - Full test suite on Python 3.9, 3.10, 3.11, 3.12
+   - Full test suite on Python 3.10, 3.11, 3.12
    - Coverage report (`--fail-under=50`)
 
 5. **Respond to review feedback** promptly. Maintainers may request changes
