@@ -4,8 +4,16 @@ Identifies patterns in text (typically LLM output) that indicate the output
 is attempting to propagate itself by instructing recipients to copy, forward,
 or inject the payload into other conversations or systems.
 
-This is a critical defense against prompt injection worms that spread
-autonomously through LLM-to-LLM communication chains.
+It targets prompt injection worms that spread autonomously through
+LLM-to-LLM communication chains.
+
+Wiring status: this detector is NOT part of the default ``scan()`` pipeline.
+It is not referenced by ``predict.py`` or ``cascade.py``. It is reachable only
+via the opt-in output-scanning path (``na0s.output.propagation`` /
+``na0s.output.dual.DualDirectionScanner``), which is gated by the
+``NA0S_PROPAGATION_SCAN`` environment variable (default: off). The default
+output scanner instantiated by ``cascade.py`` is the basic ``OutputScanner``,
+which does not invoke this detector.
 """
 
 from __future__ import annotations
