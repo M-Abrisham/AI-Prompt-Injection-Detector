@@ -246,7 +246,7 @@ pytest tests/canary/                    # one package
 pytest --collect-only -q tests/         # what scripts/extract_facts.py uses
 ```
 
-`9449` tests across `304` files at last extraction. **0** collection errors. <!-- facts.yaml#test_count, facts.yaml#test_files — volatile counts kept in inline code so the docs-drift gate doesn't hard-pin them (ISS-08) -->
+`9853` tests across `325` files at last extraction. **0** collection errors. <!-- facts.yaml#test_count, facts.yaml#test_files — volatile counts kept in inline code so the docs-drift gate doesn't hard-pin them (ISS-08) -->
 
 ---
 
