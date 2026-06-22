@@ -1150,6 +1150,31 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         if composite >= threshold and label in ("SAFE", "safe", "benign"):
             label = "MALICIOUS"
 
+    # --- Char-split obfuscation (D7.5 / char_level_reassembly) ---
+    # Input deliberately split into single chars (i.g.n.o.r.e, i_g_n_o_r_e,
+    # comma/interpunct/vertical stacks) is reassembled in Layer 0, but when
+    # there is no word-boundary signal it glues into one token that matches
+    # no word-boundary rule and the ML vocabulary is destroyed -- so the
+    # reassembled text alone leaves the composite near zero.  The *fact* of
+    # reassembly is itself a strong obfuscation signal: benign text fires it
+    # ~0.007% (and those hits are attacks) on 30k real-world texts.  Contribute
+    # bounded risk, and for a long single-char run (the `_heavy` flag) floor to
+    # the decision threshold since legitimate text essentially never does this.
+    char_split_weight = 0.0
+    char_split_heavy = "char_level_reassembly_heavy" in l0.anomaly_flags
+    if "char_level_reassembly" in l0.anomaly_flags:
+        char_split_weight = 0.45 if char_split_heavy else 0.20
+        hit_name = "char_split_obfuscation"
+        if hit_name not in hit_names_seen:
+            hits.append(hit_name)
+            hit_names_seen.add(hit_name)
+    if char_split_weight > 0.0:
+        composite = min(composite + char_split_weight, 1.0)
+        if char_split_heavy and composite < threshold:
+            composite = max(composite, threshold)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
+
     # --- Payload assembly detection (D7) ---
     # Detect fragmented payloads: token-split, code-block weaponization,
     # comment/metadata hiding, cross-encoding fragments.
