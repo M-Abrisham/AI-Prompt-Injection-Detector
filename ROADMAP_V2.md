@@ -247,7 +247,7 @@ Fix order (clear bugs/cleanup → decontaminate+calibrate → one calibrated fus
 | **L8** | `████████████████████` | **26/26**  | COMPLETE |
 | **L9** | `████████████████████` | **28/28**  | COMPLETE |
 | **L10**| `████████████████████` | **25/25**  | COMPLETE |
-| **L11**| `████████████████████` | **24/24**  | COMPLETE |
+| **L11**| `████████████████████` | **24/24**  | CORE COMPLETE · +17 hardening open (specs/hardening/) |
 | **L12**| `████████████████████` | **55/55**  | COMPLETE |
 | **L13**| `████████████████████` | **41/41**  | COMPLETE |
 | **L14**| `████████████████████` | **21/21**  | COMPLETE |
@@ -258,7 +258,7 @@ Fix order (clear bugs/cleanup → decontaminate+calibrate → one calibrated fus
 | **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
 | **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
 | **L21**| `░░░░░░░░░░░░░░░░░░░░` | **0/8**    | DRAFT (NEW 2026-04-23) |
-| **Hardening** | `██████████████░░░░░░` | **10/14** | 71% |
+| **Hardening** | `██████████████░░░░░░` | **10/14** | 71% (earlier pass; the 2026-06 supply-chain audit's 17 items are tracked under L11 → Open-Security-Hardening, not double-counted here) |
 | **Infra** | `████████████████████` | **—** | Repo reorg (13 phases), CI, Dependabot, CodeQL, SECURITY.md |
 |        |                        | **608/768** | **79%** |
 
@@ -1218,7 +1218,7 @@ Core primitives: `CanaryManager` + `CanaryToken` (the original top-level `canary
 
 ---
 
-## Layer 11: Supply Chain Integrity — Tasks: 24/24 (COMPLETE)
+## Layer 11: Supply Chain Integrity — Tasks: 24/24 core complete · 17 open hardening items (see `specs/hardening/`)
 
 ### Description
 Layer 11 is the supply-chain trust boundary covering model files, serialized classifiers, dependencies, configuration, and prompt templates. `safe_pickle` runs a 3-tier trust hierarchy: hardcoded hashes in `models/__init__.py` (most trusted) → HMAC-SHA256 sidecar keyed by `NA0S_PICKLE_KEY` → plain SHA-256 sidecar (backward-compatible). On `safe_dump`, writes an HMAC sidecar when the key is set (warns otherwise); on `safe_load`, verifies with constant-time compare. Sidecar format is versioned (`v1:sha256:...` / `v1:hmac-sha256:...`) with backward-compatible parsing. Atomic writes via `tempfile.mkstemp()` + `os.replace()` (both pickle and sidecar). Pre-hash magic-byte validation (pickle opcodes 0–5) fails fast on malformed files. World-readable / group-writable POSIX warnings after dump. Structured JSON audit logging to the `na0s.integrity_audit` logger for dump / load / failure events. Used by 20+ call sites across model persistence. `ModelProvenance` attaches a `.meta.json` sidecar (SHA-256 verification + training metadata) gated by `NA0S_MODEL_PROVENANCE=1`. `ModelEncryptor` layers AES-256-GCM on top via `cryptography`, gated by `NA0S_ENCRYPTION_KEY`. `ModelRollback` keeps timestamped backups with sidecar preservation, cleanup(keep=N), and restore, gated by `NA0S_MODEL_ROLLBACK=1`. `DependencyScanner` runs `scan_installed()` / `check_requirements()` / `find_unpinned()` / `audit_report()` (`NA0S_DEP_SCAN=1`). `RequirementsIntegrity` ships SHA-256 sidecar verification for `requirements.txt`. `FingerprintStoreIntegrity` watches the detection fingerprint DB. `SBOMGenerator` emits a CycloneDX-lite manifest linking model hashes and dependency list. YAML loading is centralized via `scripts/safe_yaml.py` (`yaml.safe_load` only, 10 MB cap against billion-laughs, path-containment check rooted at `PROJECT_ROOT/data/`, UTF-8-SIG BOM-safe, schema validation requiring categories as dicts with `name`). PyYAML pinned `>=6.0.1,<7`. Two modules live in `integrity/` for historical reasons but belong elsewhere: `safe_content.py` (ML false-positive scoring) and `validation_allowlist.py` (L8 allowlist). Historical bug-fix detail in [CHANGELOG.md](CHANGELOG.md).
@@ -1300,6 +1300,41 @@ Core pickle hardening: `safe_dump(obj, path)` / `safe_load(path)` with chunked (
 - [ ] **Misfiled modules inside `integrity/`** — `integrity/safe_content.py` is L4 FP-reduction scoring (consumed by `ml/predict.py` composite voting); `integrity/validation_allowlist.py` is L8 prompt allowlisting. Move to `ml/safe_content.py` and `validation/allowlist.py` respectively. Neither is an integrity concern. **Priority**: P2. **Effort**: Low (2 module moves + import sweep).
 - [ ] **`scripts/safe_yaml.py` is library code sitting in `scripts/`** — 77 LOC of YAML-hardening helpers (`safe_load_yaml()`, path-containment checks) imported by `data/_base.py` and `scripts/sync_datasets.py`. Library code should live under `src/na0s/integrity/safe_yaml.py`; keep a thin CLI wrapper in `scripts/` if needed. **Priority**: P2. **Effort**: Low (move + re-export + update 2 import sites).
 - [ ] **Roadmap mis-attribution crosswalk** — earlier L6 and L10 "Files:" lists incorrectly included `chain_integrity.py`, `prompt_signer.py`, and `template_integrity.py`. Those are L11 concerns with canonical homes in `integrity/`. Already corrected in this rewrite. **Priority**: P3. **Effort**: None (doc-only).
+
+### Open-Security-Hardening (supply-chain audit, items 1-17)
+
+The original 24-item audit closed, but a 2026-06 supply-chain hardening audit
+surfaced **17 new, real, open items** — each tracked by a spec under
+`specs/hardening/`. The core 24 stay COMPLETE; these are *additional* L11 work,
+so the layer is **not** fully complete. Rows stay unchecked until the matching
+hardening item merges (then flip to `[x]` with its SHA). Titles / priority tier /
+depends-on are copied verbatim from each spec header. Verify count:
+`ls specs/hardening/[0-9]*.md | grep -v 18- | wc -l` == 17.
+
+- [ ] **Item 1 (M4b) — `deploy_model.py` drops `model_embedding.pkl` (and `structural_scaler.pkl`) from `KNOWN_HASHES` on every deploy** (P1 — live correctness bug). depends-on: none. Spec: `specs/hardening/01-deploy-model-known-hashes-drop.md`.
+- [ ] **Item 2 (H1) — `distill_model.py` ImportError fallback uses bare pickle / no sidecar** (H1 — high). depends-on: none. Spec: `specs/hardening/02-distill-model-bare-pickle-fallback.md`.
+- [ ] **Item 3 (M2) — pin `transformers>=5.3.0` floor + `revision=` + `use_safetensors` on HF loads (CVE-2026-4372)** (P0 — RCE-class, blocks L5/N5/embedding/worm deploys). depends-on: none. Spec: `specs/hardening/03-hf-transformers-pin-revision.md`.
+- [ ] **Item 4 — TOCTOU read-once-buffer + allowlist `find_class` `Unpickler`** (P1 — core loader). depends-on: `ci/test-optional-dep-guards` (commit 91944d6, the `_NumpyCompatUnpickler` hook) should land first. Spec: `specs/hardening/04-toctou-allowlist-unpickler.md`.
+- [ ] **Item 5 — route 3 zero-integrity raw loaders through `safe_load`** (P1 — ACE surface). depends-on: none. Spec: `specs/hardening/05-route-raw-loaders-safeload.md`.
+- [ ] **Item 6 (M1) — fail-closed optional loaders (re-raise integrity `ValueError`)** (P0). depends-on: none. Spec: `specs/hardening/06-fail-closed-optional-loaders.md`.
+- [ ] **Item 7 — sidecar resolution: plain-SHA256 downgrade fail-closed + L1 `.hmac` DoS** (P0). depends-on: 6 (SOFT — same loaders; merge-collision avoidance). Spec: `specs/hardening/07-sidecar-resolution-rework.md`.
+- [ ] **Item 8 — L11 tests: adversarial `__reduce__` rejection + `KNOWN_HASHES` precedence + stress** (P2 — test coverage). depends-on: 4 (asserts the #4 allowlist). Spec: `specs/hardening/08-l11-adversarial-stress-tests.md`.
+- [ ] **Item 9 (H2) — L3 digest 64-hex validation in `_parse_sidecar` + L2 reject weak `NA0S_PICKLE_KEY`** (H2 — input-validation). depends-on: none. Spec: `specs/hardening/09-sidecar-key-validation.md`.
+- [ ] **Item 10 (M3) — allowlist/validate `NA0S_PROMPTGUARD_MODEL` env model id** (P1 — only live when N5 PromptGuard opt-in). depends-on: 3 (inherits revision-pin/loader hardening). Spec: `specs/hardening/10-env-model-id-allowlist.md`.
+- [ ] **Item 11 — CI security gate: bandit + fickling/modelscan + ruff S + CodeQL security-extended + gate `security-review.yml`** (P1 — makes #1–#6 enforceable). depends-on: 5, 6 (so bandit/ruff-S pass). Spec: `specs/hardening/11-ci-security-gate.md`.
+- [ ] **Item 12 — `worm/detector.py` joblib guard → canonical 3-tier integrity hierarchy** (P1 — ACE surface). depends-on: none (optional coord with 5). Spec: `specs/hardening/12-worm-3tier-integrity.md`.
+- [ ] **Item 13 — format migration: sklearn→skops, numpy/embeddings→`.npz`/safetensors (`allow_pickle=False`)** (P1 — eliminates the pickle-ACE vuln class; BIG effort). depends-on: 5 (gate every pickle entry point first). Spec: `specs/hardening/13-format-migration-skops-safetensors.md`.
+- [ ] **Item 14 (M4a) — replace brace-fragile `re.sub` `KNOWN_HASHES` rewrite with AST slice-rewrite + `ast.literal_eval` verify** (P1 — data-corruption footgun). depends-on: 1. Spec: `specs/hardening/14-deploy-model-ast-rewrite.md`.
+- [ ] **Item 15 — I-cache: bound/evict the mtime-gated hash cache + richer cache key (`st_size`/`ino`/`mtime_ns`)** (P3 — hygiene). depends-on: 7 (SOFT — same `safe_pickle.py` load path). Spec: `specs/hardening/15-hash-cache-bound.md`.
+- [ ] **Item 16 — externalize integrity knobs (chunk size / YAML max / backup retention / HMAC key env name) → `config.py`** (P3). depends-on: soft on the `:1208` `scripts/safe_yaml.py` move (YAML-max knob only). Spec: `specs/hardening/16-externalize-integrity-knobs.md`.
+- [ ] **Item 17 — DI-1→DI-3 decontamination + sealed-corpus retrain + sidecar/`KNOWN_HASHES` refresh** (P1 — every published ML/ensemble number is currently a train-on-test upper bound). depends-on: 1, 14. Spec: `specs/hardening/17-di-decontam-retrain.md`.
+- [ ] **Item 18 (DOC) — this honesty pass: fix the L11 `24/24 COMPLETE` overclaim, add this subsection, correct the bandit-CI and `process_data.py` glob misstatements** (P2 — doc/governance, no runtime change). depends-on: none (soft on 1-17 for final check-off SHAs). Spec: `specs/hardening/18-roadmap-doc-updates.md`.
+
+> Cross-reference: the existing TODO bullets `integrity/safe_content.py` +
+> `integrity/validation_allowlist.py` misfiled (above) and `scripts/safe_yaml.py`
+> library-in-scripts (above) overlap the hardening family (item 16 soft-depends on
+> the `safe_yaml.py` move) but are tracked under the original audit, not
+> double-counted here.
 
 ---
 
@@ -1857,7 +1892,7 @@ Totals: 8 workflows │ 5 repo-root config files │ ~5 source files under eval/
 
 ### Completed (21 items)
 
-CI/CD fully wired: GitHub Actions CI with Python 3.9-3.12 matrix, flake8 blocking on E9/F63/F7/F82, `coverage run -m pytest` with `--fail-under=50`, `bench-fast` on 3.12, regression-dashboard artefact upload; separate `pr-check.yml` for syntax/lint/test-summary; `codeql.yml` for static security; `publish.yml` for PyPI Trusted Publishing; four data-pipeline workflows sharing the same runners. Packaging via `pyproject.toml` (console script, optional extras, full tool config) + `MANIFEST.in` + XDG-compliant data paths — `pip install na0s` is fully functional. Pre-commit hooks for ruff, black, bandit, trailing-whitespace, end-of-file-fixer, YAML/JSON/large-file checks. 17-target `Makefile` covering install/test/lint/format/bench/build/clean/publish/evaluate-buffs/dashboard/docker-build/docker-test/docker-eval/garak/pyrit/rainbow. `evaluate_probes.py` with per-probe recall, taxonomy grouping (OWASP/AVID/LMRC), weak-probe identification, JSON export, `--attribution`/`--attribution-export` flags. `evaluate_llm_judge.py` with TP/FP/TN/FN, FPR/FNR, p50/p95 latency, FP/FN examples. Regression dashboard with `--run`/`--compare`/`--baseline`/`--output` flags appending to `data/evaluation/regression_history.jsonl`, flagging >2 % recall drops. Integration-test coverage: 7 files, 288 tests across D1/D3/D5/E1/E2/O1/O2 + general, end-to-end L0 → L1 → L2 → L4 → L6 → verdict; full regression now at 4901 passed / 0 failed / 128 xfail (down from 152 xfail after the 6-track gap-closure sprint). Property-based fuzzing via Hypothesis — 40 tests against L0 covering full Unicode/bytes input (flushed out a surrogate-crash bug). Garak and PyRIT adapters under `scripts/integrations/` (import-guarded, CLI wrappers, stub-friendly when upstream not installable). Docker containerisation with `docker-compose.yml` services for test/evaluate/rainbow. Rainbow Teaming driver with quality-diversity search seeded from probes — D1 test run went 65 % → 92 % evasion across two generations. Cross-cutting housekeeping completed alongside: central `src/na0s/config.py` constants, structured-logging conversion across `predict.py`/`cascade.py`/`output_scanner.py`, and a README rewrite to match the real 10-layer architecture. One audit fix (FIX-L14-1). See [CHANGELOG.md](CHANGELOG.md) for rollout dates.
+CI/CD fully wired: GitHub Actions CI with Python 3.9-3.12 matrix, flake8 blocking on E9/F63/F7/F82, `coverage run -m pytest` with `--fail-under=50`, `bench-fast` on 3.12, regression-dashboard artefact upload; separate `pr-check.yml` for syntax/lint/test-summary; `codeql.yml` for static security; `publish.yml` for PyPI Trusted Publishing; four data-pipeline workflows sharing the same runners. Packaging via `pyproject.toml` (console script, optional extras, full tool config) + `MANIFEST.in` + XDG-compliant data paths — `pip install na0s` is fully functional. Pre-commit hooks for ruff, black, bandit, trailing-whitespace, end-of-file-fixer, YAML/JSON/large-file checks (these are LOCAL pre-commit hooks in `.pre-commit-config.yaml`; bandit is NOT wired into any `.github/workflows/*.yml` and does **not** gate the CI build — only `codeql.yml` runs as a CI security check, and `security-review.yml` is opt-in on a `CLAUDE_API_KEY` secret. CI-enforced bandit/ruff-S is open hardening item 11, `specs/hardening/11-ci-security-gate.md`). 17-target `Makefile` covering install/test/lint/format/bench/build/clean/publish/evaluate-buffs/dashboard/docker-build/docker-test/docker-eval/garak/pyrit/rainbow. `evaluate_probes.py` with per-probe recall, taxonomy grouping (OWASP/AVID/LMRC), weak-probe identification, JSON export, `--attribution`/`--attribution-export` flags. `evaluate_llm_judge.py` with TP/FP/TN/FN, FPR/FNR, p50/p95 latency, FP/FN examples. Regression dashboard with `--run`/`--compare`/`--baseline`/`--output` flags appending to `data/evaluation/regression_history.jsonl`, flagging >2 % recall drops. Integration-test coverage: 7 files, 288 tests across D1/D3/D5/E1/E2/O1/O2 + general, end-to-end L0 → L1 → L2 → L4 → L6 → verdict; full regression now at 4901 passed / 0 failed / 128 xfail (down from 152 xfail after the 6-track gap-closure sprint). Property-based fuzzing via Hypothesis — 40 tests against L0 covering full Unicode/bytes input (flushed out a surrogate-crash bug). Garak and PyRIT adapters under `scripts/integrations/` (import-guarded, CLI wrappers, stub-friendly when upstream not installable). Docker containerisation with `docker-compose.yml` services for test/evaluate/rainbow. Rainbow Teaming driver with quality-diversity search seeded from probes — D1 test run went 65 % → 92 % evasion across two generations. Cross-cutting housekeeping completed alongside: central `src/na0s/config.py` constants, structured-logging conversion across `predict.py`/`cascade.py`/`output_scanner.py`, and a README rewrite to match the real 10-layer architecture. One audit fix (FIX-L14-1). See [CHANGELOG.md](CHANGELOG.md) for rollout dates.
 
 ### TODO List
 
