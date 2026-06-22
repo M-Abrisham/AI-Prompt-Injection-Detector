@@ -42,11 +42,15 @@ def test_server_module_importable_without_mcp_sdk():
     assert server._HAS_MCP_SUPPLY_CHAIN is True
 
 
-def test_build_guard_server_raises_actionable_without_sdk():
+def test_build_guard_server_raises_actionable_without_sdk(monkeypatch):
     from na0s.mcp import build_guard_server
 
-    # No fake injected -> the lazy import fails -> actionable ImportError.
-    assert "mcp.server.fastmcp" not in sys.modules
+    # Force the SDK to appear ABSENT regardless of the env: `mcp` is installed
+    # in CI (via the [mcp]/[all] extra) but absent in a bare dev venv. Setting
+    # the submodule to None in sys.modules makes `from mcp.server.fastmcp import
+    # FastMCP` raise ImportError, so the factory's actionable error fires
+    # deterministically either way.
+    monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", None)
     with pytest.raises(ImportError) as exc:
         build_guard_server()
     assert "na0s[mcp]" in str(exc.value)
