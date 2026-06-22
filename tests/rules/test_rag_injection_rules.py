@@ -1,4 +1,6 @@
-"""Tests for RAG injection detection rules (R1.1–R1.4).
+"""Tests for RAG injection detection rules (I1 indirect/data-source injection).
+
+(Formerly mis-tagged R1.1–R1.4 — R1.x is Resource/Availability; re-tagged to I1.x.)
 
 Covers:
     1. rag_policy_update — detects "updated policy supersedes" semantic injections
@@ -542,7 +544,9 @@ class TestRAGRuleCrossInteraction(_ParanoiaResetMixin, unittest.TestCase):
         rag_hit = [h for h in hits if h.name == "rag_context_separator"]
         self.assertEqual(len(rag_hit), 1)
         self.assertEqual(rag_hit[0].severity, "critical")
-        self.assertEqual(rag_hit[0].technique_ids, ["R1.3"])
+        # Re-tagged R1.3 -> I1.2: R1.x is Resource/Availability (DoS); these are
+        # indirect/data-source (I1) injection rules. Fixes a taxonomy collision.
+        self.assertEqual(rag_hit[0].technique_ids, ["I1.2"])
 
     def test_detailed_returns_correct_technique_ids(self):
         """rule_score_detailed should return correct technique_ids for RAG rules."""
@@ -552,7 +556,8 @@ class TestRAGRuleCrossInteraction(_ParanoiaResetMixin, unittest.TestCase):
         )
         rag_hit = [h for h in hits if h.name == "rag_policy_update"]
         self.assertEqual(len(rag_hit), 1)
-        self.assertEqual(rag_hit[0].technique_ids, ["R1.1"])
+        # Re-tagged R1.1 -> I1.2 (taxonomy collision fix; see rules_registry).
+        self.assertEqual(rag_hit[0].technique_ids, ["I1.2"])
         self.assertEqual(rag_hit[0].severity, "high")
 
 
