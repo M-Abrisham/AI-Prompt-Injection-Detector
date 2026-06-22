@@ -237,6 +237,37 @@ def _check_permissions(path, label="file"):
 
 
 
+def _is_bundled_artifact(path, basename):
+    """Return True only when *path* IS the bundled ``na0s.models`` copy.
+
+    The hardcoded ``KNOWN_HASHES`` pin protects the artefacts shipped inside
+    the package (``src/na0s/models/<name>.pkl``): their expected digest lives
+    in signed Python source, so an attacker cannot tamper with the bundled
+    ``.pkl`` without also patching the installed code.
+
+    That pin must be keyed by *identity*, not by basename. A freshly trained
+    artefact written elsewhere (e.g. ``data/processed/model.pkl`` produced by
+    the Auto-Retrain workflow) shares the basename ``model.pkl`` but is a
+    different file with a different, legitimate digest. Matching it against the
+    shipped hash wrongly rejects a valid, sidecar-signed model. We therefore
+    compare canonical (symlink-resolved) absolute paths: the hardcoded branch
+    fires only when *path* resolves to the bundled package artefact returned by
+    ``na0s.models.get_model_path(basename)``. Any other path falls through to
+    sidecar verification (HMAC, then SHA-256), so security is unchanged for the
+    bundled file and correct for fresh artefacts.
+
+    Resolution failures (missing bundled file, lookup error) return False so we
+    fail *closed* onto sidecar verification rather than silently treating an
+    arbitrary file as the trusted bundled artefact.
+    """
+    try:
+        from na0s.models import get_model_path
+        bundled = os.path.realpath(get_model_path(basename))
+    except Exception:  # pragma: no cover - defensive: never trust on lookup failure
+        return False
+    return os.path.realpath(path) == bundled
+
+
 def _resolve_expected_hash(path):
     """Return ``(expected_hex_digest, source)`` for *path*.
 
@@ -244,7 +275,10 @@ def _resolve_expected_hash(path):
     Raises ``FileNotFoundError`` when no source is available.
     """
     basename = os.path.basename(path)
-    if basename in KNOWN_HASHES:
+    # Only honour the hardcoded pin for the actual bundled package artefact.
+    # A non-bundled file that merely shares the basename (e.g. a freshly
+    # retrained data/processed/model.pkl) must verify via its own sidecar.
+    if basename in KNOWN_HASHES and _is_bundled_artifact(path, basename):
         return KNOWN_HASHES[basename], "hardcoded"
 
     # Prefer HMAC sidecar over SHA-256 sidecar
