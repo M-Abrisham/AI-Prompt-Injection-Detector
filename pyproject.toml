@@ -78,8 +78,13 @@ llm = [
     "openai>=1.0,<3",
     "groq>=0.4,<2",
 ]
+mcp = [
+    # FastMCP server SDK (module ``mcp.server.fastmcp``). Imported lazily inside
+    # na0s.mcp.build_guard_server only; na0s.mcp is importable without it.
+    "mcp>=1.2,<2",
+]
 all = [
-    "na0s[lang,embedding,ocr,docs,llm]",
+    "na0s[lang,embedding,ocr,docs,llm,mcp]",
 ]
 data = [
     "datasets>=2.14",
@@ -172,6 +177,18 @@ omit = ["scripts/*", "tests/*"]
 #     ignored so the layers contract reflects the intended dependency
 #     direction rather than the transitive hub cycle. Each ignored edge is an
 #     existing, known seam — not a license to add more.
+#
+#  3. na0s.integrations and na0s.mcp are ORCHESTRATION CONSUMERS: thin adapters
+#     that sit ABOVE the whole stack and call the top-level public API
+#     (na0s.scan / na0s.scan_output / na0s.predict.scan_tools). Like predict /
+#     cascade they import downward into many tiers, so they are deliberately
+#     NOT listed as a layer and NOT in the independence contract — constraining
+#     them would re-create the hub cycle. They ARE still gated by the
+#     forbidden-shims contract below (no re-importing deprecated layerN names).
+#     na0s.mcp's own internal detector (detectors.mcp_supply_chain) lives in the
+#     detectors tier and is fully bound by the layers contract; it copies the
+#     worm rug-pull primitives down rather than importing worm (a tier 6 -> 3
+#     upward back-edge the contract would reject).
 # ---------------------------------------------------------------------------
 [tool.importlinter]
 root_packages = ["na0s"]
@@ -227,7 +244,7 @@ type = "forbidden"
 source_modules = [
     "na0s.input", "na0s.rules", "na0s.obfuscation", "na0s.threat_intel",
     "na0s.conversation", "na0s.output", "na0s.structural", "na0s.validation",
-    "na0s.fusion", "na0s.dataset", "na0s.eval", "na0s.integrations",
+    "na0s.fusion", "na0s.dataset", "na0s.eval", "na0s.integrations", "na0s.mcp",
     "na0s.canary", "na0s.detectors", "na0s.judge", "na0s.ml", "na0s.rag",
     "na0s.worm", "na0s.parsers", "na0s.integrity", "na0s.agents", "na0s.models",
     "na0s.predict", "na0s.cascade", "na0s.config", "na0s.cli", "na0s.scan_result",
@@ -277,7 +294,7 @@ faiss-cpu = ["faiss"]
 [tool.deptry.per_rule_ignores]
 # DEP001 (missing): modules provided by optional extras / not pip-installed in
 # the CI base, all imported under try/except ImportError guards.
-DEP001 = ["pdfplumber", "PyPDF2", "pytesseract", "re2", "lxml", "olefile", "oletools", "xlrd", "claude_agent_sdk", "openclaw", "redis"]
+DEP001 = ["pdfplumber", "PyPDF2", "pytesseract", "re2", "lxml", "olefile", "oletools", "xlrd", "claude_agent_sdk", "mcp", "openclaw", "redis"]
 # DEP002 (declared-but-unused): optional-extra + data-pipeline deps used only
 # via guarded/lazy imports that deptry's static scan does not see.
 DEP002 = ["datasets", "huggingface-hub", "cleanlab", "datasketch", "dvc", "tqdm", "pyarrow", "easyocr", "Pillow", "striprtf", "openai", "groq", "langdetect"]
