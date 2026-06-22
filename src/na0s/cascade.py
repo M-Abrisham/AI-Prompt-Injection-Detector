@@ -194,6 +194,15 @@ try:
 except ImportError:
     _HAS_TOOL_ABUSE = False
 
+# RAG-poison detector (I1.x) — optional import (parity w/ scan()).
+# INGESTION-side detector for instruction/authority/exfil payloads embedded in
+# retrieved RAG context, documents, email, or structured data.
+try:
+    from .rag.poison_detector import detect_rag_poisoning, get_rag_poison_weight
+    _HAS_RAG_POISON = True
+except ImportError:
+    _HAS_RAG_POISON = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 
@@ -674,6 +683,27 @@ class WeightedClassifier:
                         label = "MALICIOUS"
             except Exception:
                 _logger.debug("Tool-abuse detection failed", exc_info=True)
+
+        # --- RAG-poison (I1.x) — parity with scan() ---
+        # Instruction/authority/exfil payloads embedded in retrieved RAG context,
+        # documents, email, or structured data.  Weight capped at 0.12 inside
+        # get_rag_poison_weight, so a lone hit is a soft signal, never decisive.
+        if _HAS_RAG_POISON:
+            try:
+                _rp = detect_rag_poisoning(text)
+                if _rp.poison_indicators:
+                    _rp_w = get_rag_poison_weight(_rp)
+                    if _rp_w > 0.0:
+                        composite = min(composite + _rp_w, 1.0)
+                    for _ind in _rp.poison_indicators:
+                        _rp_hit = "rag_poison:" + _ind
+                        if _rp_hit not in hit_names_seen:
+                            hit_names.append(_rp_hit)
+                            hit_names_seen.add(_rp_hit)
+                    if composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("RAG-poison detection failed", exc_info=True)
 
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.

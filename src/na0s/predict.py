@@ -1210,6 +1210,14 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         except Exception:
             pass  # RAG poisoning detection failure is non-fatal
 
+    # Wire RAG-poison signal into composite scoring (cap 0.12 enforced inside
+    # get_rag_poison_weight, so a lone rag_poison hit is a soft signal, never
+    # decisive on its own).  Mirrors the inter_model / tool_abuse folds below.
+    if rag_poison_weight > 0.0:
+        composite = min(composite + rag_poison_weight, 1.0)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
+
     # --- Inter-model propagation detection (IM.x) ---
     # Detect fabricated cross-model authority claims: a prompt asserting that
     # some OTHER model / judge / consensus / upstream-agent / middleware /

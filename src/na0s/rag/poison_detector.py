@@ -13,7 +13,7 @@ Six categories of RAG poisoning:
        be system messages or official instructions
     4. Relevance manipulation (I1.4): keyword stuffing + injection payload
     5. Consistency anomalies (I1.5): contradictory instructions vs query
-    6. Hidden instructions in structured data (IM.1): JSON/XML/markdown
+    6. Hidden instructions in structured data (I1.2): JSON/XML/markdown
        in retrieved docs containing hidden directives
 
 Strategy:
@@ -65,6 +65,20 @@ _add("instruction_injection", "ignore_above_context", "high", ["I1", "I1.1"],
      r"\b(?:ignore|disregard|forget|dismiss)\s+"
      r"(?:the\s+)?(?:above|previous|preceding|prior|earlier)\s+"
      r"(?:context|documents?|information|text|instructions?|results?|passages?)")
+
+# Extended ignore/disregard noun list for the request/message/summary/task class.
+# FP-safe gate: the discarded object MUST be possessive-to-the-user or temporally
+# prior ("the user's summary request", "the prior emails") — a bare "ignore the
+# summary" in benign text (e.g. "you can ignore the summary section") will NOT
+# match because the (?:user'?s|prior|previous|preceding|earlier|above) qualifier
+# is required.  Targets the indirect-injection phrasing "disregard the user's
+# summary request" / "ignore the prior emails" (A2/A3) that the high-severity
+# pattern above (anchored on context/documents/instructions) misses.
+_add("instruction_injection", "ignore_user_request_noun", "medium", ["I1", "I1.1"],
+     r"\b(?:ignore|disregard|forget|dismiss)\s+"
+     r"(?:the\s+)?(?:user'?s?|prior|previous|preceding|earlier|above)\s+"
+     r"(?:\w+\s+){0,2}?"
+     r"(?:request|message|email|summary|task)s?\b")
 
 _add("instruction_injection", "instead_do_directive", "high", ["I1", "I1.1"],
      r"\b(?:instead|rather)\s*,?\s*(?:you\s+)?(?:should|must|need\s+to|have\s+to|will|shall)\s+"
@@ -180,31 +194,68 @@ _add("consistency_anomaly", "answer_contradiction", "medium", ["I1", "I1.5"],
      r"regardless\s+of\s+(?:the|what)\s+(?:context|documents?|sources?|results?))\b")
 
 
-# ---- Category 6: Hidden Instructions in Structured Data (IM.1) ----
-# JSON/XML/markdown in retrieved docs containing hidden directives.
+# ---- Category 7: Meta-addressed AI reassignment & concealment (I1.1) ----
+# Indirect-injection tells where retrieved data speaks DIRECTLY to the model:
+# (a) addresses the assistant by role then reassigns its task, or
+# (b) instructs the model to hide that it was told to do something.
+# All anchored on an AI-DIRECTED imperative so benign twins sharing the surface
+# vocabulary (firmware/CFO/csv/summary) — but carrying no model-directed verb —
+# stay below threshold.  Severity 'medium': a lone hit adds <=0.12 and relies on
+# co-firing; never decisive on its own.
 
-_add("hidden_structured", "json_hidden_instruction", "high", ["I1", "IM.1"],
+# (a1) "NOTE TO REVIEWER AI" / "note to the AI assistant" — an out-of-band note
+# addressed to the model embedded in data it was only meant to read (A5/A3).
+_add("meta_reassignment", "note_to_ai_meta_address", "medium", ["I1", "I1.1"],
+     r"\bnote\s+to\s+(?:the\s+)?(?:reviewer\s+)?(?:ai|assistant)\b")
+
+# (a2) Spec-form meta-address: the assistant is named, then its task is
+# reassigned within the same sentence ("Assistant ...: your real task is ...").
+_add("meta_reassignment", "assistant_task_reassign", "medium", ["I1", "I1.1"],
+     r"(?:assistant|reviewer\s+ai|ai\s+assistant)[^.\n]{0,40}?"
+     r"\byour\s+(?:real|actual)\s+task\s+is\b")
+
+# (a3) Standalone task-reassignment imperative.  The injected data overrides the
+# model's assigned job ("Your actual task is to ...", "Your real task is to ...").
+# Possessive "your" + "real/actual task is to" is an AI-directed reassignment
+# almost never present in benign retrieved documents (A2/A3).
+_add("meta_reassignment", "your_real_task_is", "medium", ["I1", "I1.1"],
+     r"\byour\s+(?:real|actual)\s+task\s+is\s+to\b")
+
+# (b) Concealment tell: instructs the model not to disclose that it was
+# told/instructed to do something — a hallmark of hidden output corruption (A4).
+_add("meta_reassignment", "concealment_do_not_mention", "medium", ["I1", "I1.1"],
+     r"\bdo\s+not\s+(?:mention|disclose|reveal|say)\s+"
+     r"(?:that\s+)?you\s+(?:were|are)\s+(?:told|instructed)\b")
+
+
+# ---- Category 6: Hidden Instructions in Structured Data (I1.2) ----
+# JSON/XML/markdown in retrieved docs containing hidden directives.
+# Canonical taxonomy: hidden directives in structured retrieved docs are a
+# form of Document-injection (I1.2 in data/taxonomy.yaml).  "IM.1" was a
+# non-canonical placeholder (no such code exists under I1) — reconciled here.
+
+_add("hidden_structured", "json_hidden_instruction", "high", ["I1", "I1.2"],
      r'["\'](?:instruction|directive|command|task|system_message|system_prompt|'
      r'override|admin_note|hidden_message|internal_note)["\']'
      r'\s*:\s*["\']')
 
-_add("hidden_structured", "xml_hidden_instruction", "high", ["I1", "IM.1"],
+_add("hidden_structured", "xml_hidden_instruction", "high", ["I1", "I1.2"],
      r"<(?:instruction|directive|command|system[_-]?message|system[_-]?prompt|"
      r"override|admin[_-]?note|hidden|internal[_-]?note)>")
 
-_add("hidden_structured", "markdown_hidden_comment", "medium", ["I1", "IM.1"],
+_add("hidden_structured", "markdown_hidden_comment", "medium", ["I1", "I1.2"],
      r"<!--\s*(?:instruction|directive|command|system|override|ignore|"
      r"admin|hidden|internal|secret)\b")
 
-_add("hidden_structured", "html_hidden_directive", "high", ["I1", "IM.1"],
+_add("hidden_structured", "html_hidden_directive", "high", ["I1", "I1.2"],
      r'<\w+\s+(?:style\s*=\s*["\']display\s*:\s*none|'
      r'hidden|aria-hidden\s*=\s*["\']true)["\']?\s*>'
      r'\s*(?:ignore|disregard|override|new\s+instructions?|instead)\b')
 
-_add("hidden_structured", "data_attribute_instruction", "medium", ["I1", "IM.1"],
+_add("hidden_structured", "data_attribute_instruction", "medium", ["I1", "I1.2"],
      r'data-(?:instruction|directive|command|prompt|message|note)\s*=\s*["\']')
 
-_add("hidden_structured", "yaml_hidden_field", "medium", ["I1", "IM.1"],
+_add("hidden_structured", "yaml_hidden_field", "medium", ["I1", "I1.2"],
      r"(?:^|\n)\s*(?:instruction|directive|command|system_message|"
      r"system_prompt|override|admin_note|hidden_message|internal_note)\s*:")
 
