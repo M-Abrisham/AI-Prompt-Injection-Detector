@@ -16,7 +16,8 @@ Audit-ready, two-dimensional mapping of Na0S's internal injection taxonomy to th
 | **Coverage source of truth** | `scripts/technique_analysis.py` → `benchmarks/results/technique_analysis.json` (schema v2; threshold **0.55**; measured 2026-06-17, uncommitted). **Not** the per-row "samples" columns and **not** `BENCHMARK_RESULTS.md` (whose 100% D8 row is known-mislabeled and unfixed). |
 | **Source catalog — MITRE ATLAS** | v2026.05 (format-version 6.0.0; collection 2026.05; modified 2026-05-27) — https://github.com/mitre-atlas/atlas-data/releases/download/v2026.05/ATLAS-2026.05.yaml |
 | **Source catalog — OWASP** | OWASP Top 10 for LLM Applications 2025 (`LLMxx:2025`) — https://genai.owasp.org/llm-top-10/ |
-| **Internal taxonomy** | `data/taxonomy.yaml` v1.0 — 29 categories, 276 techniques. |
+| **Internal taxonomy** | `data/taxonomy.yaml` v1.0 — 31 categories, 284 techniques. (2026-06-22: added the mid-level `E1` exfiltration key so the live `v0.1/` prompt-exfiltration scenarios filed under bare `attack_category: E1` validate; `BEN` confirmed canonical.) |
+| **ATLAS anchoring** | The weekly threat-intel harvester is **taxonomy-aware and ATLAS-anchored**: `data/threat_intel_snapshots/atlas_to_na0s_mapping.yaml` (human-reviewed, 42 entries) maps input/output-boundary ATLAS techniques → canonical Na0S codes; `na0s.eval.harvest.tag_discovery` tags each discovery record (ATLAS id wins, else conservative keyword table; never invents, never drops). Attacker-side ATLAS techniques are deliberately unmapped. Offline/keyless. |
 | **Review cadence** | Quarterly + re-run the harness; upgrade `estimated` rows to `measured` as the holdout grows. |
 
 **Harness headline (measured @ 0.55):** overall malicious recall **57.1%** (194/340, CI 51.8–62.2) · overall benign FPR **1.2%** (6/500, CI 0.6–2.6) · overall evasion **47.6%** (270/567). The recall gate **fails** on C1, D2, E1, E2, O1, P1.
