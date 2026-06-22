@@ -205,9 +205,10 @@ class TestTrainingPipeline:
     """Test training with tiny synthetic data (no network, no large files)."""
 
     def test_train_with_synthetic_data(self, tmp_path):
-        # Skip if sklearn not available
+        # Skip if sklearn not available. joblib is no longer required: the
+        # corpus model is now persisted as a plain pickle via the canonical
+        # na0s.integrity.safe_pickle.safe_dump (3-tier integrity), not joblib.
         pytest.importorskip("sklearn")
-        pytest.importorskip("joblib")
 
         from scripts.train_worm_classifier import (
             _load_jsonl,
@@ -249,13 +250,18 @@ class TestTrainingPipeline:
         assert len(X_train) + len(X_test) == 10
 
         # Train and evaluate with nonexistent HF dir (should still work)
-        model_path = str(tmp_path / "test_model.joblib")
+        model_path = str(tmp_path / "test_model.pkl")
         from na0s.worm_detector import _WormCorpusClassifier
 
         classifier = _WormCorpusClassifier(model_path=model_path)
-        classifier.train(X_train, y_train)
+        # Keyless host: safe_dump emits a one-shot UserWarning about the missing
+        # NA0S_PICKLE_KEY and writes a plain SHA-256 sidecar.
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            classifier.train(X_train, y_train)
 
-        # Model should exist now
+        # Model should exist now, with its SHA-256 integrity sidecar.
         assert os.path.isfile(model_path)
         assert os.path.isfile(model_path + ".sha256")
 
