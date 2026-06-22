@@ -46,6 +46,13 @@ try:
 except ImportError:
     _HAS_TRANSFORMERS = False
 
+# Pure-python (no transformers dep): hardened from_pretrained kwargs
+# (use_safetensors / trust_remote_code=False / pinned revision).
+from na0s.integrity.hf_loading import (
+    hf_from_pretrained_kwargs,
+    hf_tokenizer_kwargs,
+)
+
 # ---------------------------------------------------------------------------
 # Label mapping — Prompt-Guard-2-22M uses integer label ids
 # ---------------------------------------------------------------------------
@@ -181,9 +188,13 @@ class PromptGuardClassifier:
                     "Loading Prompt Guard model '%s' on device '%s'...",
                     self._model_name, self._device,
                 )
-                self._tokenizer = AutoTokenizer.from_pretrained(self._model_name)
+                self._tokenizer = AutoTokenizer.from_pretrained(
+                    self._model_name,
+                    **hf_tokenizer_kwargs(self._model_name),
+                )
                 self._model = AutoModelForSequenceClassification.from_pretrained(
                     self._model_name,
+                    **hf_from_pretrained_kwargs(self._model_name),
                 ).to(self._device)
                 self._model.eval()
                 logger.info("Prompt Guard model loaded successfully.")
