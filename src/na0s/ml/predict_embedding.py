@@ -55,6 +55,36 @@ from na0s.structural import extract_structural_features
 
 _log = logging.getLogger(__name__)
 
+# Auditable trail for supply-chain integrity decisions (degrade vs. fail-closed).
+_integrity_audit = logging.getLogger("na0s.integrity_audit")
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed gate for the OPTIONAL embedding structural scaler loader.
+# When enabled (NA0S_FAIL_CLOSED truthy), a present-but-tampered
+# embedding_structural_scaler.pkl re-raises the integrity error from safe_load()
+# instead of silently degrading to embedding-only features. A genuinely absent
+# file still degrades (os.path.isfile guard); a TOCTOU FileNotFoundError is
+# treated as absence. Default OFF — mirrors na0s.predict._fail_closed(); kept as
+# a local copy so this module has no import dependency on predict.py.
+# ---------------------------------------------------------------------------
+# Case-insensitive: lowercase the env value before membership test so
+# NA0S_FAIL_CLOSED=YES / =TRUE / =On all enable fail-closed (a security opt-in
+# must never fail open on a stray-case truthy value). Mirrors na0s.predict.
+_FAIL_CLOSED_TRUE = frozenset({"1", "true", "yes", "on"})
+
+
+def _fail_closed() -> bool:
+    """Return True when fail-closed is enabled for this OPTIONAL loader.
+
+    Default OFF (degrade); operators opt in with NA0S_FAIL_CLOSED=1 (or any
+    case-insensitive truthy value: true/yes/on). Empty/unset/0/false → False.
+    Read at call time so tests can monkeypatch the environment without
+    re-importing.
+    """
+    return os.getenv("NA0S_FAIL_CLOSED", "").strip().lower() in _FAIL_CLOSED_TRUE
+
+
 # ---------------------------------------------------------------------------
 # Paths / constants
 # ---------------------------------------------------------------------------
@@ -123,7 +153,26 @@ def _get_cached_embedding_structural_scaler():
             _cached_embedding_structural_scaler = safe_load(
                 EMBEDDING_STRUCTURAL_SCALER_PATH
             )
+        except FileNotFoundError:
+            # TOCTOU: file vanished after the isfile() guard — treat as absence.
+            _log.warning(
+                "Embedding structural scaler missing at %s; degrading.",
+                EMBEDDING_STRUCTURAL_SCALER_PATH,
+            )
+            _cached_embedding_structural_scaler = False
+            return None
         except Exception:
+            # File is PRESENT — an integrity/deserialization failure, not absence.
+            if _fail_closed():
+                # Fail closed: surface the supply-chain failure. Do NOT cache
+                # the False sentinel — leave it None so a corrected artifact can
+                # load on a later retry.
+                _integrity_audit.error(
+                    "Refusing to degrade: embedding structural scaler at %s failed "
+                    "integrity check and NA0S_FAIL_CLOSED is set; re-raising.",
+                    EMBEDDING_STRUCTURAL_SCALER_PATH,
+                )
+                raise
             _log.warning(
                 "Failed to load embedding structural scaler from %s",
                 EMBEDDING_STRUCTURAL_SCALER_PATH,
@@ -188,6 +237,11 @@ def load_models():
     -------
     tuple[SentenceTransformer, estimator]
         ``(embedding_model, classifier)``
+
+    INVARIANT (do not weaken): the classifier ``safe_load`` below is MANDATORY
+    and already fail-closed — an integrity error on a tampered model.pkl
+    propagates uncaught. Never wrap it in a swallowing ``try/except``;
+    NA0S_FAIL_CLOSED governs only the OPTIONAL embedding structural scaler.
     """
     print("Loading embedding model: {0}".format(DEFAULT_EMBEDDING_MODEL))
     embedding_model = load_pinned_sentence_transformer(

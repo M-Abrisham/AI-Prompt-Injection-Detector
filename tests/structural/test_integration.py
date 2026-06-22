@@ -121,6 +121,105 @@ class TestCachedScaler(unittest.TestCase):
         result2 = predict_mod._get_cached_scaler()
         self.assertIsNone(result2)
 
+    def test_scaler_raises_on_tamper_when_fail_closed(self):
+        """With NA0S_FAIL_CLOSED=1, a present-but-tampered scaler RE-RAISES.
+
+        FP-safe / non-hollow: exercises the real loader code path; only the disk
+        read (safe_load) is mocked to raise the same integrity ValueError that
+        safe_load() emits on a SHA mismatch. The loader must NOT swallow it.
+        """
+        import na0s.predict as predict_mod
+
+        predict_mod._cached_scaler = None
+        tamper = ValueError("Integrity check failed for structural_scaler.pkl. "
+                            "File may be tampered.")
+        with patch.dict(os.environ, {"NA0S_FAIL_CLOSED": "1"}), \
+             patch("os.path.isfile", return_value=True), \
+             patch.object(predict_mod, "safe_load", side_effect=tamper):
+            with self.assertRaises(ValueError) as ctx:
+                predict_mod._get_cached_scaler()
+            self.assertIn("Integrity check failed", str(ctx.exception))
+        # Edge case 5: the re-raise must NOT poison the cache with the False
+        # sentinel — a corrected artifact must be able to load on retry.
+        self.assertIsNone(predict_mod._cached_scaler)
+
+    def test_scaler_absent_does_not_raise_when_fail_closed(self):
+        """A genuinely ABSENT optional scaler still degrades even when fail-closed.
+
+        Edge case 1: absence is backward-compat (pre-L3 model), not an integrity
+        violation. The os.path.isfile guard short-circuits before safe_load.
+        """
+        import na0s.predict as predict_mod
+
+        predict_mod._cached_scaler = None
+        with patch.dict(os.environ, {"NA0S_FAIL_CLOSED": "1"}), \
+             patch("os.path.isfile", return_value=False):
+            result = predict_mod._get_cached_scaler()
+        self.assertIsNone(result)
+
+    def test_scaler_degrades_on_tamper_when_flag_off(self):
+        """Explicit: with NA0S_FAIL_CLOSED unset/0, tamper degrades to None.
+
+        Locks the DEFAULT (opt-out) contract so a future change of the default
+        is caught here, not silently.
+        """
+        import na0s.predict as predict_mod
+
+        predict_mod._cached_scaler = None
+        with patch.dict(os.environ, {"NA0S_FAIL_CLOSED": "0"}), \
+             patch("os.path.isfile", return_value=True), \
+             patch.object(predict_mod, "safe_load",
+                          side_effect=ValueError("Integrity check failed")):
+            result = predict_mod._get_cached_scaler()
+        self.assertIsNone(result)
+        self.assertIs(predict_mod._cached_scaler, False)
+
+    def test_fail_closed_flag_is_case_insensitive(self):
+        """NA0S_FAIL_CLOSED parsing is case-insensitive in BOTH loaders.
+
+        A security opt-in must never silently fail OPEN on a stray-case truthy
+        value: ``YES``/``TRUE``/``On`` must enable fail-closed exactly like
+        ``1``. Conversely empty/unset/``0``/``false`` keep the default-OFF
+        (degrade) contract. Asserted against na0s.predict._fail_closed() and
+        the mirrored na0s.ml.predict_embedding._fail_closed().
+        """
+        import importlib.util as _ilu
+        import na0s.predict as predict_mod
+
+        # The mirrored embedding loader lives in na0s.ml.predict_embedding, which
+        # hard-imports the OPTIONAL sentence-transformers at module load. Stub it
+        # if absent so this test exercises the embedding _fail_closed() too —
+        # matching the established pattern in tests/ml/test_l5_structural_concat.py —
+        # without taking a real dependency on the optional package.
+        if ("sentence_transformers" not in sys.modules
+                and _ilu.find_spec("sentence_transformers") is None):
+            _stub = MagicMock()
+            _stub.SentenceTransformer = MagicMock()
+            sys.modules["sentence_transformers"] = _stub
+        import na0s.ml.predict_embedding as embed_mod
+
+        truthy = ["1", "true", "True", "TRUE", "yes", "YES", "Yes",
+                  "on", "On", "ON", " yes ", "True\n"]
+        falsy = ["", "0", "false", "False", "FALSE", "no", "off", "  ", "2"]
+
+        for mod in (predict_mod, embed_mod):
+            for val in truthy:
+                with patch.dict(os.environ, {"NA0S_FAIL_CLOSED": val}):
+                    self.assertTrue(
+                        mod._fail_closed(),
+                        f"{mod.__name__}: {val!r} must enable fail-closed",
+                    )
+            for val in falsy:
+                with patch.dict(os.environ, {"NA0S_FAIL_CLOSED": val}):
+                    self.assertFalse(
+                        mod._fail_closed(),
+                        f"{mod.__name__}: {val!r} must stay default-OFF",
+                    )
+            # Unset entirely → default OFF.
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("NA0S_FAIL_CLOSED", None)
+                self.assertFalse(mod._fail_closed())
+
     def tearDown(self):
         """Reset scaler cache after each test."""
         import na0s.predict as predict_mod

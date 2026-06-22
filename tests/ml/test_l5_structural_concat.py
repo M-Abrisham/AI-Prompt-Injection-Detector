@@ -316,6 +316,50 @@ class TestScalerCacheLocking(unittest.TestCase):
 
         _reset_embedding_structural_scaler_cache()
 
+    def test_cache_raises_on_tamper_when_fail_closed(self):
+        """With NA0S_FAIL_CLOSED=1, a present-but-tampered scaler re-raises.
+
+        Non-hollow: drives the real loader; safe_load is mocked to raise the
+        integrity ValueError. The loader must propagate it, not degrade.
+        """
+        import na0s.predict_embedding as pe
+
+        _reset_embedding_structural_scaler_cache()
+        tamper = ValueError("Integrity check failed for embedding_structural_scaler.pkl. "
+                            "File may be tampered.")
+        with patch.dict(os.environ, {"NA0S_FAIL_CLOSED": "1"}), \
+             patch("os.path.isfile", return_value=True), \
+             patch("na0s.predict_embedding.safe_load", side_effect=tamper):
+            with self.assertRaises(ValueError) as ctx:
+                _get_cached_embedding_structural_scaler()
+            self.assertIn("Integrity check failed", str(ctx.exception))
+        # Edge case 5: re-raise must not poison the cache with the False sentinel.
+        self.assertIsNone(pe._cached_embedding_structural_scaler)
+        _reset_embedding_structural_scaler_cache()
+
+    def test_cache_absent_no_raise_when_fail_closed(self):
+        """An ABSENT scaler still degrades even when fail-closed (edge case 1)."""
+        _reset_embedding_structural_scaler_cache()
+        with patch.dict(os.environ, {"NA0S_FAIL_CLOSED": "1"}), \
+             patch("os.path.isfile", return_value=False):
+            result = _get_cached_embedding_structural_scaler()
+            self.assertIsNone(result)
+        _reset_embedding_structural_scaler_cache()
+
+    def test_cache_degrades_on_tamper_when_flag_off(self):
+        """With the flag unset/0, tamper degrades to None (DEFAULT contract)."""
+        import na0s.predict_embedding as pe
+
+        _reset_embedding_structural_scaler_cache()
+        with patch.dict(os.environ, {"NA0S_FAIL_CLOSED": "0"}), \
+             patch("os.path.isfile", return_value=True), \
+             patch("na0s.predict_embedding.safe_load",
+                   side_effect=ValueError("Integrity check failed")):
+            result = _get_cached_embedding_structural_scaler()
+            self.assertIsNone(result)
+        self.assertIs(pe._cached_embedding_structural_scaler, False)
+        _reset_embedding_structural_scaler_cache()
+
 
 # ---------------------------------------------------------------------------
 # 5. End-to-end predict_embedding with structural concat

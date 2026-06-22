@@ -8,6 +8,7 @@ Validates that:
 - Backward compat: char vectorizer missing -> same behavior as before
 """
 
+import os
 import threading
 import unittest
 from unittest.mock import patch, MagicMock
@@ -243,6 +244,44 @@ class TestCachedCharVectorizer(unittest.TestCase):
                 result = pred._get_cached_char_vectorizer()
             self.assertIsNone(result)
             self.assertIs(pred._cached_char_vectorizer, False)
+        finally:
+            pred._cached_char_vectorizer = old_val
+
+    def test_get_cached_char_vectorizer_raises_when_fail_closed(self):
+        """With NA0S_FAIL_CLOSED=1, a present-but-tampered char vectorizer re-raises.
+
+        Non-hollow: drives the real loader; safe_load is mocked to raise the
+        integrity ValueError. The loader must propagate it, not degrade.
+        """
+        import na0s.predict as pred
+
+        old_val = pred._cached_char_vectorizer
+        try:
+            pred._cached_char_vectorizer = None
+            tamper = ValueError("Integrity check failed for char_tfidf_vectorizer.pkl. "
+                                "File may be tampered.")
+            with patch.dict(os.environ, {"NA0S_FAIL_CLOSED": "1"}), \
+                 patch('os.path.isfile', return_value=True), \
+                 patch.object(pred, 'safe_load', side_effect=tamper):
+                with self.assertRaises(ValueError) as ctx:
+                    pred._get_cached_char_vectorizer()
+                self.assertIn("Integrity check failed", str(ctx.exception))
+            # Edge case 5: re-raise must not poison the cache with False.
+            self.assertIsNone(pred._cached_char_vectorizer)
+        finally:
+            pred._cached_char_vectorizer = old_val
+
+    def test_get_cached_char_vectorizer_absent_no_raise_when_fail_closed(self):
+        """An ABSENT char vectorizer still degrades even when fail-closed (edge case 1)."""
+        import na0s.predict as pred
+
+        old_val = pred._cached_char_vectorizer
+        try:
+            pred._cached_char_vectorizer = None
+            with patch.dict(os.environ, {"NA0S_FAIL_CLOSED": "1"}), \
+                 patch('os.path.isfile', return_value=False):
+                result = pred._get_cached_char_vectorizer()
+            self.assertIsNone(result)
         finally:
             pred._cached_char_vectorizer = old_val
 

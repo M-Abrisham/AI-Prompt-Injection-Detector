@@ -69,6 +69,44 @@ from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Auditable trail for supply-chain integrity decisions (degrade vs. fail-closed).
+_integrity_audit = logging.getLogger("na0s.integrity_audit")
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed gate for the OPTIONAL model loaders (structural scaler, char
+# TF-IDF vectorizer; the embedding structural scaler has its own copy of this
+# helper in ml/predict_embedding.py).
+#
+# When enabled (NA0S_FAIL_CLOSED in the truthy set), a *present but tampered*
+# optional artifact re-raises the integrity error from safe_load() instead of
+# silently degrading to a reduced feature set. A genuinely *absent* file still
+# degrades — that case is handled by the os.path.isfile guard before safe_load
+# is reached, and a TOCTOU FileNotFoundError is treated as absence too.
+#
+# Default is OFF: graceful-degrade-to-None on a tampered OPTIONAL artifact is
+# the historical, intentionally-locked behavior (tests/structural/
+# test_integration.py, tests/test_subword_features.py,
+# tests/ml/test_l5_structural_concat.py). The MANDATORY loaders
+# (_get_cached_models) already fail closed unconditionally and ignore this flag.
+#
+# Boolean gate (no numeric threshold). Read at CALL time so a test can
+# monkeypatch the environment without re-importing the module.
+# Case-insensitive: the env value is lowercased before membership test so
+# NA0S_FAIL_CLOSED=YES / =TRUE / =On all enable fail-closed. A security opt-in
+# must never silently degrade (fail-open) on a stray-case truthy value.
+_FAIL_CLOSED_TRUE = frozenset({"1", "true", "yes", "on"})
+
+
+def _fail_closed() -> bool:
+    """Return True when fail-closed is enabled for the OPTIONAL loaders.
+
+    Default OFF (degrade); operators opt in with NA0S_FAIL_CLOSED=1 (or any
+    case-insensitive truthy value: true/yes/on). Empty/unset/0/false → False.
+    """
+    return os.getenv("NA0S_FAIL_CLOSED", "").strip().lower() in _FAIL_CLOSED_TRUE
+
+
 from .input import layer0_sanitize, register_malicious, quick_normalize_concat
 from .input.timeout import (
     Layer0TimeoutError,
@@ -307,6 +345,12 @@ def _get_cached_models() -> Tuple:
     """Return (vectorizer, model), loading from disk only on first call.
 
     Thread-safe via double-checked locking (check-lock-check pattern).
+
+    INVARIANT (do not weaken): this is a MANDATORY loader and is already
+    fail-closed — ``safe_load`` integrity errors on a tampered model.pkl /
+    tfidf_vectorizer.pkl propagate uncaught. Never wrap these ``safe_load``
+    calls in a ``try/except`` that swallows them; NA0S_FAIL_CLOSED governs only
+    the OPTIONAL loaders, not these.
     """
     global _cached_vectorizer, _cached_model
     if _cached_vectorizer is not None and _cached_model is not None:
@@ -399,7 +443,24 @@ def _get_cached_scaler():
             return None
         try:
             _cached_scaler = safe_load(SCALER_PATH)
+        except FileNotFoundError:
+            # File vanished between the isfile() guard and safe_load (TOCTOU):
+            # treat as absence and degrade, regardless of fail-closed.
+            logger.warning("Structural scaler missing at %s; degrading.", SCALER_PATH)
+            _cached_scaler = False
+            return None
         except Exception:
+            # The file is PRESENT (isfile() passed) — any error here is an
+            # integrity/deserialization signal, not absence.
+            if _fail_closed():
+                # Fail closed: surface the supply-chain failure. Do NOT poison
+                # the cache with the False sentinel — leave it None so a
+                # corrected artifact can load on a later retry.
+                _integrity_audit.error(
+                    "Refusing to degrade: structural scaler at %s failed integrity "
+                    "check and NA0S_FAIL_CLOSED is set; re-raising.", SCALER_PATH
+                )
+                raise
             logger.warning("Failed to load structural scaler from %s", SCALER_PATH)
             _cached_scaler = False
             return None
@@ -431,7 +492,22 @@ def _get_cached_char_vectorizer():
             return None
         try:
             _cached_char_vectorizer = safe_load(CHAR_VECTORIZER_PATH)
+        except FileNotFoundError:
+            # TOCTOU: file vanished after the isfile() guard — treat as absence.
+            logger.warning(
+                "Char TF-IDF vectorizer missing at %s; degrading.", CHAR_VECTORIZER_PATH
+            )
+            _cached_char_vectorizer = False
+            return None
         except Exception:
+            # File is PRESENT — an integrity/deserialization failure, not absence.
+            if _fail_closed():
+                _integrity_audit.error(
+                    "Refusing to degrade: char TF-IDF vectorizer at %s failed "
+                    "integrity check and NA0S_FAIL_CLOSED is set; re-raising.",
+                    CHAR_VECTORIZER_PATH,
+                )
+                raise
             logger.warning("Failed to load char TF-IDF vectorizer from %s", CHAR_VECTORIZER_PATH)
             _cached_char_vectorizer = False
             return None
