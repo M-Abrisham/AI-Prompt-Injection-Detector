@@ -1,0 +1,73 @@
+name: Architecture & Hygiene
+
+# Machine-checked package-layering contract (import-linter) plus dead-code
+# (vulture) and dependency-hygiene (deptry) gates. All three are keyless
+# DEV/CI-only OSS tools — they are NOT runtime dependencies and need no API
+# key. They are authored to pass on `main` today and gate future drift:
+# a new layering back-edge, a new import of a deprecated layerN shim, dead
+# code, or an undeclared dependency turns this workflow red.
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/*'
+      - 'feat/*'
+      - 'fix/*'
+      - 'refactor/*'
+      - 'hardening/*'
+      - 'ci/*'
+      - 'docs/*'
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-arch-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-arch-
+            ${{ runner.os }}-pip-
+
+      # Editable install (mirrors ci.yml) so import-linter/grimp can resolve
+      # the `na0s` package. grimp parses the AST statically, so the heavy
+      # optional deps (torch, faiss, ...) do NOT need to import successfully.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # 1) Package-layering contract. Reads [tool.importlinter] from
+      #    pyproject.toml: a `layers` contract (high imports low, never the
+      #    reverse), an `independence` contract for standalone subsystems, and
+      #    a `forbidden` contract banning new imports of the deprecated
+      #    layer0/1/2/15/16 shims.
+      - name: import-linter (package layering contract)
+        run: lint-imports --verbose
+
+      # 2) Dead-code detector. min-confidence 80 + .vulture_whitelist.py
+      #    (entrypoints / optional-dep fallbacks / framework callbacks /
+      #    branch-owned WIP are whitelisted with pointers).
+      - name: vulture (dead-code)
+        run: vulture src/na0s .vulture_whitelist.py --min-confidence 80
+
+      # 3) Dependency hygiene. Config in [tool.deptry] reconciles deptry's
+      #    static scan with this package's lazy/optional-extra import design.
+      - name: deptry (dependency hygiene)
+        run: deptry src

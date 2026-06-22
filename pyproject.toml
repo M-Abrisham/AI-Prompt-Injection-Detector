@@ -107,6 +107,10 @@ dev = [
     "langdetect>=0.1.1",
     "pytest>=7.0",
     "PyYAML>=6.0.1,<7",
+    # Architecture / hygiene gates (keyless dev-only OSS, never shipped at runtime).
+    "import-linter>=2.0,<3",
+    "vulture>=2.10,<3",
+    "deptry>=0.20,<1",
 ]
 
 [project.urls]
@@ -127,3 +131,156 @@ testpaths = ["tests"]
 [tool.coverage.run]
 source = ["na0s"]
 omit = ["scripts/*", "tests/*"]
+
+# ===========================================================================
+# Architecture & hygiene gates (DEV/CI only — never imported by the runtime).
+#
+# These three tools are keyless OSS and live exclusively in the `dev` extra.
+# They are NOT runtime dependencies and require no API key.
+#
+#   import-linter  — machine-checks the package layering contract
+#   vulture        — dead-code detector
+#   deptry         — dependency-hygiene checker
+#
+# All three are authored to pass on `main` TODAY. They gate *future* drift:
+# a new back-edge, a new import of a deprecated shim, dead code, or an
+# undeclared dependency turns CI red. Run locally with:
+#
+#   lint-imports
+#   vulture src/na0s .vulture_whitelist.py --min-confidence 80
+#   deptry src
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# import-linter — package layering contract
+#
+# The contracts below were derived from the REAL import graph on `main`
+# (grimp build_graph), not a guessed design. Two facts shaped them:
+#
+#  1. detectors / rules / validation are a true import CYCLE (an SCC):
+#       rules.rules_registry  -> detectors.{recon,privacy_probe}
+#       detectors.*           -> rules.{result,context}
+#       validation.positive   -> rules ; detectors.multi_turn -> validation
+#     They therefore CANNOT be split across layers. They are modeled as one
+#     cohesive tier using the ':' (non-independent) operator, which permits
+#     intra-tier imports while still forbidding the tier from importing any
+#     layer above it.
+#
+#  2. predict.py / cascade.py are orchestrator HUBS that import almost the
+#     whole stack. A handful of leaf modules import a hub back (e.g.
+#     detectors.visual_injection -> predict). Those 4 specific back-edges are
+#     ignored so the layers contract reflects the intended dependency
+#     direction rather than the transitive hub cycle. Each ignored edge is an
+#     existing, known seam — not a license to add more.
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_packages = ["na0s"]
+include_external_packages = false
+
+[[tool.importlinter.contracts]]
+name = "Semantic detection layering (high imports low, never the reverse)"
+type = "layers"
+# Listed HIGH -> LOW. A higher layer may import lower layers; a lower layer
+# may never import a higher one. '|' = independent siblings (may NOT import
+# each other); ':' = cohesive tier (may import each other).
+layers = [
+    "na0s.output",
+    "na0s.conversation",
+    "na0s.fusion | na0s.judge | na0s.eval | na0s.worm",
+    "na0s.dataset | na0s.ml",
+    "na0s.integrity | na0s.structural",
+    "na0s.detectors : na0s.rules : na0s.validation",
+    "na0s.input | na0s.obfuscation | na0s.threat_intel | na0s.models",
+]
+# Existing back-edges through the predict/cascade orchestrator hubs. These are
+# the only sanctioned upward seams; the contract gates any NEW one.
+ignore_imports = [
+    "na0s.detectors.visual_injection -> na0s.predict",
+    "na0s.fusion.ensemble -> na0s.predict",
+    "na0s.conversation.scan_bridge -> na0s.predict",
+    "na0s.output.propagation -> na0s.predict",
+]
+
+[[tool.importlinter.contracts]]
+name = "Standalone subsystems are independent"
+type = "independence"
+# These subsystems must not import one another (they only depend on top-level
+# core modules / external libs). Keeps optional features decoupled.
+modules = [
+    "na0s.rag",
+    "na0s.canary",
+    "na0s.parsers",
+    "na0s.agents",
+]
+ignore_imports = [
+    "na0s.agents.input_guard -> na0s.predict",
+]
+
+[[tool.importlinter.contracts]]
+name = "No new imports of the deprecated layerN shims"
+type = "forbidden"
+# Bans any first-party module from importing the deprecated sys.modules-alias
+# shims. ZERO current violations in src/ (verified on main) — this gates the
+# numbered->semantic rename so new code can't re-grow a dependency on the old
+# layer0/1/2/15/16 names. Tests still use the shims by design (test suite is
+# not scanned by import-linter, which analyzes the `na0s` package only).
+source_modules = [
+    "na0s.input", "na0s.rules", "na0s.obfuscation", "na0s.threat_intel",
+    "na0s.conversation", "na0s.output", "na0s.structural", "na0s.validation",
+    "na0s.fusion", "na0s.dataset", "na0s.eval", "na0s.integrations",
+    "na0s.canary", "na0s.detectors", "na0s.judge", "na0s.ml", "na0s.rag",
+    "na0s.worm", "na0s.parsers", "na0s.integrity", "na0s.agents", "na0s.models",
+    "na0s.predict", "na0s.cascade", "na0s.config", "na0s.cli", "na0s.scan_result",
+]
+forbidden_modules = [
+    "na0s.layer0", "na0s.layer1", "na0s.layer2", "na0s.layer15", "na0s.layer16",
+]
+
+# ---------------------------------------------------------------------------
+# vulture — dead-code detector
+#
+# min-confidence = 80 is calibrated against the real tree: confidence 60
+# yields ~385 reports (every unused-looking *assignment*, including framework
+# callback args and the in-flight rag_poison_weight); confidence 80 yields 13
+# high-signal reports (100%-confidence dead locals + 90%-confidence unused
+# imports). 80 keeps the gate actionable without drowning it in noise.
+# The whitelist file documents intentional "unused" names (entrypoints,
+# plugin-registered hooks, branch-owned WIP).
+# ---------------------------------------------------------------------------
+[tool.vulture]
+min_confidence = 80
+paths = ["src/na0s", ".vulture_whitelist.py"]
+sort_by_size = true
+
+# ---------------------------------------------------------------------------
+# deptry — dependency hygiene
+#
+# Config (not src edits) reconciles deptry's static scan with this package's
+# intentional design: optional features are lazily imported under
+# try/except ImportError and declared in optional extras under their PyPI
+# names. package_module_name_map resolves PyPI-name -> import-name; the
+# per-rule ignores cover modules supplied by optional extras / transitive
+# deps that deptry cannot statically attribute. NOTE: these are dependency
+# *declarations*, not code changes — no src churn (per task constraint).
+# ---------------------------------------------------------------------------
+[tool.deptry]
+known_first_party = ["na0s"]
+optional_dependencies_dev_groups = ["dev"]
+
+[tool.deptry.package_module_name_map]
+pymupdf = ["fitz"]
+python-docx = ["docx"]
+python-pptx = ["pptx"]
+sentence-transformers = ["sentence_transformers", "torch", "transformers"]
+faiss-cpu = ["faiss"]
+
+[tool.deptry.per_rule_ignores]
+# DEP001 (missing): modules provided by optional extras / not pip-installed in
+# the CI base, all imported under try/except ImportError guards.
+DEP001 = ["pdfplumber", "PyPDF2", "pytesseract", "re2", "lxml", "olefile", "oletools", "xlrd", "claude_agent_sdk", "openclaw", "redis"]
+# DEP002 (declared-but-unused): optional-extra + data-pipeline deps used only
+# via guarded/lazy imports that deptry's static scan does not see.
+DEP002 = ["datasets", "huggingface-hub", "cleanlab", "datasketch", "dvc", "tqdm", "pyarrow", "easyocr", "Pillow", "striprtf", "openai", "groq", "langdetect"]
+# DEP003 (transitive): pulled transitively by declared deps (sklearn->scipy/joblib)
+# or by optional integrations.
+DEP003 = ["scipy", "joblib", "redis", "cryptography", "openclaw", "lxml"]

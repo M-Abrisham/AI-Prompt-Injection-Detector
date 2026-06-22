@@ -1,4 +1,4 @@
-.PHONY: install test lint bench bench-fast build clean publish help test-fast format evaluate-buffs dashboard docker-build docker-test docker-eval garak pyrit rainbow recall-harness recall-gate
+.PHONY: install test lint arch bench bench-fast build clean publish help test-fast format evaluate-buffs dashboard docker-build docker-test docker-eval garak pyrit rainbow recall-harness recall-gate
 
 PYTHON ?= python3
 PYTEST_ARGS ?= -v
@@ -16,6 +16,11 @@ test:  ## Run tests with coverage
 lint:  ## Run flake8 linter
 	$(PYTHON) -m flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
 	$(PYTHON) -m flake8 src/ tests/ --count --exit-zero --max-complexity=15 --max-line-length=120 --statistics
+
+arch:  ## Run architecture & hygiene gates (import-linter, vulture, deptry)
+	$(PYTHON) -m importlinter.cli lint-imports
+	$(PYTHON) -m vulture src/na0s .vulture_whitelist.py --min-confidence 80
+	$(PYTHON) -m deptry src
 
 bench:  ## Run full benchmark suite
 	$(PYTHON) scripts/benchmark.py --dataset all
