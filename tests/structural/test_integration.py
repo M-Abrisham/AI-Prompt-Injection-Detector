@@ -117,20 +117,43 @@ class TestCachedScaler(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    def test_scaler_returns_none_after_load_failure(self):
-        """If safe_load fails, returns None and caches the failure."""
+    def test_scaler_present_but_unloadable_fails_loud_and_does_not_poison(self):
+        """A PRESENT scaler whose safe_load raises a non-FileNotFoundError
+        (integrity/tamper/corruption) is a real bundle problem: it must fail
+        loud (re-raise) and must NOT cache the failure, so a transient failure
+        is retried rather than permanently poisoning the process to word-only
+        features. The only graceful-skip case is artifact-absent
+        (FileNotFoundError / file missing)."""
         import na0s.predict as predict_mod
 
         predict_mod._cached_scaler = None
 
         with patch("os.path.isfile", return_value=True), \
-             patch.object(predict_mod, "safe_load", side_effect=RuntimeError("hash mismatch")):
+             patch.object(predict_mod, "safe_load",
+                          side_effect=RuntimeError("hash mismatch")):
+            with self.assertRaises(RuntimeError):
+                predict_mod._get_cached_scaler()
+
+        # Failure must NOT be cached (no permanent poison).
+        self.assertIsNone(predict_mod._cached_scaler)
+
+    def test_scaler_unsigned_present_is_backward_compat(self):
+        """A present-but-unsigned scaler (safe_load raises FileNotFoundError:
+        no integrity source) is a legitimate backward-compat absence: cache
+        False and return None (graceful skip), same as file-not-present."""
+        import na0s.predict as predict_mod
+
+        predict_mod._cached_scaler = None
+
+        with patch("os.path.isfile", return_value=True), \
+             patch.object(predict_mod, "safe_load",
+                          side_effect=FileNotFoundError("no integrity source")):
             result = predict_mod._get_cached_scaler()
 
         self.assertIsNone(result)
-        # Second call should also return None (cached)
-        result2 = predict_mod._get_cached_scaler()
-        self.assertIsNone(result2)
+        self.assertIs(predict_mod._cached_scaler, False)
+        # Cached: a second call returns None without re-invoking safe_load.
+        self.assertIsNone(predict_mod._get_cached_scaler())
 
     def tearDown(self):
         """Reset scaler cache after each test."""

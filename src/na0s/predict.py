@@ -283,6 +283,12 @@ _cached_vectorizer = None
 _cached_model = None
 _model_cache_lock = threading.Lock()
 
+# F-AR8 Finding A: process-wide flag so the load-time feature-width
+# reconciliation (word + char + structural vs model.n_features_in_) runs
+# exactly once per process, not on every request. Guarded by the existing
+# _model_cache_lock (no separate lock).
+_dimensions_validated = False
+
 # Process-wide flag so the sklearn version-mismatch notice is logged at most
 # once. Avoids spamming the log on every cold start across forked workers
 # that re-import this module.
@@ -366,6 +372,14 @@ def _get_cached_models() -> Tuple:
             except Exception:
                 pass
             _sklearn_version_logged = True
+        # F-AR8 Finding A: reconcile the assembled feature width against the
+        # loaded model exactly once, at the single shared chokepoint both
+        # predict() and cascade reach (_get_cached_models). Inside the lock so
+        # the once-only flag is set atomically.
+        global _dimensions_validated
+        if not _dimensions_validated:
+            _validate_feature_dimensions(_cached_vectorizer, _cached_model)
+            _dimensions_validated = True
     return _cached_vectorizer, _cached_model
 
 
@@ -416,10 +430,28 @@ def _get_cached_scaler():
             return None
         try:
             _cached_scaler = safe_load(SCALER_PATH)
-        except Exception:
-            logger.warning("Failed to load structural scaler from %s", SCALER_PATH)
+        except FileNotFoundError:
+            # Present .pkl but no integrity source (unsigned / pre-sidecar) ->
+            # legit backward-compat absence, same class as file-not-present.
+            # safe_load raises FileNotFoundError from _resolve_expected_hash when
+            # no expected hash is available. Cache False (skip the feature).
+            logger.warning(
+                "No integrity source for structural scaler at %s; "
+                "treating as absent (backward compat).", SCALER_PATH)
             _cached_scaler = False
             return None
+        except Exception:
+            # Present-but-unloadable (integrity/tamper ValueError, corrupt magic,
+            # partial read during a deploy swap): a real bundle/integrity problem.
+            # Do NOT cache the failure — a transient partial read must be retried
+            # on the next call, not permanently poisoned to word-only features.
+            # Log at error and re-raise (fail-loud, consistent with _transform's
+            # F-AR8 contract and the integrity module). _cached_scaler stays None
+            # so the next call retries.
+            logger.error(
+                "structural scaler present at %s but failed to load "
+                "(integrity/corruption) - failing loud", SCALER_PATH)
+            raise
     return _cached_scaler
 
 
@@ -448,11 +480,101 @@ def _get_cached_char_vectorizer():
             return None
         try:
             _cached_char_vectorizer = safe_load(CHAR_VECTORIZER_PATH)
-        except Exception:
-            logger.warning("Failed to load char TF-IDF vectorizer from %s", CHAR_VECTORIZER_PATH)
+        except FileNotFoundError:
+            # Present .pkl but no integrity source (unsigned / pre-sidecar) ->
+            # legit backward-compat absence, same class as file-not-present.
+            logger.warning(
+                "No integrity source for char TF-IDF vectorizer at %s; "
+                "treating as absent (backward compat).", CHAR_VECTORIZER_PATH)
             _cached_char_vectorizer = False
             return None
+        except Exception:
+            # Present-but-unloadable (integrity/tamper ValueError, corrupt magic,
+            # partial read during a deploy swap): a real bundle/integrity problem.
+            # Do NOT cache the failure — a transient partial read must be retried
+            # on the next call. Log at error and re-raise (fail-loud, consistent
+            # with _transform's F-AR8 contract). _cached_char_vectorizer stays
+            # None so the next call retries.
+            logger.error(
+                "char TF-IDF vectorizer present at %s but failed to load "
+                "(integrity/corruption) - failing loud", CHAR_VECTORIZER_PATH)
+            raise
     return _cached_char_vectorizer
+
+
+def _validate_feature_dimensions(vectorizer, model):
+    """F-AR8 Finding A: reconcile the assembled feature width with the model.
+
+    The bundle's four components (word vectorizer, optional char vectorizer,
+    optional structural scaler, classifier) are loaded by independent cached
+    loaders with no cross-check. A missing/stale/mismatched artifact otherwise
+    only surfaces as a cryptic per-request ``ValueError: X has N features`` deep
+    inside ``model.predict`` — not at load, and not naming the offending
+    component. This computes the expected assembled width and fails loud at load,
+    naming which component is missing/extra.
+
+    The structural count is ``len(FEATURE_NAMES)`` (the canonical structural
+    feature ordering, src/na0s/structural/features.py) — NOT a magic constant.
+
+    Skips cleanly (no raise) when the model has no usable ``n_features_in_``
+    (non-sklearn / mock model) so the backward-compat / injected-model paths and
+    the ~50 cached-path tests are unaffected.
+    """
+    n_features = getattr(model, "n_features_in_", None)
+    if n_features is None:
+        # Non-sklearn / mock model with no width to reconcile — backward compat.
+        return
+
+    expected = len(vectorizer.get_feature_names_out())
+
+    char_vec = _get_cached_char_vectorizer()
+    if char_vec is not None:
+        expected += len(char_vec.get_feature_names_out())
+
+    scaler = _get_cached_scaler()
+    structural_count = 0
+    if scaler is not None and _HAS_STRUCTURAL_FEATURES:
+        # Import lazily so a no-structural build stays importable.
+        from .structural import FEATURE_NAMES
+        structural_count = len(FEATURE_NAMES)
+        expected += structural_count
+
+    if expected == n_features:
+        return
+
+    delta = n_features - expected
+    # Determine the structural count even when the scaler is absent, so the
+    # "missing structural scaler" message is accurate against a structural model.
+    if _HAS_STRUCTURAL_FEATURES:
+        from .structural import FEATURE_NAMES as _FN
+        expected_structural = len(_FN)
+    else:
+        expected_structural = None
+
+    if scaler is None and expected_structural is not None and delta == expected_structural:
+        component = (
+            "structural scaler artifact missing/not loaded "
+            f"(model expects {expected_structural} structural features; "
+            "structural_scaler.pkl absent or unloadable)"
+        )
+    elif char_vec is None and delta > 0:
+        component = (
+            f"char vectorizer artifact missing ({delta} char features "
+            "expected by the model but no char vectorizer loaded)"
+        )
+    else:
+        component = (
+            "word vocabulary width mismatch (assembled feature width does not "
+            "match the model; word vectorizer vocab is likely stale/wrong)"
+        )
+
+    msg = (
+        "F-AR8 feature-contract violation: assembled feature width "
+        f"{expected} != model.n_features_in_ {n_features} (delta {delta}). "
+        f"Cause: {component}."
+    )
+    logger.error(msg)
+    raise ValueError(msg)
 
 
 def _transform(text, vectorizer, scaler=None, char_vectorizer=None):
@@ -485,6 +607,28 @@ def _transform(text, vectorizer, scaler=None, char_vectorizer=None):
             raise
 
     # Layer 3: structural features (optional) — same fail-loud contract.
+    # Backward-compat skip is the `scaler is None` case (pre-L3 bundle).
+    # F-AR8 Finding B: a PROVIDED scaler (structural_scaler.pkl shipped, so the
+    # model expects the structural columns) combined with a missing structural
+    # module (_HAS_STRUCTURAL_FEATURES False) cannot produce those columns —
+    # silently skipping them would build an under-width vector and
+    # silently-wrong scores. Fail loud instead of degrading.
+    if scaler is not None and not _HAS_STRUCTURAL_FEATURES:
+        # FEATURE_NAMES may itself be unavailable (the same import that set the
+        # flag False); fall back to a generic count phrase so the fail-loud
+        # message is never masked by a secondary ImportError.
+        try:
+            from .structural import FEATURE_NAMES
+            n_struct = str(len(FEATURE_NAMES))
+        except ImportError:
+            n_struct = "expected"
+        msg = (
+            "structural scaler artifact provided but the structural feature "
+            f"module failed to import; this build cannot produce the {n_struct} "
+            "structural columns the model expects (F-AR8 fail-loud)"
+        )
+        logger.error(msg)
+        raise RuntimeError(msg)
     if scaler is not None and _HAS_STRUCTURAL_FEATURES:
         try:
             struct_arr = extract_structural_features_batch([text])
