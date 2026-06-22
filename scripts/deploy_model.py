@@ -20,7 +20,6 @@ import argparse
 import ast
 import hashlib
 import os
-import re
 import shutil
 import sys
 from datetime import datetime
@@ -52,16 +51,30 @@ def _parse_known_hashes(content):
     """Extract the existing KNOWN_HASHES dict from *content* (init source).
 
     Returns a ``{filename: digest}`` dict, or ``{}`` if no parseable
-    KNOWN_HASHES block is found. Parsing uses ``ast.literal_eval`` on the
-    captured dict literal — safe (no code execution) and exact — so that
-    bundled-but-not-copied entries (e.g. model_embedding.pkl) can be
-    preserved across a deploy that only re-emits some files.
+    KNOWN_HASHES block is found. Uses the SAME stdlib ``ast`` approach as the
+    rewriter (:func:`_rewrite_known_hashes`): :func:`ast.parse` the module,
+    reuse :func:`_find_known_hashes_assign` to locate the assignment, and
+    :func:`ast.literal_eval` the assignment's **value node** directly — no
+    regex brace-matching. The old non-greedy regex (``\\{.*?\\}``) truncated at
+    the first inner ``}`` (e.g. a comment or a future structured value), which
+    made ``literal_eval`` fail → this returned ``{}`` → preserve-and-merge
+    silently DROPPED every bundled entry. Operating on the AST value node makes
+    inner braces irrelevant (none are ever counted).
+
+    Fail-safe contract (unchanged): return ``{}`` — never raise — when *content*
+    does not parse, has no ``KNOWN_HASHES`` assignment, or the value is not a
+    str→str dict; only ``(ValueError, SyntaxError)`` are caught (no bare
+    ``except``), so this never executes code from the init source.
     """
-    match = re.search(r"KNOWN_HASHES\s*=\s*(\{.*?\})", content, re.DOTALL)
-    if not match:
+    try:
+        tree = ast.parse(content)
+    except (ValueError, SyntaxError):
+        return {}
+    node = _find_known_hashes_assign(tree)
+    if node is None:
         return {}
     try:
-        value = ast.literal_eval(match.group(1))
+        value = ast.literal_eval(node.value)
     except (ValueError, SyntaxError):
         return {}
     if not isinstance(value, dict):
@@ -72,6 +85,131 @@ def _parse_known_hashes(content):
         for k, v in value.items()
         if isinstance(k, str) and isinstance(v, str)
     }
+
+
+def _find_known_hashes_assign(tree):
+    """Return the ``ast.Assign`` node for ``KNOWN_HASHES = {...}`` or None.
+
+    Walks the parsed module looking for an assignment whose (single) target
+    is ``Name(id="KNOWN_HASHES")``.  Returns ``None`` gracefully when no such
+    assignment exists, so the caller can warn-and-exit-0 for the absent-block
+    case rather than raising ``StopIteration``/``KeyError``.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id == "KNOWN_HASHES":
+                return node
+    return None
+
+
+def _render_known_hashes(new_hashes):
+    """Render the deterministic ``KNOWN_HASHES = {...}`` literal text."""
+    entries = ",\n".join(
+        f'    "{fname}": "{digest}"'
+        for fname, digest in sorted(new_hashes.items())
+    )
+    return "KNOWN_HASHES = {\n" + entries + ",\n}"
+
+
+def _rewrite_known_hashes(content, new_hashes):
+    """AST-locate the ``KNOWN_HASHES`` assignment and rewrite it in *content*.
+
+    Rather than a brace-fragile regex (``KNOWN_HASHES\\s*=\\s*\\{[^}]*\\}``,
+    which truncates at the first inner ``}`` — e.g. a ``# {…}`` comment or a
+    future nested literal — and silently emits invalid Python), this parses
+    *content* with :func:`ast.parse`, finds the ``KNOWN_HASHES`` assignment
+    node, and splices a freshly-rendered literal over the **whole assignment
+    statement's** source span (``lineno/col_offset`` .. ``end_lineno/
+    end_col_offset``).  Brace counts inside the literal are irrelevant because
+    no braces are ever counted.
+
+    Returns one of:
+      * ``(content, "absent")``  — no ``KNOWN_HASHES`` assignment found
+        (caller warns + exits 0);
+      * ``(updated, "ok")``      — rewrite succeeded AND the result was
+        verified: ``ast.parse(updated)`` parses, and re-extracting the new
+        ``KNOWN_HASHES`` value and ``ast.literal_eval``-ing it round-trips to
+        ``new_hashes``;
+      * ``(content, "error")``   — *content* does not parse, the rewritten
+        module does not parse, or the round-trip verification does not match.
+        The caller MUST fail closed (restore any backup, non-zero exit) and
+        MUST NOT write — the original file is never overwritten with something
+        that does not parse.
+
+    This is a pure function: it performs NO I/O and never calls ``sys.exit``,
+    so the caller owns the backup / restore / exit policy.
+
+    ``libcst`` would give a formatting-preserving codemod, but it is not a
+    dependency of this repo; stdlib ``ast`` is used so the deploy script grows
+    no new third-party requirement.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        print(f"ERROR: existing __init__.py does not parse: {exc}")
+        return content, "error"
+
+    node = _find_known_hashes_assign(tree)
+    if node is None:
+        return content, "absent"
+
+    new_literal = _render_known_hashes(new_hashes)
+
+    # Splice over the entire assignment statement span. Python >= 3.8 always
+    # populates end_lineno/end_col_offset (env is 3.14.4 — verified), so the
+    # slice is exact regardless of how the dict body is formatted.
+    lines = content.splitlines(keepends=True)
+    start_off = _offset_of(lines, node.lineno, node.col_offset)
+    end_off = _offset_of(lines, node.end_lineno, node.end_col_offset)
+    updated = content[:start_off] + new_literal + content[end_off:]
+
+    # --- Output verification (fail closed) -------------------------------
+    try:
+        verify_tree = ast.parse(updated)
+    except SyntaxError as exc:
+        print(f"ERROR: rewritten __init__.py would not parse: {exc}")
+        return content, "error"
+
+    verify_node = _find_known_hashes_assign(verify_tree)
+    if verify_node is None:
+        print("ERROR: rewritten __init__.py lost its KNOWN_HASHES assignment.")
+        return content, "error"
+    try:
+        round_tripped = ast.literal_eval(verify_node.value)
+    except (ValueError, SyntaxError) as exc:
+        print(f"ERROR: rewritten KNOWN_HASHES does not literal_eval: {exc}")
+        return content, "error"
+    if round_tripped != dict(new_hashes):
+        print(
+            "ERROR: rewritten KNOWN_HASHES does not round-trip to the "
+            "intended hashes; aborting without writing."
+        )
+        return content, "error"
+
+    return updated, "ok"
+
+
+def _offset_of(lines, lineno, col_offset):
+    """Convert a 1-based *lineno* + 0-based *col_offset* into a string index
+    into the joined *lines* (which were produced with ``keepends=True``)."""
+    return sum(len(line) for line in lines[: lineno - 1]) + col_offset
+
+
+def _restore_from_bak(path):
+    """Restore *path* from its plain ``<path>.bak`` if that backup exists.
+
+    Used on a verify/write failure so the live file is left equal to its
+    pre-write content. Silent if no backup exists or the restore itself fails
+    (the live file is then left as-is, which for the in-memory verify-failure
+    path is the original untouched content)."""
+    bak = path + ".bak"
+    if os.path.exists(bak):
+        try:
+            shutil.copy2(bak, path)
+        except OSError:
+            pass
 
 
 def _backup_file(dst):
@@ -193,32 +331,44 @@ def deploy(source_dir=None, dest_dir=None, init_path=None):
         print(f"  Copied {fname}  sha256={digest[:16]}...")
 
     # 2. Update KNOWN_HASHES in __init__.py (content already read at step 0).
-    # Build replacement dict literal from the merged (preserved + updated) map.
-    entries = ",\n".join(
-        f'    "{fname}": "{digest}"' for fname, digest in sorted(new_hashes.items())
-    )
-    new_dict = "KNOWN_HASHES = {\n" + entries + ",\n}"
+    # AST-locate the KNOWN_HASHES assignment and rewrite its value node,
+    # verifying the result parses (ast.parse) and round-trips (ast.literal_eval).
+    # This replaces the old brace-fragile re.sub, which truncated at the first
+    # inner '}' and could ship invalid Python with no parse-verify.
+    #
+    # Determine intent first without writing, so the unchanged / absent paths
+    # never touch the file or create a spurious backup.
+    updated, status = _rewrite_known_hashes(content, new_hashes)
 
-    # Replace the existing KNOWN_HASHES block
-    updated = re.sub(
-        r"KNOWN_HASHES\s*=\s*\{[^}]*\}",
-        new_dict,
-        content,
-        count=1,
-    )
-
-    if not re.search(r"KNOWN_HASHES\s*=\s*\{", content):
+    if status == "absent":
         print("WARNING: KNOWN_HASHES block not found in __init__.py")
-    elif updated == content:
+    elif status == "ok" and updated == content:
         print("  KNOWN_HASHES unchanged (hashes match)")
-    else:
+    elif status == "ok":
+        # Back up __init__.py BEFORE mutating it (G4) so any failure — a bad
+        # rewrite or a write error — is recoverable from the .bak. The rewrite
+        # was already verified-valid above, but we keep the backup/restore
+        # invariant so a corrupt file can never ship unrecoverably.
+        _backup_file(init_path)
         try:
             with open(init_path, "w", encoding="utf-8") as f:
                 f.write(updated)
         except OSError as exc:
+            _restore_from_bak(init_path)
             print(f"ERROR: could not write {init_path}: {exc}")
             sys.exit(1)
         print(f"  Updated KNOWN_HASHES in {init_path}")
+    else:
+        # status == "error": _rewrite_known_hashes already printed the reason
+        # (input did not parse, rewrite would not parse, or round-trip
+        # mismatch). Fail closed: back up the original, restore it (a no-op for
+        # the in-memory failure since nothing was written yet, but it leaves a
+        # .bak whose content equals the untouched live file), and exit non-zero
+        # WITHOUT writing the corrupt rewrite.
+        _backup_file(init_path)
+        _restore_from_bak(init_path)
+        print("ERROR: KNOWN_HASHES rewrite failed verification; file unchanged.")
+        sys.exit(1)
 
     # 3. Summary
     print("\nDeployed model hashes:")

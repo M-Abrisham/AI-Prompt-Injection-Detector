@@ -741,6 +741,372 @@ class TestKnownHashesPreserveMerge(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Reader brace-safety (item #01 hardening): a nested '}' in a KNOWN_HASHES
+# value must NOT make _parse_known_hashes return {} and silently drop bundled
+# entries through deploy(). The old non-greedy regex r"\{.*?\}" truncated at
+# the first inner '}', literal_eval failed, the reader returned {}, and
+# preserve-and-merge erased model_embedding.pkl / structural_scaler.pkl. The
+# AST reader slices the assignment's value node, so inner braces are inert.
+# ---------------------------------------------------------------------------
+
+# Like _INIT_WITH_EMBED, but one entry carries an inner '}' (a comment with a
+# brace) — the exact shape that truncated the old regex reader. The bundled
+# embedding + scaler digests below MUST survive a redeploy that does not
+# re-emit them.
+_INIT_WITH_EMBED_NESTED_BRACE = """\
+# stub __init__.py
+KNOWN_HASHES = {
+    "model.pkl": "aaaa",  # layout note: {a:b}
+    "structural_scaler.pkl": "%s",
+    "model_embedding.pkl": "%s",
+    "tfidf_vectorizer.pkl": "bbbb",
+}
+""" % (_SCALER_ORIG, _EMBED_ORIG)
+
+
+class TestKnownHashesReaderNestedBrace(unittest.TestCase):
+    """item #01 hardening: the READER must parse a KNOWN_HASHES block whose
+    value contains a nested '}' and PRESERVE its not-re-emitted bundled entries
+    through deploy(). RED on the old regex reader (literal_eval fails -> {} ->
+    entries dropped), GREEN on the AST-node reader."""
+
+    def _setup_dirs(self, td, init_template):
+        src_dir = os.path.join(td, "processed")
+        dst_dir = os.path.join(td, "models")
+        os.makedirs(src_dir)
+        os.makedirs(dst_dir)
+        init_path = os.path.join(dst_dir, "__init__.py")
+        _write_file(init_path, init_template.encode())
+        return src_dir, dst_dir, init_path
+
+    def test_parse_known_hashes_unit_survives_nested_brace(self):
+        """Unit: _parse_known_hashes returns ALL four entries (not {}) for a
+        block with a nested '}'. The old regex returned {} here."""
+        from scripts.deploy_model import _parse_known_hashes
+        parsed = _parse_known_hashes(_INIT_WITH_EMBED_NESTED_BRACE)
+        self.assertEqual(
+            set(parsed.keys()),
+            {"model.pkl", "structural_scaler.pkl",
+             "model_embedding.pkl", "tfidf_vectorizer.pkl"},
+            "nested '}' in a value truncated the reader -> entries lost",
+        )
+        # The preserved bundled digests are read verbatim.
+        self.assertEqual(parsed["model_embedding.pkl"], _EMBED_ORIG)
+        self.assertEqual(parsed["structural_scaler.pkl"], _SCALER_ORIG)
+
+    def test_bundled_entries_preserved_through_deploy_with_nested_brace(self):
+        """End-to-end: a TF-IDF-only redeploy over a nested-brace block must
+        NOT drop model_embedding.pkl / structural_scaler.pkl. This is the bug
+        item #01 was meant to fix, made latent-proof by the AST reader."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(
+                td, _INIT_WITH_EMBED_NESTED_BRACE
+            )
+            # Only model.pkl + tfidf in source: the embedding/scaler are NOT
+            # re-emitted this run, so they can only survive via the reader.
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"new_" + fname.encode())
+
+            with self.assertRaises(SystemExit) as ctx:
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            self.assertEqual(ctx.exception.code, 0)
+
+            with open(init_path) as f:
+                content = f.read()
+            # Both preserved bundled digests survive UNCHANGED.
+            self.assertIn(
+                '"model_embedding.pkl": "%s"' % _EMBED_ORIG, content,
+                "model_embedding.pkl dropped: nested '}' broke the reader",
+            )
+            self.assertIn(
+                '"structural_scaler.pkl": "%s"' % _SCALER_ORIG, content,
+                "structural_scaler.pkl dropped: nested '}' broke the reader",
+            )
+            # Result is valid Python and round-trips (file is never corrupt).
+            import ast
+            from scripts.deploy_model import _find_known_hashes_assign
+            node = _find_known_hashes_assign(ast.parse(content))
+            self.assertIsNotNone(node)
+            self.assertEqual(
+                set(ast.literal_eval(node.value).keys()),
+                {"model.pkl", "structural_scaler.pkl",
+                 "model_embedding.pkl", "tfidf_vectorizer.pkl"},
+            )
+
+
+# ---------------------------------------------------------------------------
+# AST-based KNOWN_HASHES rewrite (item #14): brace-safe + parse-verified
+# ---------------------------------------------------------------------------
+
+# An __init__ whose KNOWN_HASHES block carries an inner '}' (in a comment on
+# an entry line). The OLD brace-fragile re.sub r"KNOWN_HASHES\s*=\s*\{[^}]*\}"
+# truncates at that first inner '}' and emits invalid Python
+# (proven: "SyntaxError: unexpected indent"). The AST slice-rewrite splices the
+# whole assignment span, so the inner brace is irrelevant.
+_INIT_NESTED_BRACE = """\
+# stub __init__.py
+KNOWN_HASHES = {
+    "model.pkl": "aaaa",  # layout: {a:b}
+    "tfidf_vectorizer.pkl": "bbbb",
+}
+
+SOMETHING_ELSE = 1
+"""
+
+
+class TestKnownHashesAstRewrite(unittest.TestCase):
+    """Item #14: the KNOWN_HASHES rewrite is AST-based, not a brace-fragile
+    regex, and the result is ast.parse + ast.literal_eval verified before any
+    write (fail-closed)."""
+
+    def _setup_dirs(self, td, init_template):
+        src_dir = os.path.join(td, "processed")
+        dst_dir = os.path.join(td, "models")
+        os.makedirs(src_dir)
+        os.makedirs(dst_dir)
+        init_path = os.path.join(dst_dir, "__init__.py")
+        _write_file(init_path, init_template.encode())
+        return src_dir, dst_dir, init_path
+
+    def test_nested_brace_value_survives_and_parses(self):
+        """T1 (headline, red on old re.sub / green on AST): a KNOWN_HASHES
+        block containing an inner '}' must rewrite to VALID Python that
+        round-trips via ast.literal_eval, and code after the block survives."""
+        import ast
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td, _INIT_NESTED_BRACE)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"uniq_" + fname.encode())
+
+            with self.assertRaises(SystemExit) as ctx:
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            self.assertEqual(ctx.exception.code, 0)
+
+            with open(init_path) as f:
+                result = f.read()
+
+            # Must be valid Python (the old re.sub produced SyntaxError here).
+            tree = ast.parse(result)  # raises if invalid -> test fails
+            # KNOWN_HASHES round-trips to the two real 64-hex digests.
+            from scripts.deploy_model import _find_known_hashes_assign
+            node = _find_known_hashes_assign(tree)
+            self.assertIsNotNone(node)
+            parsed = ast.literal_eval(node.value)
+            self.assertEqual(set(parsed.keys()), {"model.pkl", "tfidf_vectorizer.pkl"})
+            for digest in parsed.values():
+                self.assertRegex(digest, r"^[0-9a-f]{64}$")
+            # The stale placeholder values are gone and there is exactly one block.
+            self.assertNotIn('"aaaa"', result)
+            self.assertNotIn('"bbbb"', result)
+            self.assertEqual(len(re.findall(r"KNOWN_HASHES\s*=\s*\{", result)), 1)
+            # Code AFTER the block is preserved (proves the splice ended at the
+            # dict's closing brace, not the comment's inner '}').
+            self.assertIn("SOMETHING_ELSE = 1", result)
+
+    def test_rewrite_helper_round_trips_nested_brace(self):
+        """T1 (unit): _rewrite_known_hashes on a nested-brace block returns
+        'ok' and the spliced text ast-parses + literal_evals to new_hashes."""
+        import ast
+        from scripts.deploy_model import _rewrite_known_hashes, _find_known_hashes_assign
+        new = {"model.pkl": "1" * 64, "tfidf_vectorizer.pkl": "2" * 64}
+        updated, status = _rewrite_known_hashes(_INIT_NESTED_BRACE, new)
+        self.assertEqual(status, "ok")
+        node = _find_known_hashes_assign(ast.parse(updated))
+        self.assertEqual(ast.literal_eval(node.value), new)
+
+    def test_malformed_rewrite_rejected_pre_write(self):
+        """T2 (fail-closed, G3): if the rendered literal would be invalid
+        Python, deploy() exits 1 and the live __init__.py is byte-identical
+        (the corrupt rewrite is NEVER written)."""
+        from scripts import deploy_model
+        from scripts.deploy_model import deploy
+
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td, _INIT_TEMPLATE)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"data_" + fname.encode())
+
+            with open(init_path) as f:
+                before = f.read()
+
+            # Force the renderer to emit a literal that does NOT parse, so the
+            # output ast.parse verify trips and the rewrite is refused.
+            def broken_render(_hashes):
+                return 'KNOWN_HASHES = {"oops": }'  # invalid Python
+
+            with mock.patch.object(
+                deploy_model, "_render_known_hashes", side_effect=broken_render
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            self.assertEqual(ctx.exception.code, 1)
+
+            with open(init_path) as f:
+                after = f.read()
+            # The corrupt rewrite was never written: file unchanged.
+            self.assertEqual(before, after)
+
+    def test_round_trip_mismatch_rejected(self):
+        """T2b: a syntactically-valid rewrite whose dict does NOT equal the
+        intended new_hashes is rejected (round-trip guard), file unchanged."""
+        from scripts import deploy_model
+        from scripts.deploy_model import deploy
+
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td, _INIT_TEMPLATE)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"data_" + fname.encode())
+
+            with open(init_path) as f:
+                before = f.read()
+
+            # Valid Python, but WRONG contents (does not match new_hashes).
+            def wrong_render(_hashes):
+                return 'KNOWN_HASHES = {\n    "evil.pkl": "deadbeef",\n}'
+
+            with mock.patch.object(
+                deploy_model, "_render_known_hashes", side_effect=wrong_render
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            self.assertEqual(ctx.exception.code, 1)
+
+            with open(init_path) as f:
+                after = f.read()
+            self.assertEqual(before, after)
+            self.assertNotIn("evil.pkl", after)
+
+    def test_init_backup_created_and_equals_live_on_failure(self):
+        """T3 (G4): on the fail-closed path a __init__.py.bak exists and equals
+        the (unchanged) live file."""
+        from scripts import deploy_model
+        from scripts.deploy_model import deploy
+
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td, _INIT_TEMPLATE)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"data_" + fname.encode())
+
+            def broken_render(_hashes):
+                return 'KNOWN_HASHES = {"oops": }'
+
+            with mock.patch.object(
+                deploy_model, "_render_known_hashes", side_effect=broken_render
+            ):
+                with self.assertRaises(SystemExit):
+                    deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            bak = init_path + ".bak"
+            self.assertTrue(os.path.exists(bak), "expected __init__.py.bak on failure")
+            with open(init_path) as f:
+                live = f.read()
+            with open(bak) as f:
+                backed = f.read()
+            self.assertEqual(live, backed)
+
+    def test_init_backup_created_on_success(self):
+        """T3b: a successful KNOWN_HASHES update backs up __init__.py first."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td, _INIT_TEMPLATE)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"fresh_" + fname.encode())
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            self.assertTrue(
+                os.path.exists(init_path + ".bak"),
+                "expected __init__.py.bak after a real KNOWN_HASHES update",
+            )
+
+    def test_idempotent_no_backup_when_unchanged(self):
+        """T4 (G5): a second identical deploy leaves __init__.py byte-identical
+        (the 'unchanged' path holds under the AST rewrite)."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td, _INIT_TEMPLATE)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"stable_" + fname.encode())
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            with open(init_path) as f:
+                after_first = f.read()
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            with open(init_path) as f:
+                after_second = f.read()
+
+            self.assertEqual(after_first, after_second)
+
+    def test_rewritten_module_imports(self):
+        """T5 (use-case, end-to-end): after deploy() over a nested-brace init,
+        the rewritten module compiles AND exposes the expected KNOWN_HASHES
+        dict — proving the producer never emits a module that breaks
+        `import na0s.models` (predict.py:84 import)."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td, _INIT_NESTED_BRACE)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"mod_" + fname.encode())
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            with open(init_path) as f:
+                src = f.read()
+            # Execute the rewritten module in an isolated namespace: this is
+            # what `import na0s.models` does at load time.
+            ns = {}
+            code = compile(src, init_path, "exec")
+            exec(code, ns)  # noqa: S102 - executing the rewritten module under test
+            self.assertIn("KNOWN_HASHES", ns)
+            self.assertEqual(
+                set(ns["KNOWN_HASHES"].keys()),
+                {"model.pkl", "tfidf_vectorizer.pkl"},
+            )
+            # And the trailing statement executed too.
+            self.assertEqual(ns.get("SOMETHING_ELSE"), 1)
+
+    def test_real_init_shape_guard_read_only(self):
+        """T7: the helper locates the KNOWN_HASHES node in the REAL
+        src/na0s/models/__init__.py and it literal_evals to the live entries.
+        Read-only — never writes the real file."""
+        import ast
+        from scripts.deploy_model import INIT_PATH, _find_known_hashes_assign
+
+        with open(INIT_PATH, encoding="utf-8") as f:
+            real = f.read()
+        node = _find_known_hashes_assign(ast.parse(real))
+        self.assertIsNotNone(node, "KNOWN_HASHES not found in real __init__.py")
+        live = ast.literal_eval(node.value)
+        self.assertEqual(
+            set(live.keys()),
+            {
+                "model.pkl",
+                "structural_scaler.pkl",
+                "model_embedding.pkl",
+                "tfidf_vectorizer.pkl",
+            },
+        )
+        for digest in live.values():
+            self.assertRegex(digest, r"^[0-9a-f]{64}$")
+
+    def test_absent_block_returns_absent(self):
+        """T5b (unit): the AST walk returns 'absent' (no StopIteration/KeyError)
+        when there is no KNOWN_HASHES assignment, so deploy() can warn+exit 0."""
+        from scripts.deploy_model import _rewrite_known_hashes
+        content = "# nothing here\nX = 1\n"
+        out, status = _rewrite_known_hashes(content, {"model.pkl": "z" * 64})
+        self.assertEqual(status, "absent")
+        self.assertEqual(out, content)
+
+
+# ---------------------------------------------------------------------------
 # Product invariant: every bundled *.pkl is a key in KNOWN_HASHES
 # ---------------------------------------------------------------------------
 
