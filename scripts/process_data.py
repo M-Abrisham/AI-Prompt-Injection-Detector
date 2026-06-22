@@ -68,6 +68,14 @@ def _load_csv(path):
               f"(no label column found among {LABEL_CANDIDATES})")
         return None
 
+    # Carry per-source taxonomy provenance through to combined_data.csv when the
+    # raw CSV has it (sync_datasets.py stamps it). Older raw CSVs / hard-neg /
+    # staging files lack the column -> "" (untagged). Not all rows are tagged:
+    # scraped/harvest corpora stay "", so no consumer may assume full coverage.
+    out["taxonomy_codes"] = (
+        df["taxonomy_codes"].fillna("").astype(str) if "taxonomy_codes" in df.columns else ""
+    )
+
     out = out.dropna(subset=["text", "label"])
     out["label"] = out["label"].astype(int)
     # Only keep valid binary labels
@@ -96,6 +104,13 @@ def _load_jsonl(path):
         print(f"  WARN: skipping {os.path.basename(path)} "
               f"(no label column found among {LABEL_CANDIDATES})")
         return None
+
+    # Carry per-source taxonomy provenance when present (see _load_csv). Harvest
+    # / aggregated JSONL generally lack it -> "" (untagged); the column is purely
+    # additive and never perturbs the text-keyed dedup at merge_datasets().
+    out["taxonomy_codes"] = (
+        df["taxonomy_codes"].fillna("").astype(str) if "taxonomy_codes" in df.columns else ""
+    )
 
     out = out.dropna(subset=["text", "label"])
     out["label"] = out["label"].astype(int)
