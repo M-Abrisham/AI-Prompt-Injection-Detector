@@ -24,6 +24,7 @@ from na0s.safe_pickle import (
     _hash_path,
     _hmac_path,
     _hmac_sha256,
+    _resolve_expected_hash,
     _sha256,
     safe_dump,
     safe_load,
@@ -340,6 +341,122 @@ class TestLargeObjectTruncation(unittest.TestCase):
         # Protocol 2+ files start with the PROTO opcode (0x80) + version byte.
         self.assertEqual(head[0], 0x80)
         self.assertGreaterEqual(head[1], 4)
+
+
+class TestFreshArtifactNotPinnedToShippedHash(unittest.TestCase):
+    """Regression: a non-bundled file named ``model.pkl`` must verify via its
+    own sidecar, not the shipped KNOWN_HASHES pin.
+
+    Root cause of the bug: ``_resolve_expected_hash`` keyed KNOWN_HASHES by
+    basename, so a freshly trained ``data/processed/model.pkl`` (same basename
+    as the bundled artefact) wrongly matched the *shipped* model's hash and was
+    rejected by ``safe_load`` even though it carried a valid safe_dump sidecar.
+    The Auto-Retrain workflow's "Calibrate decision threshold" step
+    (scripts/optimize_threshold.py) hit exactly this. The fix scopes the
+    hardcoded pin to the bundled package artefact only.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmpdir = self._tmpdir.name
+        # Mirror the failing path shape: a fresh data/processed/model.pkl that
+        # shares the bundled basename but is NOT the bundled file.
+        self.fresh_path = os.path.join(
+            self.tmpdir, "data", "processed", "model.pkl"
+        )
+        os.makedirs(os.path.dirname(self.fresh_path))
+        self.test_obj = {"fresh_model": True, "weights": [9.0, 8.0, 7.0]}
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    @patch.dict(os.environ, {"NA0S_PICKLE_KEY": "freshsecret"})
+    def test_fresh_model_pkl_resolves_via_hmac_sidecar(self):
+        """A non-bundled model.pkl resolves source 'sidecar_hmac', not 'hardcoded'."""
+        safe_dump(self.test_obj, self.fresh_path)
+        _, source = _resolve_expected_hash(self.fresh_path)
+        self.assertEqual(source, "sidecar_hmac")
+
+    @patch.dict(os.environ, {"NA0S_PICKLE_KEY": "freshsecret"})
+    def test_fresh_model_pkl_loads_via_sidecar(self):
+        """safe_dump+safe_load of a non-bundled model.pkl round-trips (the bug)."""
+        safe_dump(self.test_obj, self.fresh_path)
+        loaded = safe_load(self.fresh_path)
+        self.assertEqual(loaded, self.test_obj)
+
+    @patch.dict(os.environ, {k: v for k, v in os.environ.items()
+                             if k != "NA0S_PICKLE_KEY"})
+    def test_fresh_model_pkl_resolves_via_sha256_sidecar(self):
+        """Without a key, a non-bundled model.pkl uses 'sidecar_sha256'."""
+        os.environ.pop("NA0S_PICKLE_KEY", None)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            safe_dump(self.test_obj, self.fresh_path)
+        _, source = _resolve_expected_hash(self.fresh_path)
+        self.assertEqual(source, "sidecar_sha256")
+        self.assertEqual(safe_load(self.fresh_path), self.test_obj)
+
+    @patch.dict(os.environ, {"NA0S_PICKLE_KEY": "freshsecret"})
+    def test_tampered_fresh_model_pkl_still_rejected(self):
+        """Tampering a non-bundled model.pkl without updating the sidecar fails."""
+        safe_dump(self.test_obj, self.fresh_path)
+        # Flip a byte past the pickle magic; do not touch the sidecar.
+        with open(self.fresh_path, "r+b") as f:
+            f.seek(2)
+            original = f.read(1)
+            f.seek(2)
+            f.write(bytes([original[0] ^ 0x01]))
+        with self.assertRaises(ValueError) as ctx:
+            safe_load(self.fresh_path)
+        self.assertIn("Integrity check failed", str(ctx.exception))
+
+    def test_bundled_model_still_resolves_hardcoded(self):
+        """The actual bundled na0s.models/model.pkl still uses the KNOWN_HASHES pin."""
+        from na0s.models import KNOWN_HASHES, get_model_path
+
+        bundled = get_model_path("model.pkl")
+        expected, source = _resolve_expected_hash(bundled)
+        self.assertEqual(source, "hardcoded")
+        self.assertEqual(expected, KNOWN_HASHES["model.pkl"])
+        # And it still loads cleanly against the pin.
+        self.assertIsNotNone(safe_load(bundled))
+
+    def test_bundled_path_mismatch_still_rejected(self):
+        """A file AT the bundled path with wrong bytes fails against KNOWN_HASHES.
+
+        Proves the shipped-model integrity pin is NOT weakened: identity is the
+        bundled path, so wrong bytes there are still rejected by the hardcoded
+        hash (not silently accepted via a sidecar).
+        """
+        import shutil
+
+        import na0s.models as models_mod
+        from na0s.models import get_model_path
+
+        real_bundled = get_model_path("model.pkl")
+        impostor = os.path.join(self.tmpdir, "model.pkl")
+        shutil.copyfile(real_bundled, impostor)
+        # Corrupt the impostor's bytes.
+        with open(impostor, "r+b") as f:
+            f.seek(2)
+            original = f.read(1)
+            f.seek(2)
+            f.write(bytes([original[0] ^ 0xFF]))
+
+        # Point the bundled-artefact lookup at the impostor so it is treated as
+        # "the bundled file" -> must still verify against the hardcoded pin.
+        original_gmp = models_mod.get_model_path
+        models_mod.get_model_path = (
+            lambda fn: impostor if fn == "model.pkl" else original_gmp(fn)
+        )
+        try:
+            _, source = _resolve_expected_hash(impostor)
+            self.assertEqual(source, "hardcoded")
+            with self.assertRaises(ValueError) as ctx:
+                safe_load(impostor)
+            self.assertIn("Integrity check failed", str(ctx.exception))
+        finally:
+            models_mod.get_model_path = original_gmp
 
 
 if __name__ == "__main__":
