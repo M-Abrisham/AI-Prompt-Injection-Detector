@@ -251,20 +251,20 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-    # Try to use safe_pickle if available, fall back to regular pickle
+    # Require the canonical integrity gate. If na0s is unavailable we error out
+    # rather than silently falling back to a raw, unverified pickle.load —
+    # which would be an arbitrary-code-execution sink on a swapped artifact.
     try:
-        from na0s.safe_pickle import safe_load, safe_dump
-    except ImportError:
-        import pickle
-
-        def safe_load(path):
-            with open(path, "rb") as f:
-                return pickle.load(f)
-
-        def safe_dump(obj, path):
-            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            with open(path, "wb") as f:
-                pickle.dump(obj, f)
+        from na0s.integrity.safe_pickle import safe_load, safe_dump
+    except ImportError as exc:
+        print(
+            "ERROR: na0s is required for safe (de)serialization.\n"
+            "Install the na0s package (pip install -e .) so artifacts are "
+            "loaded through na0s.integrity.safe_pickle.\n"
+            "Import error: {0}".format(exc),
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # Load TF-IDF features
     print("Loading TF-IDF features from {0}".format(args.tfidf_features))

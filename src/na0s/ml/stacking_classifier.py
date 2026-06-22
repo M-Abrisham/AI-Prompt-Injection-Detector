@@ -11,11 +11,12 @@ to the current linear combination in ``_voting.py``.
 
 from __future__ import annotations
 
-import pickle
 import threading
 from typing import Any
 
 import numpy as np
+
+from na0s.integrity.safe_pickle import safe_dump, safe_load
 
 
 class StackingMetaLearner:
@@ -116,18 +117,21 @@ class StackingMetaLearner:
     # -- Persistence ---------------------------------------------------------
 
     def save(self, path: str) -> None:
-        """Save the trained model to *path*."""
+        """Save the trained model to *path* with an integrity sidecar."""
         with self._lock:
-            with open(path, "wb") as fh:
-                pickle.dump(
-                    {"model": self._model, "trained": self._trained},
-                    fh,
-                )
+            payload = {"model": self._model, "trained": self._trained}
+        # safe_dump writes an HMAC-SHA256 (or SHA-256) sidecar so load() can
+        # verify the artifact before unpickling.
+        safe_dump(payload, path)
 
     def load(self, path: str) -> None:
-        """Load a trained model from *path*."""
-        with open(path, "rb") as fh:
-            data = pickle.load(fh)  # noqa: S301
+        """Load a trained model from *path*.
+
+        Verifies the integrity sidecar before unpickling; ``safe_load`` raises
+        ``ValueError`` on a tampered artifact (or ``FileNotFoundError`` when no
+        sidecar exists). We never fall back to a raw ``pickle.load``.
+        """
+        data = safe_load(path)
         with self._lock:
             self._model = data["model"]
             self._trained = data["trained"]

@@ -29,9 +29,10 @@ from __future__ import annotations
 
 import logging
 import os
-import pickle
 import threading
 from typing import Any, Dict, Optional
+
+from na0s.integrity.safe_pickle import safe_dump, safe_load
 
 logger = logging.getLogger(__name__)
 
@@ -178,9 +179,12 @@ class FAISSClassifier:
     def save(self, path: str) -> None:
         """Serialize the FAISS index and labels to disk.
 
-        Creates two files:
+        Creates three files:
         - ``path`` — the FAISS index binary
         - ``path + '.labels.pkl'`` — pickled label array
+        - ``path + '.labels.pkl' + '.hmac'`` (or ``.sha256``) — integrity
+          sidecar written by ``safe_dump`` so ``load()`` can reject a swapped
+          ``.labels.pkl`` (a ``__reduce__`` RCE sink) before unpickling.
 
         Parameters
         ----------
@@ -195,8 +199,9 @@ class FAISSClassifier:
         _get_faiss().write_index(self._index, path)
 
         labels_path = path + ".labels.pkl"
-        with open(labels_path, "wb") as f:
-            pickle.dump(self._labels, f)
+        # Route through the canonical integrity gate: writes the pickle plus an
+        # HMAC-SHA256 (or SHA-256) sidecar so load() can verify before unpickling.
+        safe_dump(self._labels, labels_path)
 
         logger.info("FAISS index saved to %s (%d vectors)", path, self._index.ntotal)
 
@@ -208,6 +213,14 @@ class FAISSClassifier:
         path : str
             Path to the FAISS index file. Labels are expected at
             ``path + '.labels.pkl'``.
+
+        Raises
+        ------
+        ValueError
+            If the ``.labels.pkl`` sidecar is missing or its integrity digest
+            does not match (tampered / swapped artifact). The exception
+            propagates so callers (e.g. ``_ensure_loaded``) fail closed and
+            refuse the FAISS path rather than unpickling an attacker object.
         """
         if not _faiss_available():
             raise RuntimeError("faiss-cpu is required to load a FAISS index.")
@@ -215,8 +228,11 @@ class FAISSClassifier:
         self._index = _get_faiss().read_index(path)
 
         labels_path = path + ".labels.pkl"
-        with open(labels_path, "rb") as f:
-            self._labels = pickle.load(f)
+        # Verify the integrity sidecar BEFORE unpickling. safe_load raises
+        # ValueError on a tampered/forged artifact (or FileNotFoundError when
+        # no sidecar exists); we deliberately let it propagate — never fall
+        # back to a raw pickle.load.
+        self._labels = safe_load(labels_path)
 
         self._loaded = True
         self._init_failed = False
