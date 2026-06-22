@@ -29,6 +29,12 @@ data/scraped/static/
 !data/raw/
 data/raw/*.csv
 !data/raw/harvested_samples.csv
+# Threat-intel snapshots dir: ignore runtime snapshot artifacts but keep the
+# human-reviewed MITRE ATLAS -> Na0S mapping committed (the taxonomy-aware
+# harvester and its tests depend on this default mapping existing in a clone).
+!data/threat_intel_snapshots/
+data/threat_intel_snapshots/*
+!data/threat_intel_snapshots/atlas_to_na0s_mapping.yaml
 __pycache__/
 .DS_Store
 *.egg-info/
