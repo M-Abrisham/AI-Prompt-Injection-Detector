@@ -247,6 +247,32 @@ categories:
       E2.4: { name: "Capability-mapping", severity: low }
       E2.5: { name: "Context-inventory", severity: medium }
 
+  # Intermediate (mid-level) key for the direct prompt/system-prompt
+  # extraction sub-family. Mirrors the C/C1 precedent above: the live v0.1
+  # scenarios reference the bare mid-level code (attack_category: E1) rather
+  # than a leaf technique, so this key makes those scenarios pass their own
+  # taxonomy gate without migrating the 27 scenario files. Its techniques are
+  # the E1.x leaves of category E.
+  E1:
+    name: "System-prompt / Data Exfiltration (E1)"
+    description: "Direct extraction of the system prompt or other sensitive context (direct request, repeat-above, completion/translation/encoding/summarization tricks)."
+    type: extraction
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm07"
+      - "owasp-llm:2025:llm02"
+      - "avid-effect:security:S0500"
+      - "avid-effect:security:S0301"
+      - "risk-cards:lmrc:prompt_extraction"
+    expected_layers: ["layer1_ml", "layer2_rules"]
+    techniques:
+      E1.1: { name: "Direct-prompt-request", severity: high }
+      E1.2: { name: "Repeat-above", severity: high }
+      E1.3: { name: "Completion-trick", severity: medium }
+      E1.4: { name: "Translation-trick", severity: medium }
+      E1.5: { name: "Encoding-trick", severity: medium }
+      E1.6: { name: "Summarization-trick", severity: medium }
+
   # ════════════════════════════════════════════════════════════════
   # Category A — Adversarial ML Attacks
   # ════════════════════════════════════════════════════════════════

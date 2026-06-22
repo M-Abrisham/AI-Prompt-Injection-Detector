@@ -562,6 +562,38 @@ def _update_scan_history(output_dir, summary):
 
 
 # ---------------------------------------------------------------------------
+# Taxonomy-aware tagging (additive, offline, keyless)
+# ---------------------------------------------------------------------------
+
+def _tag_discoveries(discoveries):
+    """Attach a canonical Na0S ``attack_category`` to each discovery in place.
+
+    Pure/offline: routes each record's relevance signals through
+    ``na0s.eval.harvest.tag_discovery`` (ATLAS id -> mapped code, else curated
+    keyword -> canonical code). Records with no confident, canonical match are
+    left untagged (never guessed, never dropped). The na0s import is guarded so
+    the standalone harvester still runs if the package is not importable.
+    """
+    try:
+        from na0s.eval.harvest import tag_discovery
+    except Exception as exc:  # pragma: no cover - optional dependency at runtime
+        log.warning("Taxonomy tagging unavailable (%s); leaving records untagged", exc)
+        return
+    tagged = 0
+    for entry in discoveries:
+        try:
+            category = tag_discovery(entry)
+        except Exception as exc:  # pragma: no cover - never let tagging crash a scan
+            log.warning("Tagging failed for %r: %s", entry.get("id"), exc)
+            continue
+        if category:
+            entry["attack_category"] = category
+            tagged += 1
+    log.info("Tagged %d/%d discoveries with a canonical attack_category",
+             tagged, len(discoveries))
+
+
+# ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
 
@@ -641,6 +673,12 @@ def run_harvest(output_dir, since_days=7, sources=None, dry_run=False):
             seen.add(key)
             unique.append(entry)
     all_discoveries = unique
+
+    # Taxonomy-aware tagging (additive, offline). Attach a CANONICAL Na0S
+    # attack_category to each discovery when one can be confidently resolved
+    # from its relevance signals (ATLAS id or curated keyword); records with no
+    # confident match are left untagged for manual mapping, never dropped.
+    _tag_discoveries(all_discoveries)
 
     total = len(all_discoveries)
 

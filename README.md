@@ -52,7 +52,7 @@ Optional extras live in [pyproject.toml](pyproject.toml). Once a `pyproject_extr
 - **Semantic attacks** — fictional framing, indirect extraction, RAG poisoning, multilingual obfuscation. <!-- src: src/na0s/detectors/, src/na0s/multilingual_handler.py -->
 - **Multi-turn attacks** — fabricated history, escalation, payload splitting, scheming. **8** detectors over session state. <!-- src: src/na0s/layer16/detectors/; count via facts.yaml#L16_detectors -->
 
-Coverage spans **30** attack categories and **278** techniques. <!-- facts.yaml#taxonomy -->
+Coverage spans **31** attack categories and **284** techniques. <!-- facts.yaml#taxonomy -->
 
 ---
 
@@ -167,7 +167,7 @@ After `pip install -e .` the `na0s` shorthand is on `$PATH`. Exit codes follow t
 
 ## Taxonomy
 
-**30** categories, **278** techniques. <!-- facts.yaml#taxonomy -->
+**31** categories, **284** techniques. <!-- facts.yaml#taxonomy -->
 
 The largest by technique count:
 
