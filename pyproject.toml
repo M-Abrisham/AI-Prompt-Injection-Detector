@@ -277,10 +277,10 @@ faiss-cpu = ["faiss"]
 [tool.deptry.per_rule_ignores]
 # DEP001 (missing): modules provided by optional extras / not pip-installed in
 # the CI base, all imported under try/except ImportError guards.
-DEP001 = ["pdfplumber", "PyPDF2", "pytesseract", "re2", "lxml", "olefile", "oletools", "xlrd", "claude_agent_sdk"]
+DEP001 = ["pdfplumber", "PyPDF2", "pytesseract", "re2", "lxml", "olefile", "oletools", "xlrd", "claude_agent_sdk", "openclaw", "redis"]
 # DEP002 (declared-but-unused): optional-extra + data-pipeline deps used only
 # via guarded/lazy imports that deptry's static scan does not see.
 DEP002 = ["datasets", "huggingface-hub", "cleanlab", "datasketch", "dvc", "tqdm", "pyarrow", "easyocr", "Pillow", "striprtf", "openai", "groq", "langdetect"]
 # DEP003 (transitive): pulled transitively by declared deps (sklearn->scipy/joblib)
 # or by optional integrations.
-DEP003 = ["scipy", "joblib", "redis", "cryptography", "openclaw"]
+DEP003 = ["scipy", "joblib", "redis", "cryptography", "openclaw", "lxml"]
