@@ -11,11 +11,13 @@ to the current linear combination in ``_voting.py``.
 
 from __future__ import annotations
 
-import pickle
+import logging
 import threading
 from typing import Any
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class StackingMetaLearner:
@@ -116,18 +118,40 @@ class StackingMetaLearner:
     # -- Persistence ---------------------------------------------------------
 
     def save(self, path: str) -> None:
-        """Save the trained model to *path*."""
+        """Save the trained model to *path* with an integrity sidecar.
+
+        Uses ``safe_dump`` so the meta-learner pickle ships with a verifiable
+        ``.hmac``/``.sha256`` sidecar; :meth:`load` refuses a tampered or
+        sidecar-less file rather than executing an attacker-controlled pickle.
+        """
+        from na0s.integrity.safe_pickle import safe_dump
+
         with self._lock:
-            with open(path, "wb") as fh:
-                pickle.dump(
-                    {"model": self._model, "trained": self._trained},
-                    fh,
-                )
+            safe_dump({"model": self._model, "trained": self._trained}, path)
 
     def load(self, path: str) -> None:
-        """Load a trained model from *path*."""
-        with open(path, "rb") as fh:
-            data = pickle.load(fh)  # noqa: S301
+        """Load a trained model from *path*, verifying integrity first.
+
+        ``safe_load`` verifies the digest sidecar BEFORE unpickling. On a
+        tampered file (``ValueError``) or a missing sidecar / KNOWN_HASHES
+        entry (``FileNotFoundError``) the load is refused: we log and leave the
+        meta-learner untrained so :meth:`is_available` returns ``False`` and the
+        ensemble degrades to the linear combiner — we do NOT silently load an
+        unverified pickle.
+        """
+        from na0s.integrity.safe_pickle import safe_load
+
+        try:
+            data = safe_load(path)
+        except (ValueError, FileNotFoundError, OSError) as exc:
+            logger.warning(
+                "Refusing to load stacking model from %s: %s. "
+                "Meta-learner stays unavailable (ensemble degrades).",
+                path, exc,
+            )
+            with self._lock:
+                self._trained = False
+            return
         with self._lock:
             self._model = data["model"]
             self._trained = data["trained"]
