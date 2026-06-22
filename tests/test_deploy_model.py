@@ -592,5 +592,183 @@ class TestCharVectorizerRequired(unittest.TestCase):
                 self.assertEqual(f.read(), bak_content)
 
 
+# ---------------------------------------------------------------------------
+# Preserve-and-merge: bundled pkls not re-emitted this run must survive
+# ---------------------------------------------------------------------------
+
+# A 64-hex digest that no real fake-file content will collide with, used to
+# prove an entry was PRESERVED verbatim (not recomputed from a copied file).
+_EMBED_ORIG = "09" * 32
+_SCALER_ORIG = "51" * 32
+
+_INIT_WITH_EMBED = """\
+# stub __init__.py
+KNOWN_HASHES = {
+    "model.pkl": "aaaa",
+    "structural_scaler.pkl": "%s",
+    "model_embedding.pkl": "%s",
+    "tfidf_vectorizer.pkl": "bbbb",
+}
+""" % (_SCALER_ORIG, _EMBED_ORIG)
+
+
+class TestKnownHashesPreserveMerge(unittest.TestCase):
+    """deploy() must MERGE fresh digests into the existing KNOWN_HASHES,
+    preserving entries for bundled pickles it does not re-emit this run.
+
+    These tests demonstrate the M4(b) drop bug: each one FAILS on the old
+    rebuild-from-scratch code (which seeded new_hashes={} and re-wrote the
+    whole dict from only copied files) and PASSES after the preserve-merge fix.
+    """
+
+    def _setup_dirs(self, td, init_template):
+        src_dir = os.path.join(td, "processed")
+        dst_dir = os.path.join(td, "models")
+        os.makedirs(src_dir)
+        os.makedirs(dst_dir)
+        init_path = os.path.join(dst_dir, "__init__.py")
+        _write_file(init_path, init_template.encode())
+        return src_dir, dst_dir, init_path
+
+    def test_model_embedding_preserved_when_absent_from_source(self):
+        """T1 (headline): a TF-IDF-only redeploy must NOT drop model_embedding.pkl.
+
+        RED on old code (entry erased), GREEN after preserve-merge.
+        """
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td, _INIT_WITH_EMBED)
+            # Only model.pkl + tfidf in source: a normal redeploy that does
+            # NOT re-emit the embedding model.
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"new_" + fname.encode())
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            with open(init_path) as f:
+                content = f.read()
+            # The original embedding digest must survive UNCHANGED.
+            self.assertIn(
+                '"model_embedding.pkl": "%s"' % _EMBED_ORIG,
+                content,
+                "model_embedding.pkl entry was dropped from KNOWN_HASHES",
+            )
+
+    def test_structural_scaler_preserved_when_absent_from_source(self):
+        """T2 (G2): structural_scaler.pkl entry must survive when not in source."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td, _INIT_WITH_EMBED)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"new_" + fname.encode())
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            with open(init_path) as f:
+                content = f.read()
+            self.assertIn(
+                '"structural_scaler.pkl": "%s"' % _SCALER_ORIG,
+                content,
+                "structural_scaler.pkl entry was dropped from KNOWN_HASHES",
+            )
+
+    def test_copied_file_hash_is_updated_not_frozen(self):
+        """T3: a copied file's stale hash must be REPLACED with the real SHA-256,
+        proving merge updates (not freezes) entries for files it touches."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td, _INIT_WITH_EMBED)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"real_" + fname.encode())
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            with open(init_path) as f:
+                content = f.read()
+            # Stale placeholder hashes for copied files must be gone.
+            self.assertNotIn('"aaaa"', content)
+            self.assertNotIn('"bbbb"', content)
+            # model.pkl entry must equal the real SHA-256 of the deployed file.
+            real_model_digest = _sha256(os.path.join(dst_dir, "model.pkl"))
+            self.assertIn(
+                '"model.pkl": "%s"' % real_model_digest,
+                content,
+            )
+
+    def test_idempotent_second_run(self):
+        """T3b (G4): two consecutive deploys with identical inputs must leave
+        KNOWN_HASHES byte-identical (no spurious churn)."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td, _INIT_WITH_EMBED)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"stable_" + fname.encode())
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            with open(init_path) as f:
+                after_first = f.read()
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            with open(init_path) as f:
+                after_second = f.read()
+
+            self.assertEqual(after_first, after_second)
+            # And the preserved embedding entry is still intact.
+            self.assertIn(
+                '"model_embedding.pkl": "%s"' % _EMBED_ORIG, after_second
+            )
+
+    def test_char_vectorizer_still_absent_after_preserve_merge(self):
+        """Preserve-merge must NOT invent char_tfidf_vectorizer.pkl: when it is
+        absent from both source and the existing dict, it stays absent."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td, _INIT_WITH_EMBED)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"new_" + fname.encode())
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            with open(init_path) as f:
+                content = f.read()
+            self.assertNotIn("char_tfidf_vectorizer.pkl", content)
+
+
+# ---------------------------------------------------------------------------
+# Product invariant: every bundled *.pkl is a key in KNOWN_HASHES
+# ---------------------------------------------------------------------------
+
+class TestKnownHashesCoverageInvariant(unittest.TestCase):
+    """Durable invariant (T4, G3): every *.pkl bundled in src/na0s/models/ MUST
+    have an entry in na0s.models.KNOWN_HASHES, since none ship sidecar .sha256
+    files — the hardcoded hash is their only integrity source. This guards
+    against any future bundled pkl being silently droppable from the dict."""
+
+    def test_every_bundled_pkl_in_known_hashes(self):
+        import importlib.resources
+        from na0s.models import KNOWN_HASHES
+
+        models_dir = importlib.resources.files("na0s.models")
+        bundled = {
+            p.name
+            for p in models_dir.iterdir()
+            if p.name.endswith(".pkl")
+        }
+        self.assertTrue(bundled, "expected at least one bundled *.pkl")
+        missing = bundled - set(KNOWN_HASHES.keys())
+        self.assertEqual(
+            missing,
+            set(),
+            "bundled pkl(s) missing from KNOWN_HASHES (no sidecar => "
+            "safe_load would raise FileNotFoundError): %s" % sorted(missing),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

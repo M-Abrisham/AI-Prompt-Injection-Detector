@@ -2,8 +2,13 @@
 """Deploy trained model files and update KNOWN_HASHES.
 
 Copies model.pkl and tfidf_vectorizer.pkl from data/processed/ into the
-package directory (src/na0s/models/) and rewrites the KNOWN_HASHES dict
-in src/na0s/models/__init__.py with fresh SHA-256 digests.
+package directory (src/na0s/models/) and updates the KNOWN_HASHES dict in
+src/na0s/models/__init__.py. The update MERGES fresh digests into the
+existing KNOWN_HASHES, preserving entries for bundled pickle files that
+are not re-emitted this run (e.g. model_embedding.pkl, structural_scaler.pkl).
+Files copied this run override their prior digest; untouched bundled
+entries are kept verbatim so every bundled *.pkl always retains its
+authoritative hash (none of them ship sidecar .sha256 files).
 
 Usage::
 
@@ -12,6 +17,7 @@ Usage::
 """
 
 import argparse
+import ast
 import hashlib
 import os
 import re
@@ -40,6 +46,32 @@ def _sha256(path):
         for chunk in iter(lambda: f.read(1 << 16), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _parse_known_hashes(content):
+    """Extract the existing KNOWN_HASHES dict from *content* (init source).
+
+    Returns a ``{filename: digest}`` dict, or ``{}`` if no parseable
+    KNOWN_HASHES block is found. Parsing uses ``ast.literal_eval`` on the
+    captured dict literal — safe (no code execution) and exact — so that
+    bundled-but-not-copied entries (e.g. model_embedding.pkl) can be
+    preserved across a deploy that only re-emits some files.
+    """
+    match = re.search(r"KNOWN_HASHES\s*=\s*(\{.*?\})", content, re.DOTALL)
+    if not match:
+        return {}
+    try:
+        value = ast.literal_eval(match.group(1))
+    except (ValueError, SyntaxError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    # Keep only string->string entries (real digest records).
+    return {
+        k: v
+        for k, v in value.items()
+        if isinstance(k, str) and isinstance(v, str)
+    }
 
 
 def _backup_file(dst):
@@ -99,8 +131,21 @@ def deploy(source_dir=None, dest_dir=None, init_path=None):
     if init_path is None:
         init_path = INIT_PATH
 
-    # 1. Copy model files (required + conditionally-required + optional)
-    new_hashes = {}
+    # 0. Read the existing __init__.py and seed new_hashes from the existing
+    #    KNOWN_HASHES so that bundled pickles we do NOT re-emit this run
+    #    (e.g. model_embedding.pkl, structural_scaler.pkl when absent from
+    #    source) retain their authoritative digest instead of being dropped.
+    try:
+        with open(init_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError as exc:
+        print(f"ERROR: could not read {init_path}: {exc}")
+        sys.exit(1)
+
+    new_hashes = dict(_parse_known_hashes(content))
+
+    # 1. Copy model files (required + conditionally-required + optional).
+    #    Files copied this run OVERRIDE their preserved digest below.
 
     # If the model was trained with char-level features, the char vectorizer
     # is required for correct inference (15,029 dims vs 10,029 without it).
@@ -147,15 +192,8 @@ def deploy(source_dir=None, dest_dir=None, init_path=None):
         new_hashes[fname] = digest
         print(f"  Copied {fname}  sha256={digest[:16]}...")
 
-    # 2. Update KNOWN_HASHES in __init__.py
-    try:
-        with open(init_path, "r", encoding="utf-8") as f:
-            content = f.read()
-    except OSError as exc:
-        print(f"ERROR: could not read {init_path}: {exc}")
-        sys.exit(1)
-
-    # Build replacement dict literal
+    # 2. Update KNOWN_HASHES in __init__.py (content already read at step 0).
+    # Build replacement dict literal from the merged (preserved + updated) map.
     entries = ",\n".join(
         f'    "{fname}": "{digest}"' for fname, digest in sorted(new_hashes.items())
     )
