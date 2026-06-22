@@ -70,6 +70,7 @@ Each class is scored 0–100 on how completely Na0S **detects it at runtime toda
 | **INJ-0024** | P3 | LLM05 *(adjacent)* | *no clean ATLAS* | Malicious code generation | input | **42** | estimated | — | `malicious_code_gen.py` (P3); overlaps `harmful_intent.py` O1.2 only | high | No P3 detector; samples-only for the named technique. |
 | **INJ-0025** | R | LLM10 | T0034 Cost Harvesting; T0029 DoS | Resource exhaustion / DoS / cost-amplification | mixed | **46** | estimated | — | `layer0/resource_guard.py`, length/chunk caps, R1 rules — PARTIAL | medium | Input-side R1.1 only; output-side recursive/cost not detected. |
 | **INJ-0026** | T | LLM06 | T0053 Tool Invocation; T0011.002 Poisoned Tool | Agent / tool / MCP abuse | agent-tool | **62** | measured (GTG T 3/3 block; benign 0 FP) | GTG T 3/3 | New `detectors/tool_abuse.py` (in-prose T1.x free-text matcher) + `scan(tool_calls=…)` autoroute through `mcp_tool` manifest scan, WIRED behind `_HAS_TOOL_ABUSE` into `scan()`+`cascade.py`; GTG-1002 T scenarios (T1.1/T1.3/T2.3) BLOCK via tool-abuse + goal-decomposition; xfail flipped strict | critical | On the default path now. Residual: not yet benchmarked vs MCPTox/MCPSecBench; manifest path needs structured tool traces supplied via `tool_calls=`. |
+| **INJ-0027** | T (T1.2 / T1.4 / T2.3) | LLM06 | T0053 Tool Invocation; T0011.002 Poisoned Tool | MCP supply-chain lifecycle (tool-poisoning / rug-pull / typosquat) | agent-tool | **55** | estimated (64 unit tests pass; FP-safe on legit manifests; not in recall harness) | — (not in harness) | New `detectors/mcp_supply_chain.py` (`scan_tool_supply_chain` + capped `get_mcp_supply_chain_weight` ≤0.30) reached via the new `na0s.mcp` FastMCP **guard server** (`scan_text` / `check_tool_call` / `check_tool_response` over `na0s.scan`/`scan_output`/`predict.scan_tools`); SERVER-ONLY (behind `_HAS_MCP_SUPPLY_CHAIN`, NOT on the default free-text `scan()` path). Emits canonical T1.2 (description injection / OWASP-MCP01), T1.4 (schema poisoning / OWASP-MCP03, rug-pull / OWASP-MCP06, typosquat plugin-confusion), T2.3 (exfil / OWASP-MCP10). MCP SDK imported lazily (`pip install na0s[mcp]`). | critical | Local/keyless; reachable only when a host runs the guard server (opt-in), not from `scan(text)`. Rug-pull needs an approved `ToolBaselineStore`. Unmeasured by the recall harness; not yet benchmarked vs MCPTox/MCPSecBench. |
 
 ---
 
@@ -110,7 +111,7 @@ The mean fell from v2.0's 61.8% **because measurement replaced optimistic estima
 |------|-------|------|
 | Validated (85–100) | 1 | INJ-0015 *(estimated — only Validated row not yet harness-measured)* |
 | Asserted (70–84) | 8 | INJ-0001, INJ-0002, INJ-0008, INJ-0009, INJ-0010, INJ-0011, INJ-0012, INJ-0013 |
-| Partial (45–69) | 11 | INJ-0003, INJ-0006, INJ-0007, INJ-0014, INJ-0017, INJ-0018, INJ-0019, INJ-0022, INJ-0023, INJ-0025, INJ-0026 |
+| Partial (45–69) | 12 | INJ-0003, INJ-0006, INJ-0007, INJ-0014, INJ-0017, INJ-0018, INJ-0019, INJ-0022, INJ-0023, INJ-0025, INJ-0026, INJ-0027 |
 | Taxonomy-only (15–44) | 4 | INJ-0016, INJ-0020, INJ-0021, INJ-0024 |
 | Not modeled (0–14) | 2 | INJ-0004, INJ-0005 |
 
@@ -121,6 +122,7 @@ The mean fell from v2.0's 61.8% **because measurement replaced optimistic estima
 2. **INJ-0020 privacy (35%)**, **INJ-0018 jailbreak (57%)**, **O1 (30%)** — gate-failing measured slices.
 3. **Evasion stacking (33%)** — keyword-gated chaining; affects every class.
 4. **INJ-0017 (60)** and **INJ-0026 (62)** — agent-tool surface, now WIRED (2026-06-20, branch `hardening/decompose-im-detection`): IM matchers + free-text tool-abuse + goal-decomposition on the default `scan()` path; GTG-1002 6/6 block, 0 benign FP. Residual: broad IM recall ~33%; MCPTox/MCPSecBench benchmarking pending.
+5. **INJ-0027 (55)** — MCP supply-chain lifecycle (tool-poisoning / rug-pull / typosquat), branch `feat/mcp-guard`: new `na0s.mcp` FastMCP guard server + `detectors/mcp_supply_chain.py` (T1.2/T1.4/T2.3 ↔ OWASP-MCP01/03/06/10). SERVER-ONLY (opt-in; behind `_HAS_MCP_SUPPLY_CHAIN`, NOT on the default free-text `scan()` path), local/keyless, FP-safe on legit manifests. Residual: unmeasured by the recall harness; not yet benchmarked vs MCPTox/MCPSecBench.
 
 ---
 
@@ -158,6 +160,7 @@ These live in sibling docs that are under active edit; flagged here for the next
 - **Measured grounding.** Scores for the 13 harness-covered categories now use measured recall @0.55 (`Basis = measured`/`mixed`); the rest stay `estimated`. Harness artifact is the declared source of truth, over the per-row "samples" columns and over `BENCHMARK_RESULTS.md` (whose 100% D8 row is known-mislabeled and unfixed — **not** used here).
 - **D8 hardening reflected (in-flight, pending commit).** INJ-0007 rises 58→64 (measured): `context_manipulation.py` no longer dead code, multi-turn verdict folds into `scan()`, new `token_budget.py`/`state_confusion.py`, per-segment max-pool, cascade parity — all six D8.x techniques wired, 14/14 scan tests green. Residual is recall calibration (~7 round-number gates unvalidated), not wiring.
 - **D4 spaced-hex reflected.** Evasion axis hex 0%→69.8% (measured). Multi-buff stacking remains **OPEN** (measured 33%, keyword-gated chaining untouched).
+- **MCP guard server added (2026-06-22, branch `feat/mcp-guard`).** New INJ-0027 row: the `na0s.mcp` FastMCP guard server (`scan_text` / `check_tool_call` / `check_tool_response`) + `detectors/mcp_supply_chain.py` (tool-poisoning / rug-pull / typosquat). Emits canonical taxonomy codes only — T1.2 / T1.4 / T2.3 — with OWASP-MCP-Top-10 codes (MCP01/03/06/10) carried as external reference labels, NOT taxonomy codes. SERVER-ONLY (opt-in; does not change the default `scan()` path); local/keyless; the MCP SDK is an optional `na0s[mcp]` extra.
 - **2D structure + 9 new rows + Category column** retained from v2.0. Four v1.0 ATLAS/OWASP mapping corrections retained.
 - **Sibling-doc edits left untouched** — ROADMAP_V2.md and THREAT_TAXONOMY.md carry the author's own in-flight measured-coverage notes; this file is kept consistent with them, not overwritten onto them.
 
