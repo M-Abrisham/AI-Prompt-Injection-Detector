@@ -219,6 +219,23 @@ try:
 except ImportError:
     _HAS_RAG_POISON = False
 
+# Multimodal hidden-channel scoring (M1/M2/M3) — parity with scan().
+# cascade previously had ZERO visual / M-flag scoring references; this folds
+# the SAME corroborating boost + clean-attachment dampener so an embedded-image
+# payload whose decoded text trips an injection indicator blocks here too, and
+# a clean attachment stays SAFE.  Single source of truth in detectors.multimodal.
+try:
+    from .detectors.multimodal import (
+        map_m_flags as _map_m_flags,
+        get_multimodal_boost as _get_multimodal_boost,
+        is_uncorroborated_channel as _is_uncorroborated_channel,
+        has_hidden_channel as _has_hidden_channel,
+        MULTIMODAL_CLEAN_RISK_CEILING as _MM_CLEAN_CEILING,
+    )
+    _HAS_MULTIMODAL = True
+except ImportError:
+    _HAS_MULTIMODAL = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 
@@ -1122,6 +1139,45 @@ class CascadeClassifier:
             # Using 0.5 confidence signals maximum uncertainty.
             label, confidence, hits = "SAFE", 0.5, []
             technique_tags = []
+
+        # ---------------------------------------------------------------
+        # Multimodal hidden-channel scoring (M1/M2/M3) — parity with scan().
+        # Presence of a modality is NOT malicious.  DAMPENER: a clean
+        # embedded image / data-URI / attachment whose only signals are
+        # blob-shape artefacts is clamped below threshold.  BOOST: a hidden
+        # channel + an *independent* injection indicator adds a bounded
+        # corroborating boost (cap 0.30).  Operates in P(malicious) space,
+        # then converts back to the cascade's P(label-correct) confidence.
+        # ---------------------------------------------------------------
+        if _HAS_MULTIMODAL and l0 and _has_hidden_channel(l0.anomaly_flags):
+            try:
+                _mm_threshold = self._weighted.threshold
+                for _mm_tid in _map_m_flags(l0.anomaly_flags):
+                    if _mm_tid not in technique_tags:
+                        technique_tags.append(_mm_tid)
+                # Convert cascade confidence (P(label correct)) -> P(malicious).
+                _p_mal = confidence if label == "MALICIOUS" else 1.0 - confidence
+                if _is_uncorroborated_channel(l0.anomaly_flags, hits):
+                    if _p_mal > _MM_CLEAN_CEILING:
+                        _p_mal = _MM_CLEAN_CEILING
+                        label = "MALICIOUS" if _p_mal >= _mm_threshold else "SAFE"
+                        if "multimodal:clean_image_dampened" not in hits:
+                            hits.append("multimodal:clean_image_dampened")
+                else:
+                    _mm_boost = _get_multimodal_boost(
+                        l0.anomaly_flags, hits,
+                        corroborated=(label == "MALICIOUS"),
+                    )
+                    if _mm_boost > 0.0:
+                        _p_mal = min(_p_mal + _mm_boost, 1.0)
+                        if _p_mal >= _mm_threshold:
+                            label = "MALICIOUS"
+                # Convert back to P(label correct).
+                confidence = round(
+                    _p_mal if label == "MALICIOUS" else 1.0 - _p_mal, 4
+                )
+            except Exception:
+                _logger.debug("Multimodal scoring (cascade) failed", exc_info=True)
 
         # ---------------------------------------------------------------
         # Layer 6: Groundedness check — verify MALICIOUS verdicts are
