@@ -37,7 +37,7 @@ rule_count:
     count: 6
   - alias: _COMPLIANCE_RULES
     source_attr: RULES
-    source_file: src/na0s/compliance_evasion_rules.py
+    source_file: src/na0s/rules/registry/compliance_evasion.py
     count: 4
   total_ast: 120
 taxonomy:
@@ -76,10 +76,10 @@ taxonomy:
     C1MT: 6
     BEN: 2
 test_count:
-  count: 9853
+  count: 9872
   collection_errors: 0
   pytest_exit_code: 0
-test_files: 325
+test_files: 326
 detection_signals_in_scan:
   filter_doc: Names matching prefixes (detect_, scan_, analyze_, extract_, score_,
     compute_, classify*, predict*, get_, sniff_) plus an exact-match allowlist for

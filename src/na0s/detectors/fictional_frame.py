@@ -47,12 +47,22 @@ class FictionalFrameResult:
 
 _FICTIONAL_FRAME_PATTERNS = [
     # Story/novel/movie framing
+    # NOTE on the ``(?:\w+\s+){0,2}`` adjective slot below: it permits up to two
+    # bounded adjectives between the determiner and the frame noun so that
+    # "for a *fictional* novel" / "for my *short crime* story" match (the bare
+    # determiner→noun shape missed any adjective-interrupted phrasing).  The
+    # ``{0,2}`` upper bound keeps the regex ReDoS-linear — an unbounded ``*``
+    # over ``\w+\s+`` would be catastrophic.  A frame match alone still carries
+    # weight 0 (Layer 3), so broadening this cannot cause a false positive.
     ("fictional", re.compile(
         r"\b(?:imagine|pretend|suppose|let'?s?\s+say|hypothetically|"
-        r"in\s+(?:my|our|the|a|this)\s+(?:novel|story|book|fiction|screenplay|script|fanfic|movie|game|scenario|world|simulation)|"
-        r"write\s+a\s+(?:story|scene|script|novel|screenplay)|"
+        r"in\s+(?:my|our|the|a|this)\s+(?:\w+\s+){0,2}(?:novel|story|book|fiction|screenplay|script|fanfic|movie|film|game|scenario|world|simulation|comic|manga|anime|graphic\s+novel|webcomic)|"
+        r"(?:write|create|compose|craft|pen)\s+(?:a|an|me\s+a)\s+(?:\w+\s+){0,2}(?:story|scene|script|novel|screenplay|tale|narrative)|"
         r"if\s+you\s+were\s+(?:a\s+character|in\s+a\s+(?:movie|novel|book))|"
-        r"for\s+(?:a|my)\s+(?:story|novel|book|screenplay|game|fiction)|"
+        r"for\s+(?:a|my|this)\s+(?:\w+\s+){0,2}(?:story|novel|book|screenplay|game|fiction|podcast|documentary|series|film|comic|manga|true\s+crime\s+podcast)|"
+        r"for\s+my\s+(?:youtube|tiktok|twitch|streaming)\s+(?:channel|video|series)?|"
+        r"based\s+on\s+a\s+true\s+story|"
+        r"(?:true\s+crime|murder\s+mystery|crime)\s+(?:podcast|novel|story|series|documentary)|"
         r"fictional\s+(?:scenario|character|world|setting)|"
         r"in\s+this\s+roleplay|"
         r"creative\s+writing\s+(?:exercise|prompt))\b",
@@ -125,7 +135,7 @@ _INNER_ATTACK_PATTERNS = [
     ("override", re.compile(
         r"(?:ignore|bypass|disable|remove|turn\s+off|deactivate|circumvent|break|overcome)\s+"
         r"(?:all\s+)?(?:your\s+)?(?:safety|security|content|output|ethical|moral)\s*"
-        r"(?:filters?|restrictions?|guidelines?|rules?|limitations?|constraints?|measures?|checks?|protections?|guardrails?)",
+        r"(?:filters?|restrictions?|guidelines?|rules?|limitations?|constraints?|measures?|checks?|protections?|guardrails?|moderation|filtering|controls?)",
         re.IGNORECASE,
     )),
     # Harmful content request inner patterns
@@ -182,7 +192,12 @@ _HARMFUL_OBJECT_STRONG_RE = re.compile(
     r"explosives?|pipe\s+bomb|ied|detonator|"
     r"untraceable\s+(?:weapon|firearm|gun|poison)|"
     r"extremist\s+(?:recruitment|propaganda)|radicaliz\w+|terrorist\s+(?:attack|propaganda|cell)|"
-    r"human\s+trafficking|child\s+(?:exploitation|abuse|sexual)"
+    r"human\s+trafficking|child\s+(?:exploitation|abuse|sexual)|"
+    # Inherently-harmful acts (no benign reading) — strong-listed so they fire
+    # without a separate production verb.  Still gated by the frame×inner
+    # conjunction (Layer 3): they only contribute weight inside a frame.
+    r"dispose\s+of\s+(?:a\s+)?(?:body|corpse|the\s+body)|hide\s+a\s+(?:body|corpse)|"
+    r"get\s+away\s+with\s+(?:murder|killing)|cover\s+up\s+a\s+(?:murder|killing|crime)"
     r")\b",
     re.IGNORECASE,
 )

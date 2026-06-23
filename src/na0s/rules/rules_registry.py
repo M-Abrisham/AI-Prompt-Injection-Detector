@@ -2117,7 +2117,9 @@ from ..detectors.privacy_probe import PRIVACY_RULES as _PRIVACY_RULES  # noqa: E
 RULES.extend(_PRIVACY_RULES)
 
 # ---------------------------------------------------------------------------
-# Track C: C1 Compliance Evasion rules (from compliance_evasion_rules.py)
+# Track C: C1 Compliance Evasion rules (rules/registry/compliance_evasion.py)
+# (v1.0.0 Step 10: moved from the top-level na0s.compliance_evasion_rules
+# module into the per-track rules/registry/ package — no back-compat shim.)
 # ---------------------------------------------------------------------------
-from ..compliance_evasion_rules import RULES as _COMPLIANCE_RULES  # noqa: E402
+from .registry.compliance_evasion import RULES as _COMPLIANCE_RULES  # noqa: E402
 RULES.extend(_COMPLIANCE_RULES)
