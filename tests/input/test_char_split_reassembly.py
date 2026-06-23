@@ -102,6 +102,15 @@ class TestReassembleMagnitude(unittest.TestCase):
         self.assertIn("char_level_reassembly", flags)
         self.assertIn("char_level_reassembly_heavy", flags)
 
+    def test_short_run_reassembles_but_does_not_score(self):
+        # A bare 3-char space run reassembles (text normalized) but must NOT
+        # emit the SCORED flag -- it fires on incidental benign letter runs.
+        text, reass, run = _reassemble_char_splits("the plan is a b c then go")
+        self.assertTrue(reass)            # reassembly still happens
+        self.assertEqual(run, 3)
+        _, _, flags = normalize_text("the plan is a b c then go")
+        self.assertNotIn("char_level_reassembly", flags)  # but not scored
+
 
 class TestReassembleFalsePositives(unittest.TestCase):
     """Legitimate uses of the same separators must NOT be reassembled."""

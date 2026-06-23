@@ -96,6 +96,14 @@ _GENERIC_CHAR_SPLIT_RE = re.compile(
     r"[A-Za-z]([^A-Za-z0-9\s/|<>\\]{1,3})(?:[A-Za-z]\1){2,}[A-Za-z]"
 )
 
+# Reassembly always normalizes the text (so downstream rules see the word),
+# but the SCORED ``char_level_reassembly`` flag is only emitted for a run this
+# long (>= chars).  A bare 3-char run is the weakest signal and fires on
+# incidental benign letter-sequences (~0.05% of genuine-benign text, e.g. an
+# acronym or a list of single letters), so it must NOT add composite risk;
+# real char-split attacks spell whole words (run >= 4).
+_CHAR_SPLIT_MIN_SCORED = 4
+
 # A single-char run this long (>= chars) is treated as *heavy* obfuscation:
 # essentially never produced by benign text, so the scorer floors it to the
 # decision threshold (see predict.py char-split block).
@@ -1058,7 +1066,10 @@ def normalize_text(text, _idempotency_pass=False):
     # multi-space collapse so that double-space word boundaries are
     # preserved for accurate reassembly.
     text, char_reassembled, char_run = _reassemble_char_splits(text)
-    if char_reassembled:
+    if char_reassembled and char_run >= _CHAR_SPLIT_MIN_SCORED:
+        # Emit the SCORED flag only for a run >= 4 (a bare 3-char run is too
+        # weak and fires on incidental benign letter-sequences).  The text is
+        # still reassembled above regardless, so rules see the de-split word.
         flags.append("char_level_reassembly")
         # Grade severity: a long single-char run is essentially never benign,
         # so tag it for the scorer's heavy-obfuscation floor.

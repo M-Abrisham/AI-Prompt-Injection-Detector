@@ -34,7 +34,11 @@ from .config import (
 )
 from .obfuscation import obfuscation_scan
 from .input import layer0_sanitize
-from .input.normalization import _reassemble_char_splits, _CHAR_SPLIT_HEAVY_RUN
+from .input.normalization import (
+    _reassemble_char_splits,
+    _CHAR_SPLIT_HEAVY_RUN,
+    _CHAR_SPLIT_MIN_SCORED,
+)
 from .input.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult
 from .models import get_model_path
@@ -687,7 +691,7 @@ class WeightedClassifier:
         try:
             _cs_src = raw_text if raw_text is not None else text
             _, _cs_reassembled, _cs_run = _reassemble_char_splits(_cs_src)
-            if _cs_reassembled:
+            if _cs_reassembled and _cs_run >= _CHAR_SPLIT_MIN_SCORED:
                 _cs_heavy = _cs_run >= _CHAR_SPLIT_HEAVY_RUN
                 _cs_w = 0.45 if _cs_heavy else 0.20
                 composite = min(composite + _cs_w, 1.0)
