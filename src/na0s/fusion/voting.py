@@ -125,6 +125,30 @@ def get_decision_threshold():
             "ignoring.", env_val,
         )
 
+    # 1b. Packaged calibrated threshold shipped in the wheel (na0s/models/
+    # decision_threshold.json).  The retrain's deploy step writes this so the
+    # CALIBRATED operating point ships with the model instead of falling back to
+    # the uncalibrated default; preferred over the repo-local data/processed copy.
+    try:
+        import importlib.resources as _ir
+        _res = _ir.files("na0s.models") / "decision_threshold.json"
+        if _res.is_file():
+            data = json.loads(_res.read_text(encoding="utf-8"))
+            raw = data.get("target_fpr_threshold", data.get("recall95_threshold"))
+            valid = _valid_threshold(raw)
+            if valid is not None:
+                _cached_threshold = valid
+                _logger.info(
+                    "Decision threshold loaded from packaged decision_threshold.json: %.4f",
+                    _cached_threshold,
+                )
+                return _cached_threshold
+            _logger.warning(
+                "Packaged decision_threshold.json has invalid value %r; ignoring.", raw,
+            )
+    except Exception as exc:
+        _logger.debug("No packaged decision_threshold.json (%s); trying repo copy.", exc)
+
     # 2. Load from optimal_threshold.json
     json_path = os.path.normpath(_THRESHOLD_JSON_PATH)
     if os.path.isfile(json_path):

@@ -231,18 +231,26 @@ class TestCachedCharVectorizer(unittest.TestCase):
         finally:
             pred._cached_char_vectorizer = old_val
 
-    def test_get_cached_char_vectorizer_load_failure(self):
-        """Returns None when safe_load raises an exception."""
+    def test_get_cached_char_vectorizer_present_but_corrupt_fails_loud(self):
+        """A PRESENT-but-unloadable char vectorizer (safe_load raises a non-
+        FileNotFoundError: integrity/tamper/corruption) must FAIL LOUD and must
+        NOT poison the cache — a transient failure is retried, not permanently
+        downgraded to word-only features. (The old behavior silently cached
+        False and returned None; the cache-sentinel fix realigned it to the
+        F-AR8 fail-loud contract. The legitimate skip is artifact-absent /
+        unsigned — covered by test_get_cached_char_vectorizer_missing_file.)"""
         import na0s.predict as pred
 
         old_val = pred._cached_char_vectorizer
         try:
             pred._cached_char_vectorizer = None
             with patch('os.path.isfile', return_value=True), \
-                 patch.object(pred, 'safe_load', side_effect=Exception("corrupt")):
-                result = pred._get_cached_char_vectorizer()
-            self.assertIsNone(result)
-            self.assertIs(pred._cached_char_vectorizer, False)
+                 patch.object(pred, 'safe_load',
+                              side_effect=ValueError("Integrity check failed; tampered")):
+                with self.assertRaises(ValueError):
+                    pred._get_cached_char_vectorizer()
+            # Failure must NOT be cached (no permanent poison): cache stays None.
+            self.assertIsNone(pred._cached_char_vectorizer)
         finally:
             pred._cached_char_vectorizer = old_val
 

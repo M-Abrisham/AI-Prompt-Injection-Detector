@@ -35,7 +35,7 @@ import tempfile
 
 import warnings
 
-from na0s.models import KNOWN_HASHES
+from na0s.models import KNOWN_HASHES, get_model_path
 
 _logger = logging.getLogger("na0s.safe_pickle")
 _audit = logging.getLogger("na0s.integrity_audit")
@@ -237,6 +237,20 @@ def _check_permissions(path, label="file"):
 
 
 
+def _is_packaged_model(path, basename):
+    """True iff *path* resolves to the model bundled in the ``na0s.models`` package.
+
+    Used to scope the hardcoded ``KNOWN_HASHES`` pin to the SHIPPED artifact, so a
+    same-named training intermediate in another directory is verified by its own
+    sidecar instead of the (old) shipped hash.  Degrades to ``False`` (sidecar
+    path) if the packaged location can't be resolved.
+    """
+    try:
+        return os.path.realpath(path) == os.path.realpath(get_model_path(basename))
+    except Exception:
+        return False
+
+
 def _resolve_expected_hash(path):
     """Return ``(expected_hex_digest, source)`` for *path*.
 
@@ -244,7 +258,14 @@ def _resolve_expected_hash(path):
     Raises ``FileNotFoundError`` when no source is available.
     """
     basename = os.path.basename(path)
-    if basename in KNOWN_HASHES:
+    # The hardcoded KNOWN_HASHES pin is a supply-chain guard for the SHIPPED
+    # model bundled in na0s.models ONLY.  A freshly-trained candidate written
+    # elsewhere (e.g. data/processed/model.pkl during a retrain) shares the
+    # basename but is NOT the shipped artifact, so it must be verified by its own
+    # fresh sidecar — never against the OLD shipped hash.  Without this scoping,
+    # every retrain's candidate is rejected as "tampered" and the model can never
+    # be retrained (auto-retrain GAP-03 / shadow_evaluate / f14_promotion_gate).
+    if basename in KNOWN_HASHES and _is_packaged_model(path, basename):
         return KNOWN_HASHES[basename], "hardcoded"
 
     # Prefer HMAC sidecar over SHA-256 sidecar

@@ -102,8 +102,16 @@ def load_canary_csv(csv_path: str) -> list[dict]:
     return rows
 
 
-def evaluate(csv_path: str, verbose: bool = False) -> dict:
-    """Run Na0S prediction on the canary set and return metrics."""
+def evaluate(csv_path: str, verbose: bool = False, model_dir: str = None) -> dict:
+    """Run Na0S prediction on the canary set and return metrics.
+
+    When *model_dir* is given (e.g. ``data/processed`` during a retrain), the
+    CANDIDATE model triple is scored instead of the shipped package model — so
+    the deploy gate validates the freshly-trained model, not the old one.  This
+    repoints predict.py's structural-scaler + char-vectorizer caches at the
+    candidate too; otherwise classify_prompt would build features with the
+    SHIPPED scaler/char-vectorizer (mismatched) and the gate would be invalid.
+    """
 
     print("=" * 70)
     print("  Na0S Canary Evaluation Set")
@@ -113,9 +121,23 @@ def evaluate(csv_path: str, verbose: bool = False) -> dict:
     print()
 
     # Load model
-    print("  Loading TF-IDF model...")
-    vectorizer = safe_load(get_model_path("tfidf_vectorizer.pkl"))
-    model = safe_load(get_model_path("model.pkl"))
+    if model_dir:
+        import os as _os
+        import na0s.predict as _p
+        # Repoint ALL artifact paths predict.py reads from its module globals so
+        # classify_prompt scores the candidate consistently (model + tfidf +
+        # char-tfidf + structural scaler all from the candidate dir).
+        _p.SCALER_PATH = _os.path.join(model_dir, "structural_scaler.pkl")
+        _p.CHAR_VECTORIZER_PATH = _os.path.join(model_dir, "char_tfidf_vectorizer.pkl")
+        _p._cached_scaler = None
+        _p._cached_char_vectorizer = None
+        print(f"  Loading CANDIDATE model from {model_dir} ...")
+        vectorizer = safe_load(_os.path.join(model_dir, "tfidf_vectorizer.pkl"))
+        model = safe_load(_os.path.join(model_dir, "model.pkl"))
+    else:
+        print("  Loading shipped package model ...")
+        vectorizer = safe_load(get_model_path("tfidf_vectorizer.pkl"))
+        model = safe_load(get_model_path("model.pkl"))
     print("  Model loaded.\n")
 
     # Load data
@@ -382,6 +404,13 @@ def main():
         action="store_true",
         help="Print per-sample results",
     )
+    parser.add_argument(
+        "--model-dir",
+        default=None,
+        help="Directory holding the CANDIDATE model.pkl/tfidf_vectorizer.pkl/"
+             "char_tfidf_vectorizer.pkl/structural_scaler.pkl to score instead of "
+             "the shipped package model (e.g. data/processed during a retrain).",
+    )
 
     json_group = parser.add_mutually_exclusive_group()
     json_group.add_argument(
@@ -408,7 +437,7 @@ def main():
         print(f"ERROR: Canary CSV not found: {args.csv}", file=sys.stderr)
         sys.exit(2)
 
-    result = evaluate(args.csv, verbose=args.verbose)
+    result = evaluate(args.csv, verbose=args.verbose, model_dir=args.model_dir)
 
     if args.json_path is not None:
         export_json(result, csv_path=args.csv, json_path=args.json_path)

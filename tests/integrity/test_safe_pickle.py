@@ -342,5 +342,34 @@ class TestLargeObjectTruncation(unittest.TestCase):
         self.assertGreaterEqual(head[1], 4)
 
 
+class TestHardcodedHashPathScoping(unittest.TestCase):
+    """The hardcoded KNOWN_HASHES pin must apply ONLY to the shipped package model.
+
+    Regression for the auto-retrain GAP-03 blocker: a freshly-trained candidate
+    (e.g. data/processed/model.pkl) shares the basename 'model.pkl' with the
+    shipped artifact, so a basename-only KNOWN_HASHES lookup rejected it against
+    the OLD shipped hash ("File may be tampered") and the model could never be
+    retrained.  The candidate must instead verify via its own fresh sidecar.
+    """
+
+    def test_candidate_same_basename_uses_sidecar_not_shipped_pin(self):
+        from na0s.safe_pickle import _resolve_expected_hash
+
+        with tempfile.TemporaryDirectory() as d:
+            cand = os.path.join(d, "model.pkl")  # basename collides with KNOWN_HASHES
+            safe_dump({"candidate": True, "v": 999}, cand)  # writes a fresh sidecar
+            _, source = _resolve_expected_hash(cand)
+            self.assertIn(source, ("sidecar_hmac", "sidecar_sha256"))
+            # Must NOT raise "File may be tampered" against the shipped pin.
+            self.assertEqual(safe_load(cand), {"candidate": True, "v": 999})
+
+    def test_shipped_model_still_uses_hardcoded_pin(self):
+        from na0s.safe_pickle import _resolve_expected_hash
+        from na0s.models import get_model_path
+
+        _, source = _resolve_expected_hash(get_model_path("model.pkl"))
+        self.assertEqual(source, "hardcoded")
+
+
 if __name__ == "__main__":
     unittest.main()

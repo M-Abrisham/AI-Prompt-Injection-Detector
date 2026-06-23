@@ -77,7 +77,10 @@ def _compute_metadata(text):
     length_bytes = len(text_bytes)
 
     enc = _get_encoder()
-    token_count = len(enc.encode(text))
+    # disallowed_special=() so adversarial samples that embed tokenizer control
+    # strings (e.g. "<|endoftext|>") are counted as ordinary text instead of
+    # raising ValueError and aborting the whole generator mid-write.
+    token_count = len(enc.encode(text, disallowed_special=()))
 
     # compression_ratio: lower = more repetitive (0.0-1.0 range)
     if length_bytes > 0:
@@ -110,6 +113,21 @@ _FIELDNAMES = [
 
 
 _BENIGN_SUFFIX = "_benign"
+
+
+def _utf8_safe(text):
+    """Return ``text`` with lone surrogates replaced so it is valid UTF-8.
+
+    A few probe samples (e.g. malformed-Unicode adversarial strings in the
+    Adversarial-ML probe) contain lone surrogate code points (U+D800-U+DFFF)
+    that ``str.encode("utf-8")`` cannot encode.  Without this, the very first
+    such sample aborts the entire generator at the dedup hash (and again at the
+    CSV write), so NO taxonomy training CSV is produced — which is why the IM
+    family (and every category) never reached model training.  The ``replace``
+    error handler substitutes ``?`` for each un-encodable code point, yielding a
+    hashable, CSV-writable string while preserving the rest of the sample.
+    """
+    return text.encode("utf-8", "replace").decode("utf-8")
 
 
 def _technique_to_category(technique_id):
@@ -365,6 +383,9 @@ def main(seed=42):
         for item in samples:
             text, tech_id = item[0], item[1]
             meta = item[2] if len(item) == 3 else {}
+            # Sanitize lone surrogates so neither the dedup hash below nor the
+            # later UTF-8 CSV write can abort the whole run on a malformed sample.
+            text = _utf8_safe(text)
             h = hashlib.sha256(text.encode("utf-8")).hexdigest()
             if h not in seen:
                 seen.add(h)
@@ -396,6 +417,7 @@ def main(seed=42):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
     out_path = os.path.join(project_root, "data", "raw", "taxonomy_samples.csv")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)  # data/raw is gitignored; create on demand
 
     print("\nComputing per-sample metadata...")
     with open(out_path, "w", newline="", encoding="utf-8") as f:

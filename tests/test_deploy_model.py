@@ -193,6 +193,28 @@ class TestDeploy(unittest.TestCase):
             self.assertRegex(content, r'"model\.pkl":\s*"[0-9a-f]{64}"')
             self.assertRegex(content, r'"tfidf_vectorizer\.pkl":\s*"[0-9a-f]{64}"')
 
+    def test_merge_preserves_unretrained_pins(self):
+        """F-AR2: deploy MERGES new hashes over the existing KNOWN_HASHES, so a
+        pin the retrain does NOT regenerate (model_embedding.pkl, produced only
+        by scripts/model_embedding.py) is preserved rather than dropped."""
+        from scripts.deploy_model import deploy
+        try:
+            from na0s.models import KNOWN_HASHES
+        except Exception:
+            self.skipTest("na0s.models not importable")
+        if "model_embedding.pkl" not in KNOWN_HASHES:
+            self.skipTest("no model_embedding.pkl pin to preserve in this build")
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"cand_" + fname.encode())
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            content = open(init_path).read()
+            # The unretrained embedding pin survives the rewrite (merge, not replace).
+            self.assertIn("model_embedding.pkl", content)
+            self.assertIn(KNOWN_HASHES["model_embedding.pkl"], content)
+
     def test_backup_created_when_dest_exists(self):
         from scripts.deploy_model import deploy
         with tempfile.TemporaryDirectory() as td:
@@ -590,6 +612,193 @@ class TestCharVectorizerRequired(unittest.TestCase):
 
             with open(os.path.join(dst_dir, "char_tfidf_vectorizer.pkl"), "rb") as f:
                 self.assertEqual(f.read(), bak_content)
+
+
+# ---------------------------------------------------------------------------
+# Sidecar regeneration (F-AR6)
+# ---------------------------------------------------------------------------
+
+def _parse_sidecar(raw):
+    """Local mirror of safe_pickle._parse_sidecar so this test has no hard
+    dependency on the (heavy) na0s import for the deploy-path assertions."""
+    raw = raw.strip()
+    if raw.startswith("v1:"):
+        parts = raw.split(":", 2)
+        if len(parts) == 3:
+            return parts[2]
+    return raw
+
+
+class TestSidecarRegen(unittest.TestCase):
+    """F-AR6: deploy_model must (re)write each model file's .sha256 sidecar from
+    the freshly-deployed bytes — deploy copies the .pkl but not its sidecar, so
+    without this the destination keeps a stale sidecar that no longer matches the
+    .pkl it guards."""
+
+    def _setup_dirs(self, td):
+        src_dir = os.path.join(td, "processed")
+        dst_dir = os.path.join(td, "models")
+        os.makedirs(src_dir)
+        os.makedirs(dst_dir)
+        init_path = os.path.join(dst_dir, "__init__.py")
+        _write_file(init_path, _INIT_TEMPLATE.encode())
+        return src_dir, dst_dir, init_path
+
+    def test_sidecar_written_and_matches_pkl(self):
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"fresh_" + fname.encode())
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                pkl = os.path.join(dst_dir, fname)
+                sidecar = pkl + ".sha256"
+                self.assertTrue(os.path.exists(sidecar), f"sidecar missing for {fname}")
+                parsed = _parse_sidecar(open(sidecar).read())
+                self.assertEqual(parsed, _sha256(pkl),
+                                 f"sidecar for {fname} does not match its .pkl")
+
+    def test_unchanged_branch_refreshes_stale_sidecar(self):
+        """The bug exactly: .pkl unchanged but the shipped sidecar is stale.
+        deploy's unchanged-skip path must still rewrite the sidecar."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                content = b"identical_" + fname.encode()
+                _write_file(os.path.join(src_dir, fname), content)
+                _write_file(os.path.join(dst_dir, fname), content)  # same bytes -> skip copy
+                # Seed a STALE sidecar that does NOT match the file.
+                _write_file(os.path.join(dst_dir, fname + ".sha256"), b"v1:sha256:" + b"0" * 64)
+
+            with self.assertRaises(SystemExit):
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                pkl = os.path.join(dst_dir, fname)
+                parsed = _parse_sidecar(open(pkl + ".sha256").read())
+                self.assertEqual(parsed, _sha256(pkl),
+                                 f"stale sidecar for {fname} was not refreshed")
+
+
+class TestShippedSidecarsFresh(unittest.TestCase):
+    """Regression guard against the real shipped sidecars going stale again
+    (the original F-AR6 finding: model.pkl.sha256 / tfidf_vectorizer.pkl.sha256
+    did not match their .pkl)."""
+
+    def test_shipped_sidecars_match_their_pkl(self):
+        from scripts.deploy_model import DEST_DIR
+        checked = 0
+        for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+            pkl = os.path.join(DEST_DIR, fname)
+            sidecar = pkl + ".sha256"
+            if not (os.path.exists(pkl) and os.path.exists(sidecar)):
+                continue
+            parsed = _parse_sidecar(open(sidecar).read())
+            self.assertEqual(
+                parsed, _sha256(pkl),
+                f"shipped {fname}.sha256 is stale — does not match {fname}",
+            )
+            checked += 1
+        if checked == 0:
+            self.skipTest("no shipped .pkl + .sha256 pairs found in this build")
+
+
+# ---------------------------------------------------------------------------
+# Failure-mode branch coverage (TC1)
+# ---------------------------------------------------------------------------
+
+class TestDeployFailureModes(unittest.TestCase):
+    """Exercise the error branches that the happy-path tests never reach:
+    copy failure, rollback restore failure, unreadable __init__, sidecar write
+    failure, and backup size-mismatch — each must exit 1 (or sys.exit(1))."""
+
+    def _setup_dirs(self, td):
+        src_dir = os.path.join(td, "processed")
+        dst_dir = os.path.join(td, "models")
+        os.makedirs(src_dir)
+        os.makedirs(dst_dir)
+        init_path = os.path.join(dst_dir, "__init__.py")
+        _write_file(init_path, _INIT_TEMPLATE.encode())
+        return src_dir, dst_dir, init_path
+
+    def test_deploy_copy_failure_exits_1(self):
+        """shutil.copy2 raising OSError during deploy must exit 1."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir, dst_dir, init_path = self._setup_dirs(td)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"data_" + fname.encode())
+            with mock.patch("shutil.copy2", side_effect=OSError("disk full")):
+                with self.assertRaises(SystemExit) as ctx:
+                    deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_path)
+            self.assertEqual(ctx.exception.code, 1)
+
+    def test_rollback_copy_failure_exits_1(self):
+        """shutil.copy2 raising OSError during rollback must exit 1."""
+        from scripts.deploy_model import rollback
+        with tempfile.TemporaryDirectory() as td:
+            dst_dir = os.path.join(td, "models")
+            os.makedirs(dst_dir)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(dst_dir, fname), b"live")
+                _write_file(os.path.join(dst_dir, fname + ".bak"), b"old")
+            with mock.patch("shutil.copy2", side_effect=OSError("read-only fs")):
+                with self.assertRaises(SystemExit) as ctx:
+                    rollback(dest_dir=dst_dir)
+            self.assertEqual(ctx.exception.code, 1)
+
+    def test_deploy_unreadable_init_exits_1(self):
+        """An __init__ path that cannot be read (here: a directory) exits 1."""
+        from scripts.deploy_model import deploy
+        with tempfile.TemporaryDirectory() as td:
+            src_dir = os.path.join(td, "processed")
+            dst_dir = os.path.join(td, "models")
+            os.makedirs(src_dir)
+            os.makedirs(dst_dir)
+            for fname in ["model.pkl", "tfidf_vectorizer.pkl"]:
+                _write_file(os.path.join(src_dir, fname), b"data_" + fname.encode())
+            # init_path is a directory -> open(..., "r") raises OSError.
+            init_dir = os.path.join(dst_dir, "init_as_dir")
+            os.makedirs(init_dir)
+            with self.assertRaises(SystemExit) as ctx:
+                deploy(source_dir=src_dir, dest_dir=dst_dir, init_path=init_dir)
+            self.assertEqual(ctx.exception.code, 1)
+
+    def test_write_sidecar_oserror_exits_1(self):
+        """_write_sidecar must exit 1 when the sidecar path is unwritable."""
+        from scripts.deploy_model import _write_sidecar
+        with tempfile.TemporaryDirectory() as td:
+            pkl = os.path.join(td, "model.pkl")
+            _write_file(pkl, b"x")
+            os.makedirs(pkl + ".sha256")  # directory at the sidecar path
+            with self.assertRaises(SystemExit) as ctx:
+                _write_sidecar(pkl, "deadbeef")
+            self.assertEqual(ctx.exception.code, 1)
+
+    def test_backup_size_mismatch_exits_1(self):
+        """_backup_file must exit 1 when the backup size differs from the original."""
+        from scripts.deploy_model import _backup_file
+        with tempfile.TemporaryDirectory() as td:
+            dst = os.path.join(td, "model.pkl")
+            _write_file(dst, b"data")
+            real_getsize = os.path.getsize
+
+            def fake_getsize(p):
+                # Report a wrong size for the timestamped backup only.
+                base = os.path.basename(p)
+                if base.startswith("model.pkl.") and base.endswith(".bak") and "-" in base:
+                    return 999999
+                return real_getsize(p)
+
+            with mock.patch("os.path.getsize", side_effect=fake_getsize):
+                with self.assertRaises(SystemExit) as ctx:
+                    _backup_file(dst)
+            self.assertEqual(ctx.exception.code, 1)
 
 
 if __name__ == "__main__":
