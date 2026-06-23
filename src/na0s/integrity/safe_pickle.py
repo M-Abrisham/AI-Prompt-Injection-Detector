@@ -42,11 +42,15 @@ import json
 import logging
 import os
 import pickle
+import re
 import stat
 import tempfile
+import threading
 
 import warnings
+from collections import OrderedDict
 
+from na0s.config import INTEGRITY_HASH_CHUNK_BYTES, PICKLE_SIGNING_KEY_ENV
 from na0s.models import KNOWN_HASHES
 
 _logger = logging.getLogger("na0s.safe_pickle")
@@ -55,10 +59,125 @@ _audit = logging.getLogger("na0s.integrity_audit")
 # Valid pickle protocol 0 start bytes
 _PROTO0_OPCODES = frozenset(b"(]})\x89\x88IX\x80")
 
-# mtime-gated hash cache: avoids re-hashing unchanged files on every load.
-# Maps path -> (mtime, digest) for both SHA-256 and HMAC-SHA256.
-_sha256_cache: dict = {}  # path -> (mtime, hex_digest)
-_hmac_cache: dict = {}    # path -> (mtime, hex_digest)
+# Canonical shape of an expected integrity digest. SHA-256 and HMAC-SHA256 both
+# emit ``hexdigest()`` = exactly 64 lowercase-hex chars (verified empirically:
+# ``len(hashlib.sha256(b'x').hexdigest()) == 64`` and the HMAC equivalent). This
+# is an invariant of the hash construction, NOT a tunable threshold. Accept
+# A-F so externally-generated uppercase digests parse; the parser normalises to
+# lowercase on return because ``hmac.compare_digest`` is byte-exact against the
+# lowercase ``hexdigest()`` output.
+_HEX64_RE = re.compile(r"\A[0-9a-fA-F]{64}\Z")
+
+# NA0S_PICKLE_KEY strength policy (bytes of the stripped key):
+#   < _MIN_PICKLE_KEY_LEN        -> hard REJECT (ValueError); a key this short
+#                                   gives an HMAC-SHA256 secret too little
+#                                   entropy to resist offline brute force.
+#   [_MIN .. _WEAK_PICKLE_KEY_LEN) -> ACCEPT but WARN (operationally weak).
+#   >= _WEAK_PICKLE_KEY_LEN      -> ACCEPT silently (>= the 256-bit HMAC-SHA256
+#                                   output/recommended key size).
+# 8 bytes ~= 48 bits for a random alphanumeric secret: rejects only degenerate
+# 1-7 char / whitespace-only keys while passing every legitimate operator key.
+# 32 bytes = 256 bits = the HMAC-SHA256 output (digest) size, the recommended
+# key length past which a random key is full-entropy for HMAC-SHA256. (Keys are
+# only hashed down above the 64-byte SHA-256 *block* size — a separate bound.)
+# Both are named,
+# justified constants (na0s-review-checklist: no magic thresholds), not numbers
+# chosen to keep tests green.
+# TODO(P3): externalize via config.py (ROADMAP_V2.md:1177 — integrity knobs).
+_MIN_PICKLE_KEY_LEN = 8
+_WEAK_PICKLE_KEY_LEN = 32
+
+# File-identity-gated digest cache: avoids re-hashing unchanged files on every
+# load. This is a transparent OPTIMIZATION that sits *after* the trust decision
+# (``hmac.compare_digest(actual, expected)`` in ``verify_file_digest``): it only
+# memoises a recomputed digest of the *same* file, so it cannot change which hash
+# is expected or whether a load is accepted. It is NOT an integrity boundary.
+#
+# Each cache is a bounded LRU keyed on the path string, with the value
+# ``(file_identity, hex_digest)``. ``file_identity`` is ``(st_mtime_ns, st_size,
+# st_ino)`` from one ``os.stat`` (see ``_file_identity``) — strictly finer than
+# the old ``getmtime()``-seconds gate, so a same-mtime-tick rewrite (different
+# size/inode) is a cache MISS and is re-hashed rather than served stale.
+#
+# ``_CACHE_MAXSIZE`` bounds memory at O(cap), not O(distinct paths seen): the
+# real production universe is the ~6 fixed model pkls (four in
+# ``predict.py``'s loaders, two in ``predict_embedding.py``), each loaded once;
+# the bound only ever engages for pathological batch/rollback/test workloads
+# that ``safe_load``/``safe_dump`` over many distinct/temp paths. 64 is ~10x the
+# real path count, so the steady-state SDK never evicts. The eviction idiom
+# (``OrderedDict`` + ``move_to_end`` + ``popitem(last=False)``) mirrors the
+# bounded LRU in ``judge/llm_judge.py`` (``cache_size`` default 128,
+# ``popitem(last=False)`` eviction). Mutations are serialised by ``_cache_lock``;
+# the (slow, I/O-bound) hash itself is computed OUTSIDE the lock.
+_CACHE_MAXSIZE = 64
+_sha256_cache: "OrderedDict[str, tuple]" = OrderedDict()  # path -> (file_id, hex)
+_hmac_cache: "OrderedDict[str, tuple]" = OrderedDict()    # path -> (file_id, hex)
+_cache_lock = threading.Lock()
+
+
+def _file_identity(path):
+    """Cheap change-detection key for the digest cache.
+
+    Returns ``(st_mtime_ns, st_size, st_ino)`` from a single ``os.stat`` — a
+    drop-in replacement for the old ``os.path.getmtime`` (itself a ``stat`` under
+    the hood), so this is net-zero syscall cost.
+
+    * ``st_mtime_ns`` (nanosecond mtime) is finer than ``getmtime()``'s float
+      seconds, catching most rapid-rewrite cases.
+    * ``st_size`` catches a same-mtime-tick rewrite that changes length.
+    * ``st_ino`` catches an atomic ``os.replace`` (``safe_dump``) that changes
+      the inode even when size+mtime coincide. On some Windows filesystems
+      ``st_ino`` may be 0; that simply degrades the key to ``(mtime_ns, size)``,
+      still strictly better than the old seconds-only gate. We do not branch on
+      platform.
+
+    An ``OSError`` from ``os.stat`` (e.g. the file vanished) propagates exactly
+    as ``os.path.getmtime`` did before — no new error semantics.
+    """
+    st = os.stat(path)
+    return (st.st_mtime_ns, st.st_size, st.st_ino)
+
+
+def _cache_get_or_compute(cache, path, compute):
+    """Look ``path`` up in *cache*, recomputing via *compute* on a miss.
+
+    The single shared core for ``_cached_sha256`` / ``_cached_hmac_sha256`` so
+    the two paths cannot drift. Returns the cached digest on a HIT (and promotes
+    it to most-recently-used); on a MISS computes the digest **outside** the
+    lock (the hash is the slow, I/O-bound part — holding the lock across 64 KiB-
+    chunked reads would serialise every concurrent load), then stores it and
+    evicts the least-recently-used entries past ``_CACHE_MAXSIZE``.
+
+    Two threads racing the same cold path may both ``compute()`` once — a benign,
+    idempotent double-hash (same value, last write wins), never a correctness
+    bug. ``popitem(last=False)`` does not iterate, so the locked mutation cannot
+    raise ``dictionary changed size during iteration``.
+    """
+    file_id = _file_identity(path)
+    with _cache_lock:
+        cached = cache.get(path)
+        if cached is not None and cached[0] == file_id:
+            cache.move_to_end(path)  # mark most-recently-used
+            return cached[1]
+    digest = compute()  # slow I/O — computed OUTSIDE the lock
+    with _cache_lock:
+        cache[path] = (file_id, digest)
+        cache.move_to_end(path)
+        while len(cache) > _CACHE_MAXSIZE:
+            cache.popitem(last=False)  # evict least-recently-used
+    return digest
+
+
+def _reset_caches():
+    """Clear both digest caches under the lock (test seam).
+
+    Underscore-prefixed and not exported; tests call this in ``setUp`` so each
+    case starts from a cold, deterministic cache without reaching into the
+    ``OrderedDict`` internals byte-by-byte.
+    """
+    with _cache_lock:
+        _sha256_cache.clear()
+        _hmac_cache.clear()
 
 
 
@@ -69,20 +188,18 @@ def _hash_path(pkl_path):
 def _sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 16), b""):
+        for chunk in iter(lambda: f.read(INTEGRITY_HASH_CHUNK_BYTES), b""):
             h.update(chunk)
     return h.hexdigest()
 
 
 def _cached_sha256(path):
-    """Return SHA-256 hex digest, using mtime-gated cache."""
-    mtime = os.path.getmtime(path)
-    cached = _sha256_cache.get(path)
-    if cached is not None and cached[0] == mtime:
-        return cached[1]
-    digest = _sha256(path)
-    _sha256_cache[path] = (mtime, digest)
-    return digest
+    """Return the SHA-256 hex digest of *path*, via the bounded LRU cache.
+
+    Signature unchanged; the bound/eviction/richer-key/lock all live behind
+    :func:`_cache_get_or_compute`, so the ``safe_load`` call sites are untouched.
+    """
+    return _cache_get_or_compute(_sha256_cache, path, lambda: _sha256(path))
 
 
 
@@ -92,9 +209,53 @@ def _hmac_path(pkl_path):
 
 
 def _get_signing_key():
-    """Return the HMAC signing key from NA0S_PICKLE_KEY env var, or None."""
-    key_str = os.getenv("NA0S_PICKLE_KEY", "")
-    return key_str.encode() if key_str else None
+    """Return the HMAC signing key from NA0S_PICKLE_KEY, or None if unset.
+
+    Enforces a key-strength policy at the trust boundary (the key's whole job is
+    to be unforgeable, so a low-entropy key silently defeats the HMAC tier):
+
+    * unset                          -> ``None`` (keyless SHA-256 fallback; the
+      documented backward-compatible path, never raises).
+    * empty / whitespace-only        -> ``ValueError`` (was a 0-after-strip
+      "key"; previously ``.encode()``d as bytes of whitespace).
+    * ``< _MIN_PICKLE_KEY_LEN``      -> ``ValueError`` (too weak for HMAC).
+    * ``[_MIN .. _WEAK_PICKLE_KEY_LEN)`` -> accepted, but ``warnings.warn`` that
+      the key is operationally weak.
+    * ``>= _WEAK_PICKLE_KEY_LEN``    -> accepted silently.
+
+    The key is **stripped before encoding** so a trailing newline in an env var
+    (the common ``export NA0S_PICKLE_KEY=$(cat keyfile)`` footgun) is not part of
+    the secret. Length checks are on the stripped value.
+    """
+    key_str = os.getenv(PICKLE_SIGNING_KEY_ENV)
+    if key_str is None:
+        return None
+    stripped = key_str.strip()
+    if not stripped:
+        raise ValueError(
+            "{} is set but empty/whitespace-only. Unset it to use "
+            "the keyless SHA-256 fallback, or set a key of at least {} chars.".format(
+                PICKLE_SIGNING_KEY_ENV, _MIN_PICKLE_KEY_LEN
+            )
+        )
+    if len(stripped) < _MIN_PICKLE_KEY_LEN:
+        raise ValueError(
+            "{} too weak ({} chars); require >= {} chars for "
+            "HMAC-SHA256 strength. A short key gives an attacker a tractable "
+            "offline brute force against the integrity signature.".format(
+                PICKLE_SIGNING_KEY_ENV, len(stripped), _MIN_PICKLE_KEY_LEN
+            )
+        )
+    if len(stripped) < _WEAK_PICKLE_KEY_LEN:
+        warnings.warn(
+            "{} is {} chars; >= {} chars (a full 256-bit HMAC-SHA256 key) "
+            "is recommended for full HMAC-SHA256 key entropy.".format(
+                PICKLE_SIGNING_KEY_ENV, len(stripped), _WEAK_PICKLE_KEY_LEN
+            ),
+            UserWarning,
+            stacklevel=2,
+        )
+    return stripped.encode()
 
 
 def _allow_sha256_downgrade():
@@ -117,20 +278,27 @@ def _hmac_sha256(path, key):
     """Compute HMAC-SHA256 of file at *path* using *key*."""
     h = hmac.new(key, digestmod=hashlib.sha256)
     with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 16), b""):
+        for chunk in iter(lambda: f.read(INTEGRITY_HASH_CHUNK_BYTES), b""):
             h.update(chunk)
     return h.hexdigest()
 
 
 def _cached_hmac_sha256(path, key):
-    """Return HMAC-SHA256 hex digest, using mtime-gated cache."""
-    mtime = os.path.getmtime(path)
-    cached = _hmac_cache.get(path)
-    if cached is not None and cached[0] == mtime:
-        return cached[1]
-    digest = _hmac_sha256(path, key)
-    _hmac_cache[path] = (mtime, digest)
-    return digest
+    """Return the HMAC-SHA256 hex digest of *path*, via the bounded LRU cache.
+
+    DOCUMENTED LIMITATION — the cache key is the *path* and the file identity
+    only; the signing *key* is captured by the ``compute`` closure and is NOT
+    part of the cache key. ``_hmac_cache`` is consulted only on the
+    ``sidecar_hmac`` branch, where the process has a single fixed
+    ``NA0S_PICKLE_KEY``, so this is safe today. A future multi-key caller MUST
+    ``_reset_caches()`` (or extend the key) on a key rotation, otherwise a stale
+    digest computed under the previous key would be returned for an unchanged
+    file. Pinned by ``test_safe_pickle.py`` so item-7's key-aware selection
+    cannot silently introduce a multi-key hazard.
+    """
+    return _cache_get_or_compute(
+        _hmac_cache, path, lambda: _hmac_sha256(path, key)
+    )
 
 
 def _format_sidecar(algorithm, digest):
@@ -138,19 +306,56 @@ def _format_sidecar(algorithm, digest):
     return "v1:{}:{}".format(algorithm, digest)
 
 
-def _parse_sidecar(raw):
-    """Parse a sidecar value, returning the bare hex digest.
+def _extract_and_validate_digest(raw, where):
+    """Extract and shape-validate the digest from a sidecar value.
 
-    Accepts both versioned (``v1:algo:digest``) and legacy bare hex formats
-    for backward compatibility.
+    Returns ``(declared_algo_or_None, lowercase_hex_digest)``. Accepts versioned
+    (``v1:<algo>:<digest>``) and legacy bare-hex formats. Raises ``ValueError``
+    (with *where* naming the source) when:
+
+    * a ``v1:`` header has fewer than three colon-parts (e.g. ``"v1:sha256"`` —
+      previously this fell through and returned the prefix itself as a
+      "digest"), or
+    * the extracted candidate is not a 64-char hex SHA-256 / HMAC-SHA256 digest.
+
+    The 64-hex shape is the exact, invariant output length of
+    ``hashlib.sha256(...).hexdigest()`` / the HMAC equivalent (see
+    ``_HEX64_RE``), so a legitimate expected digest *always* matches — this
+    validation has zero false-positive risk for genuine sidecars. Validating
+    here makes a corrupt sidecar surface immediately and accurately, instead of
+    as a deferred, misleading ``compare_digest`` mismatch ("File may be
+    tampered") in :func:`verify_file_digest`.
     """
     raw = raw.strip()
     if raw.startswith("v1:"):
         parts = raw.split(":", 2)
-        if len(parts) == 3:
-            return parts[2]
-    # Legacy bare hex digest
-    return raw
+        if len(parts) != 3:
+            raise ValueError(
+                "malformed integrity sidecar for {}: 'v1:' header without "
+                "algo:digest body ({!r})".format(where, raw[:80])
+            )
+        declared_algo, candidate = parts[1], parts[2]
+    else:
+        declared_algo, candidate = None, raw  # legacy bare hex digest, no tag
+    if not _HEX64_RE.match(candidate):
+        raise ValueError(
+            "malformed integrity sidecar for {}: expected a 64-char hex "
+            "digest, got {!r} (len {})".format(where, candidate[:80], len(candidate))
+        )
+    return declared_algo, candidate.lower()
+
+
+def _parse_sidecar(raw):
+    """Parse a sidecar value, returning the validated lowercase hex digest.
+
+    Accepts both versioned (``v1:algo:digest``) and legacy bare hex formats for
+    backward compatibility. Raises ``ValueError`` if the extracted value is not
+    a 64-char hex SHA-256/HMAC-SHA256 digest (including a ``v1:`` header with
+    fewer than three colon-parts, which previously fell through and returned the
+    ``"v1:algo"`` prefix verbatim as the "digest").
+    """
+    _algo, digest = _extract_and_validate_digest(raw, "<value>")
+    return digest
 
 
 def _parse_sidecar_typed(raw):
@@ -162,14 +367,14 @@ def _parse_sidecar_typed(raw):
     a ``.sha256``-named file). Legacy bare-hex sidecars have no tag, so the
     algorithm is ``None`` and the caller falls back to trusting the extension
     (backward compatibility — see ``test_l11_safe_pickle_fixes.py``).
+
+    The returned digest is shape-validated against the 64-char hex invariant on
+    BOTH paths (versioned and legacy bare), raising ``ValueError`` on a
+    malformed sidecar so the live load path (:func:`_read_sidecar` ->
+    :func:`_resolve_expected_hash`) fails fast at parse instead of as a
+    deferred, misleading compare-mismatch.
     """
-    raw = raw.strip()
-    if raw.startswith("v1:"):
-        parts = raw.split(":", 2)
-        if len(parts) == 3:
-            return parts[1], parts[2]
-    # Legacy bare hex digest — no declared algorithm.
-    return None, raw
+    return _extract_and_validate_digest(raw, "<value>")
 
 
 def _validate_pickle_magic(path):
@@ -302,8 +507,15 @@ def _read_sidecar(sidecar_path, source):
     Legacy bare-hex sidecars (no tag) are accepted and trust the extension.
     """
     with open(sidecar_path, "r", encoding="utf-8") as f:
-        raw = f.read().strip()
-    declared_algo, digest = _parse_sidecar_typed(raw)
+        # Bound the read: a legitimate sidecar is "v1:hmac-sha256:" + 64 hex
+        # (< 80 bytes). 256 bytes is comfortable headroom while preventing an
+        # attacker-supplied multi-megabyte sidecar from being slurped into
+        # memory before the shape check rejects it.
+        raw = f.read(256).strip()
+    # Validate with the concrete sidecar path so a corrupt/truncated sidecar
+    # raises "malformed integrity sidecar for <real path>" — naming the file at
+    # fault — rather than a generic value or a deferred compare-mismatch.
+    declared_algo, digest = _extract_and_validate_digest(raw, sidecar_path)
     expected_algo = _SIDECAR_EXPECTED_ALGO[source]
     if declared_algo is not None and declared_algo != expected_algo:
         raise ValueError(
@@ -359,10 +571,10 @@ def _resolve_expected_hash(path):
             if _allow_sha256_downgrade():
                 return _read_sidecar(hash_file, "sidecar_sha256"), "sidecar_sha256"
             raise ValueError(
-                "NA0S_PICKLE_KEY is set but only a plain SHA-256 sidecar "
+                "{} is set but only a plain SHA-256 sidecar "
                 "exists for {}; refusing to downgrade. Re-run safe_dump() to "
                 "write an HMAC sidecar, or set NA0S_ALLOW_SHA256_DOWNGRADE=1 "
-                "for a migration window.".format(path)
+                "for a migration window.".format(PICKLE_SIGNING_KEY_ENV, path)
             )
     else:
         # Keyless. The verifiable artifact is the .sha256. A present .hmac
@@ -415,8 +627,8 @@ def write_digest_sidecar(path, _event="write_digest_sidecar", _artifact_label="a
         algorithm = "hmac-sha256"
     else:
         warnings.warn(
-            "NA0S_PICKLE_KEY is not set. Writing plain SHA-256 sidecar. "
-            "Set NA0S_PICKLE_KEY for HMAC-SHA256 signing.",
+            "{0} is not set. Writing plain SHA-256 sidecar. "
+            "Set {0} for HMAC-SHA256 signing.".format(PICKLE_SIGNING_KEY_ENV),
             UserWarning,
             stacklevel=2,
         )
@@ -472,9 +684,11 @@ def verify_file_digest(path):
         # the signing key, so refuse rather than pretend it verified.
         if not key:
             raise ValueError(
-                "HMAC sidecar exists for {} but NA0S_PICKLE_KEY is not set "
+                "HMAC sidecar exists for {} but {} is not set "
                 "and no plain SHA-256 (.sha256) fallback is present. "
-                "Cannot verify without the signing key.".format(path)
+                "Cannot verify without the signing key.".format(
+                    path, PICKLE_SIGNING_KEY_ENV
+                )
             )
         actual = _cached_hmac_sha256(path, key)
     else:  # sidecar_sha256
@@ -488,8 +702,9 @@ def verify_file_digest(path):
                 })
             )
             _logger.warning(
-                "NA0S_PICKLE_KEY is set but %s uses a plain SHA-256 sidecar. "
+                "%s is set but %s uses a plain SHA-256 sidecar. "
                 "Re-run write_digest_sidecar() to upgrade to HMAC protection.",
+                PICKLE_SIGNING_KEY_ENV,
                 path,
             )
         actual = _cached_sha256(path)

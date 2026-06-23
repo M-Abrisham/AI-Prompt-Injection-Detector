@@ -11,6 +11,7 @@ Run with:
 import os
 import pickle
 import tempfile
+import threading
 import unittest
 import warnings
 from unittest.mock import patch
@@ -19,6 +20,8 @@ from unittest.mock import patch
 os.environ["SCAN_TIMEOUT_SEC"] = "0"
 
 from na0s.safe_pickle import (
+    _MIN_PICKLE_KEY_LEN,
+    _WEAK_PICKLE_KEY_LEN,
     _atomic_write_binary,
     _format_sidecar,
     _get_signing_key,
@@ -29,6 +32,16 @@ from na0s.safe_pickle import (
     _sha256,
     safe_dump,
     safe_load,
+)
+from na0s.integrity.safe_pickle import (
+    _CACHE_MAXSIZE,
+    _cache_get_or_compute,
+    _cached_hmac_sha256,
+    _cached_sha256,
+    _file_identity,
+    _hmac_cache,
+    _reset_caches,
+    _sha256_cache,
 )
 
 
@@ -425,7 +438,9 @@ class TestKeyAwareSidecarResolution(unittest.TestCase):
         """Keyless, only .hmac, no .sha256 -> raises; message names the missing
         SHA-256 fallback (genuinely unverifiable without a key)."""
         # Dump with a key to get an .hmac sidecar, then delete the would-be sha.
-        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": "k"}):
+        # Key lengthened (item #09): "k" (1 char) is now hard-rejected by the
+        # _MIN_PICKLE_KEY_LEN floor; a >= 32-char key is accepted silently.
+        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": "k" * 32}):
             safe_dump(self.test_obj, self.pkl_path)
         sha = _hash_path(self.pkl_path)
         if os.path.exists(sha):
@@ -456,7 +471,9 @@ class TestKeyAwareSidecarResolution(unittest.TestCase):
             os.remove(hmac_side)
         env = {k: v for k, v in os.environ.items()
                if k not in ("NA0S_PICKLE_KEY", "NA0S_ALLOW_SHA256_DOWNGRADE")}
-        env["NA0S_PICKLE_KEY"] = "secret"
+        # Key lengthened (item #09): "secret" (6 chars) is now hard-rejected by
+        # the _MIN_PICKLE_KEY_LEN floor; a >= 32-char key is accepted silently.
+        env["NA0S_PICKLE_KEY"] = "secret" * 6  # 36 chars
         with patch.dict(os.environ, env, clear=True):
             with self.assertRaises(ValueError) as ctx:
                 safe_load(self.pkl_path)
@@ -464,7 +481,9 @@ class TestKeyAwareSidecarResolution(unittest.TestCase):
 
     def test_key_set_prefers_hmac_over_sha256(self):
         """Regression guard: both sidecars present + key set -> HMAC verified."""
-        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": "secret"}):
+        # Key lengthened (item #09): "secret" (6 chars) is now hard-rejected by
+        # the _MIN_PICKLE_KEY_LEN floor; a >= 32-char key is accepted silently.
+        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": "secret" * 6}):
             safe_dump(self.test_obj, self.pkl_path)
             # Add a stray (irrelevant) .sha256 alongside the .hmac.
             with open(_hash_path(self.pkl_path), "w") as f:
@@ -504,6 +523,406 @@ class TestKeyAwareSidecarResolution(unittest.TestCase):
         expected, source = _resolve_expected_hash(path)
         self.assertEqual(source, "hardcoded")
         self.assertEqual(expected, KNOWN_HASHES[name])
+
+
+class TestKeyStrength(unittest.TestCase):
+    """Item #09 — ``_get_signing_key`` enforces an NA0S_PICKLE_KEY strength
+    policy: reject empty/whitespace-only and ``< _MIN_PICKLE_KEY_LEN``, warn for
+    the weak band ``[_MIN .. _WEAK)``, accept ``>= _WEAK`` silently. The keyless
+    (unset) path is unchanged and must never raise.
+    """
+
+    @patch.dict(os.environ, {k: v for k, v in os.environ.items()
+                             if k != "NA0S_PICKLE_KEY"})
+    def test_key_unset_returns_none(self):
+        """K1: unset NA0S_PICKLE_KEY -> None (keyless SHA-256 fallback intact)."""
+        os.environ.pop("NA0S_PICKLE_KEY", None)
+        self.assertIsNone(_get_signing_key())
+
+    @patch.dict(os.environ, {"NA0S_PICKLE_KEY": "   "})
+    def test_key_whitespace_only_raises(self):
+        """K2: whitespace-only key -> ValueError (was 3 bytes of whitespace)."""
+        with self.assertRaises(ValueError) as ctx:
+            _get_signing_key()
+        self.assertIn("empty/whitespace-only", str(ctx.exception))
+
+    def test_key_empty_string_raises(self):
+        """An explicitly empty string is rejected like whitespace-only."""
+        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": ""}):
+            with self.assertRaises(ValueError) as ctx:
+                _get_signing_key()
+            self.assertIn("empty/whitespace-only", str(ctx.exception))
+
+    def test_key_too_short_raises(self):
+        """K3: a key shorter than the floor -> ValueError naming 'too weak'."""
+        with patch.dict(os.environ,
+                        {"NA0S_PICKLE_KEY": "x" * (_MIN_PICKLE_KEY_LEN - 1)}):
+            with self.assertRaises(ValueError) as ctx:
+                _get_signing_key()
+            self.assertIn("too weak", str(ctx.exception))
+
+    def test_key_min_boundary(self):
+        """Boundary: exactly _MIN accepted, _MIN-1 rejected (pins the floor)."""
+        with patch.dict(os.environ,
+                        {"NA0S_PICKLE_KEY": "x" * _MIN_PICKLE_KEY_LEN}):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                self.assertEqual(_get_signing_key(), b"x" * _MIN_PICKLE_KEY_LEN)
+        with patch.dict(os.environ,
+                        {"NA0S_PICKLE_KEY": "x" * (_MIN_PICKLE_KEY_LEN - 1)}):
+            with self.assertRaises(ValueError):
+                _get_signing_key()
+
+    def test_key_weak_band_warns_but_accepts(self):
+        """[_MIN .. _WEAK): accepted, returns bytes, emits a weakness warning."""
+        weak_len = _MIN_PICKLE_KEY_LEN  # 8 -> in the warn band
+        self.assertLess(weak_len, _WEAK_PICKLE_KEY_LEN)
+        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": "x" * weak_len}):
+            with self.assertWarns(UserWarning) as cm:
+                key = _get_signing_key()
+        self.assertEqual(key, b"x" * weak_len)
+        self.assertIn("recommended for full HMAC", str(cm.warning))
+
+    def test_key_strong_accepted_silently(self):
+        """K4: >= _WEAK accepted with NO warning, returns the encoded bytes."""
+        strong = "x" * _WEAK_PICKLE_KEY_LEN
+        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": strong}):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                key = _get_signing_key()
+        self.assertEqual(key, strong.encode())
+        self.assertEqual(
+            [w for w in caught if issubclass(w.category, UserWarning)], []
+        )
+
+    def test_key_stripped_before_encode(self):
+        """Surrounding whitespace is stripped before encoding (the trailing-
+        newline-in-env footgun is not part of the secret)."""
+        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": "  " + "a" * 32 + "  "}):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                self.assertEqual(_get_signing_key(), b"a" * 32)
+
+
+class TestMalformedSidecarFailFast(unittest.TestCase):
+    """Item #09 — end-to-end loader contract: a malformed sidecar fails fast at
+    PARSE with an accurate 'malformed integrity sidecar' message, distinct from
+    the valid-shape compare-mismatch ('Integrity check failed'). And a weak key
+    is rejected at dump time, not just load time.
+    """
+
+    _STRONG_KEY = "strong-key-aaaaaaaaaaaaaaaaaaaaaa"  # 33 chars, >= _WEAK
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmpdir = self._tmpdir.name
+        self.pkl_path = os.path.join(self.tmpdir, "fastfail_model.pkl")
+        self.test_obj = {"weights": [1.0, 2.0, 3.0], "bias": 0.5}
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_load_malformed_hmac_sidecar_fails_fast(self):
+        """Overwrite the .hmac sidecar with a malformed (non-64-hex) body; load
+        raises at parse, naming the malformed sidecar — NOT 'Integrity check
+        failed' (which would wrongly imply a tampered pickle)."""
+        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": self._STRONG_KEY}):
+            safe_dump(self.test_obj, self.pkl_path)
+            with open(_hmac_path(self.pkl_path), "w") as f:
+                f.write("v1:hmac-sha256:zzzz")  # malformed digest body
+            with self.assertRaises(ValueError) as ctx:
+                safe_load(self.pkl_path)
+        msg = str(ctx.exception)
+        self.assertIn("malformed integrity sidecar", msg)
+        self.assertNotIn("Integrity check failed", msg)
+
+    def test_valid_shape_tamper_still_hits_compare_mismatch(self):
+        """Contrast: a VALID-shape but wrong .hmac digest (64 zeros) reaches the
+        compare and raises 'Integrity check failed' — the two failure points are
+        distinct and both preserved."""
+        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": self._STRONG_KEY}):
+            safe_dump(self.test_obj, self.pkl_path)
+            with open(_hmac_path(self.pkl_path), "w") as f:
+                f.write(_format_sidecar("hmac-sha256", "0" * 64))
+            with self.assertRaises(ValueError) as ctx:
+                safe_load(self.pkl_path)
+        self.assertIn("Integrity check failed", str(ctx.exception))
+
+    def test_load_legit_still_roundtrips(self):
+        """Regression: dump+load with an adequate key returns the object."""
+        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": self._STRONG_KEY}):
+            safe_dump(self.test_obj, self.pkl_path)
+            loaded = safe_load(self.pkl_path)
+        self.assertEqual(loaded, self.test_obj)
+
+    def test_dump_with_weak_key_raises(self):
+        """A too-short key is rejected at WRITE time (in _get_signing_key via
+        safe_dump), not only at load."""
+        env = {k: v for k, v in os.environ.items() if k != "NA0S_PICKLE_KEY"}
+        env["NA0S_PICKLE_KEY"] = "x"  # 1 char -> below the floor
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(ValueError) as ctx:
+                safe_dump(self.test_obj, self.pkl_path)
+        self.assertIn("too weak", str(ctx.exception))
+
+    def test_keyless_dump_still_works(self):
+        """K1 regression: unset key -> SHA-256 sidecar written, no raise."""
+        env = {k: v for k, v in os.environ.items() if k != "NA0S_PICKLE_KEY"}
+        with patch.dict(os.environ, env, clear=True):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                safe_dump(self.test_obj, self.pkl_path)
+            self.assertTrue(os.path.exists(_hash_path(self.pkl_path)))
+            self.assertFalse(os.path.exists(_hmac_path(self.pkl_path)))
+
+
+class TestDigestCacheBoundedLRU(unittest.TestCase):
+    """Item #15 — the mtime hash cache is now a bounded LRU keyed on
+    ``(st_mtime_ns, st_size, st_ino)`` under a lock.
+
+    These tests exercise the cache directly via ``_cached_sha256`` /
+    ``_cached_hmac_sha256`` plus two end-to-end ``safe_dump``/``safe_load``
+    round-trips. They use real files in a ``TemporaryDirectory`` and reset the
+    caches in ``setUp`` so each case starts cold. The cache sits AFTER the
+    ``compare_digest`` trust decision, so none of this touches accept/reject.
+    """
+
+    def setUp(self):
+        _reset_caches()
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmpdir = self._tmpdir.name
+
+    def tearDown(self):
+        _reset_caches()
+        self._tmpdir.cleanup()
+
+    def _write(self, name, data=b"payload"):
+        path = os.path.join(self.tmpdir, name)
+        with open(path, "wb") as f:
+            f.write(data)
+        return path
+
+    # --- Defect A: bounded / evicting ---
+
+    def test_cache_bounded_to_maxsize(self):
+        """Hashing _CACHE_MAXSIZE + 10 distinct paths caps the cache at exactly
+        _CACHE_MAXSIZE (proves the bound — fails if eviction is dropped)."""
+        n = _CACHE_MAXSIZE + 10
+        for i in range(n):
+            p = self._write("m{}.bin".format(i), data=b"x%d" % i)
+            _cached_sha256(p)
+        self.assertEqual(len(_sha256_cache), _CACHE_MAXSIZE)
+
+    def test_lru_evicts_oldest_not_newest(self):
+        """Fill to cap, re-touch the oldest entry (-> MRU), insert one more:
+        the re-touched entry survives and the SECOND-oldest is evicted. Proves
+        LRU recency, not plain FIFO."""
+        paths = []
+        for i in range(_CACHE_MAXSIZE):
+            p = self._write("m{}.bin".format(i), data=b"x%d" % i)
+            _cached_sha256(p)
+            paths.append(p)
+        # Re-access the oldest (paths[0]) -> moves it to MRU.
+        _cached_sha256(paths[0])
+        # Insert one more, forcing exactly one eviction.
+        extra = self._write("extra.bin", data=b"extra")
+        _cached_sha256(extra)
+        self.assertEqual(len(_sha256_cache), _CACHE_MAXSIZE)
+        # paths[0] survived (it was MRU); paths[1] (now oldest) was evicted.
+        self.assertIn(paths[0], _sha256_cache)
+        self.assertNotIn(paths[1], _sha256_cache)
+        self.assertIn(extra, _sha256_cache)
+
+    def test_evicted_entry_recomputes_correct_digest(self):
+        """After eviction, re-accessing an evicted path returns the CORRECT
+        digest (== _sha256 of the file) and re-inserts it — eviction is not data
+        loss / not a stale value."""
+        first = self._write("first.bin", data=b"the-first-file")
+        _cached_sha256(first)
+        # Evict it by flooding with cap more distinct paths.
+        for i in range(_CACHE_MAXSIZE):
+            _cached_sha256(self._write("flood{}.bin".format(i), data=b"f%d" % i))
+        self.assertNotIn(first, _sha256_cache)
+        # Re-access: must recompute and match the ground-truth digest.
+        self.assertEqual(_cached_sha256(first), _sha256(first))
+        self.assertIn(first, _sha256_cache)
+
+    # --- Defect B: richer key catches stale content ---
+
+    def test_same_mtime_different_size_is_cache_miss(self):
+        """A same-mtime-SECONDS rewrite that changes the file SIZE is a MISS:
+        the second call returns the NEW digest, not the stale cached one. This is
+        the headline [test-update] case — fails if the key is mtime-seconds."""
+        p = self._write("rw.bin", data=b"short")
+        d1 = _cached_sha256(p)
+        st = os.stat(p)
+        # Rewrite with different-length content, then force the SAME
+        # mtime-seconds via os.utime (mtime_ns may still differ, but size alone
+        # must already discriminate).
+        with open(p, "wb") as f:
+            f.write(b"a-much-longer-payload-than-before")
+        same_sec = float(int(st.st_mtime))
+        os.utime(p, (same_sec, same_sec))
+        d2 = _cached_sha256(p)
+        self.assertNotEqual(d1, d2)
+        self.assertEqual(d2, _sha256(p))
+
+    def test_utime_reset_with_changed_content_is_cache_miss(self):
+        """Change content then RESET mtime to the original via os.utime: still a
+        MISS + correct new digest (st_size / st_ino discriminate even when the
+        attacker/race restores the old mtime)."""
+        p = self._write("reset.bin", data=b"original-content-here")
+        st0 = os.stat(p)
+        d1 = _cached_sha256(p)
+        with open(p, "wb") as f:
+            f.write(b"tampered!")  # different size, too
+        # Restore the original mtime exactly (ns).
+        os.utime(p, ns=(st0.st_atime_ns, st0.st_mtime_ns))
+        d2 = _cached_sha256(p)
+        self.assertNotEqual(d1, d2)
+        self.assertEqual(d2, _sha256(p))
+
+    def test_unchanged_file_is_cache_hit(self):
+        """Two _cached_sha256 of an untouched file: the second is a HIT — the
+        underlying _sha256 is invoked EXACTLY ONCE (the optimization still works,
+        no spurious miss / no perf regression)."""
+        p = self._write("hit.bin", data=b"stable-bytes")
+        with patch(
+            "na0s.integrity.safe_pickle._sha256",
+            wraps=__import__("na0s.integrity.safe_pickle",
+                             fromlist=["_sha256"])._sha256,
+        ) as spy:
+            _cached_sha256(p)
+            _cached_sha256(p)
+        self.assertEqual(spy.call_count, 1)
+
+    # --- Defect C + isolation ---
+
+    def test_sha256_and_hmac_caches_are_independent(self):
+        """The SHA and HMAC caches do not conflate: the same path yields a
+        SHA-256 digest in one and an HMAC digest in the other, and neither cache
+        returns the other's value (regression guard for a future shared-helper
+        refactor)."""
+        p = self._write("iso.bin", data=b"isolation-test")
+        key = b"k" * 32
+        sha = _cached_sha256(p)
+        mac = _cached_hmac_sha256(p, key)
+        self.assertNotEqual(sha, mac)
+        self.assertEqual(_sha256_cache[p][1], sha)
+        self.assertEqual(_hmac_cache[p][1], mac)
+        self.assertEqual(mac, _hmac_sha256(p, key))
+
+    def test_hmac_cache_key_excludes_signing_key_documented(self):
+        """DOCUMENTED LIMITATION: the HMAC cache key excludes the signing key, so
+        a second call with a DIFFERENT key on an UNCHANGED file returns the STALE
+        first-key digest. This pins the current single-key-per-process contract
+        so item-7's key-aware work can't silently regress into a multi-key
+        hazard. (A real key rotation must _reset_caches().)"""
+        p = self._write("multikey.bin", data=b"same-bytes")
+        key1 = b"k" * 32
+        key2 = b"j" * 32
+        d1 = _cached_hmac_sha256(p, key1)
+        d2 = _cached_hmac_sha256(p, key2)  # unchanged file -> HIT, stale key1
+        self.assertEqual(d1, d2)
+        self.assertEqual(d1, _hmac_sha256(p, key1))
+        self.assertNotEqual(d1, _hmac_sha256(p, key2))
+        # After a reset, the new key is honoured.
+        _reset_caches()
+        self.assertEqual(_cached_hmac_sha256(p, key2), _hmac_sha256(p, key2))
+
+    def test_concurrent_loads_around_cap_do_not_raise(self):
+        """N threads each hashing one of _CACHE_MAXSIZE*2 distinct files: no
+        exception, and the cache settles at exactly _CACHE_MAXSIZE (the lock +
+        non-iterating popitem hold under contention)."""
+        paths = [self._write("c{}.bin".format(i), data=b"c%d" % i)
+                 for i in range(_CACHE_MAXSIZE * 2)]
+        errors = []
+
+        def worker(pth):
+            try:
+                _cached_sha256(pth)
+            except Exception as exc:  # noqa: BLE001 - test records, re-asserts
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(p,)) for p in paths]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(_sha256_cache), _CACHE_MAXSIZE)
+
+    def test_cache_get_or_compute_computes_outside_lock(self):
+        """Perf invariant: the compute() callable runs while _cache_lock is NOT
+        held (so concurrent loads don't serialise on I/O). Asserted by checking
+        the lock is acquirable from inside compute()."""
+        p = self._write("outside.bin", data=b"lock-check")
+        observed = {}
+
+        def compute():
+            observed["acquired"] = _cache_lock_acquirable()
+            return _sha256(p)
+
+        def _cache_lock_acquirable():
+            from na0s.integrity.safe_pickle import _cache_lock
+            got = _cache_lock.acquire(blocking=False)
+            if got:
+                _cache_lock.release()
+            return got
+
+        _reset_caches()
+        result = _cache_get_or_compute(_sha256_cache, p, compute)
+        self.assertEqual(result, _sha256(p))
+        self.assertTrue(observed["acquired"],
+                        "compute() must run OUTSIDE the cache lock")
+
+    # --- Use-case / behavior end-to-end ---
+
+    def test_safe_load_roundtrip_unchanged_with_bounded_cache(self):
+        """Full safe_dump -> safe_load (keyless SHA path) returns the original
+        object, and a second safe_load is a cache HIT (_sha256 called once for
+        the load-time digest)."""
+        obj = {"weights": [1.0, 2.0], "bias": 0.25}
+        path = os.path.join(self.tmpdir, "rt.pkl")
+        env_no_key = {k: v for k, v in os.environ.items()
+                      if k != "NA0S_PICKLE_KEY"}
+        with patch.dict(os.environ, env_no_key, clear=True):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                safe_dump(obj, path)
+            _reset_caches()
+            real_sha256 = __import__(
+                "na0s.integrity.safe_pickle", fromlist=["_sha256"]
+            )._sha256
+            with patch(
+                "na0s.integrity.safe_pickle._sha256", wraps=real_sha256
+            ) as spy:
+                self.assertEqual(safe_load(path), obj)
+                self.assertEqual(safe_load(path), obj)
+            # First load computes the digest; second load is a cache HIT.
+            self.assertEqual(spy.call_count, 1)
+
+    def test_steady_state_few_paths_never_evict(self):
+        """Edge case 8: repeatedly loading a small fixed set of paths (the real
+        SDK shape) keeps the cache well under the cap and never evicts — proves
+        zero behavior/perf change for the production workload."""
+        obj = {"a": 1}
+        env_no_key = {k: v for k, v in os.environ.items()
+                      if k != "NA0S_PICKLE_KEY"}
+        paths = []
+        with patch.dict(os.environ, env_no_key, clear=True):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                for i in range(4):  # ~ the real ≤6 model-path universe
+                    p = os.path.join(self.tmpdir, "fixed{}.pkl".format(i))
+                    safe_dump(obj, p)
+                    paths.append(p)
+            _reset_caches()
+            for _ in range(5):  # many loads of the same fixed set
+                for p in paths:
+                    self.assertEqual(safe_load(p), obj)
+        self.assertEqual(len(_sha256_cache), len(paths))
+        self.assertLessEqual(len(_sha256_cache), _CACHE_MAXSIZE)
 
 
 if __name__ == "__main__":

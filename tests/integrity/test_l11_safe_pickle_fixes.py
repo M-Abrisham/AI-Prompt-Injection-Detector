@@ -29,6 +29,8 @@ from na0s.safe_pickle import (
     _hash_path,
     _hmac_path,
     _parse_sidecar,
+    _parse_sidecar_typed,
+    _read_sidecar,
     _validate_pickle_magic,
     safe_dump,
     safe_load,
@@ -110,17 +112,29 @@ class TestSidecarVersioning:
         assert _format_sidecar("hmac-sha256", "ef56") == "v1:hmac-sha256:ef56"
 
     def test_parse_versioned_sidecar(self):
-        assert _parse_sidecar("v1:sha256:abcdef0123456789") == "abcdef0123456789"
+        # Fixture corrected (item #09): the digest body must be a real 64-char
+        # hex SHA-256 digest. The previous 16-hex literal ("abcdef0123456789")
+        # is now correctly rejected by the 64-hex shape guard; this asserts the
+        # SAME behavior (the v1: digest body is returned) with a valid digest.
+        digest = "ab" * 32  # 64 hex chars
+        assert _parse_sidecar("v1:sha256:" + digest) == digest
 
     def test_parse_legacy_bare_hex(self):
         bare = "a" * 64
         assert _parse_sidecar(bare) == bare
 
     def test_parse_versioned_with_whitespace(self):
-        assert _parse_sidecar("  v1:hmac-sha256:deadbeef\n") == "deadbeef"
+        # Fixture corrected (item #09): "deadbeef" (8 hex) is now rejected by the
+        # shape guard; use a valid 64-hex body. Asserts the SAME behavior — the
+        # surrounding whitespace is stripped and the digest body returned.
+        digest = "de" * 32  # 64 hex chars
+        assert _parse_sidecar("  v1:hmac-sha256:" + digest + "\n") == digest
 
-    @patch.dict(os.environ, {"NA0S_PICKLE_KEY": "verkey"})
+    @patch.dict(os.environ, {"NA0S_PICKLE_KEY": "verkey-strong-32char-secret-aaaa"})
     def test_safe_dump_writes_versioned_hmac_sidecar(self, pkl_path, sample_obj):
+        # Key lengthened (item #09): "verkey" (6 chars) is now hard-rejected by
+        # the _MIN_PICKLE_KEY_LEN floor; a >= 32-char key is accepted silently.
+        # Assertion (sidecar format) is unchanged.
         safe_dump(sample_obj, pkl_path)
         with open(_hmac_path(pkl_path), "r") as f:
             content = f.read().strip()
@@ -137,9 +151,11 @@ class TestSidecarVersioning:
             content = f.read().strip()
         assert content.startswith("v1:sha256:")
 
-    @patch.dict(os.environ, {"NA0S_PICKLE_KEY": "verkey2"})
+    @patch.dict(os.environ, {"NA0S_PICKLE_KEY": "verkey2-strong-32char-secret-aaa"})
     def test_roundtrip_versioned_sidecar(self, pkl_path, sample_obj):
         """Dump with versioned format, load should still work."""
+        # Key lengthened (item #09): "verkey2" (7 chars) is now hard-rejected by
+        # the _MIN_PICKLE_KEY_LEN floor; a >= 32-char key is accepted silently.
         safe_dump(sample_obj, pkl_path)
         loaded = safe_load(pkl_path)
         assert loaded == sample_obj
@@ -158,6 +174,129 @@ class TestSidecarVersioning:
                 f.write(digest)  # bare hex, no v1: prefix
             loaded = safe_load(pkl_path)
             assert loaded == sample_obj
+
+
+# ---------------------------------------------------------------------------
+# Item #09: digest shape validation in _parse_sidecar / _parse_sidecar_typed
+# ---------------------------------------------------------------------------
+
+# A canonical 64-char lowercase-hex digest (the exact shape SHA-256 /
+# HMAC-SHA256 hexdigest() emits). Built so the literal length is self-evident.
+_VALID_DIGEST = "0123456789abcdef" * 4  # 64 hex chars
+
+
+class TestSidecarDigestValidation:
+    """Item #09 — ``_parse_sidecar`` / ``_parse_sidecar_typed`` now reject any
+    value that is not a 64-char hex SHA-256/HMAC digest, so a corrupt sidecar
+    fails fast with an accurate 'malformed integrity sidecar' error instead of a
+    deferred, misleading compare-mismatch."""
+
+    # --- E1/E2/E3: accept paths (no FP for legitimate sidecars) ---
+
+    def test_parse_valid_versioned_sha256(self):
+        assert _parse_sidecar("v1:sha256:" + _VALID_DIGEST) == _VALID_DIGEST
+
+    def test_parse_valid_versioned_hmac(self):
+        assert _parse_sidecar("v1:hmac-sha256:" + _VALID_DIGEST) == _VALID_DIGEST
+
+    def test_parse_valid_legacy_bare(self):
+        # Backward compat: a bare 64-hex digest (no v1: prefix) must NOT raise.
+        bare = "a" * 64
+        assert _parse_sidecar(bare) == bare
+
+    def test_parse_uppercase_normalized(self):
+        # External tooling may emit uppercase; accept and normalise to lowercase
+        # (compare_digest is byte-exact against lowercase hexdigest()).
+        assert _parse_sidecar("A" * 64) == "a" * 64
+        assert _parse_sidecar("v1:sha256:" + "DEADBEEF" * 8) == "deadbeef" * 8
+
+    # --- E4-E7: reject paths (must fail loud, not silently mis-parse) ---
+
+    def test_parse_empty_digest_raises(self):
+        with pytest.raises(ValueError, match="malformed integrity sidecar"):
+            _parse_sidecar("v1:sha256:")
+
+    def test_parse_short_hex_raises(self):
+        with pytest.raises(ValueError, match="64-char hex"):
+            _parse_sidecar("abcd")
+        with pytest.raises(ValueError, match="64-char hex"):
+            _parse_sidecar("a" * 63)
+
+    def test_parse_long_hex_raises(self):
+        with pytest.raises(ValueError, match="64-char hex"):
+            _parse_sidecar("a" * 65)
+
+    def test_parse_nonhex_raises(self):
+        with pytest.raises(ValueError, match="64-char hex"):
+            _parse_sidecar("z" * 64)
+        # 63 hex + a trailing space is exactly 64 chars but not all-hex.
+        with pytest.raises(ValueError, match="64-char hex"):
+            _parse_sidecar("a" * 63 + " ")
+
+    def test_parse_v1_two_parts_raises(self):
+        # Regression for the old silent ``return "v1:sha256"`` fall-through: a
+        # v1: header with < 3 colon-parts now raises, naming the missing body.
+        with pytest.raises(ValueError, match="without algo:digest body"):
+            _parse_sidecar("v1:sha256")
+
+    def test_parse_whitespace_preserved(self):
+        # Surrounding whitespace is still stripped (existing strip() behavior);
+        # a valid 64-hex body inside whitespace parses to the bare digest.
+        assert _parse_sidecar("  " + _VALID_DIGEST + "\n") == _VALID_DIGEST
+
+    # --- _parse_sidecar_typed validates BOTH return paths (item #09) ---
+
+    def test_typed_valid_versioned_returns_algo_and_digest(self):
+        assert _parse_sidecar_typed(
+            "v1:hmac-sha256:" + _VALID_DIGEST
+        ) == ("hmac-sha256", _VALID_DIGEST)
+
+    def test_typed_valid_legacy_returns_none_algo(self):
+        assert _parse_sidecar_typed(_VALID_DIGEST) == (None, _VALID_DIGEST)
+
+    def test_typed_versioned_bad_digest_raises(self):
+        # The versioned return path is validated (was returned verbatim).
+        with pytest.raises(ValueError, match="64-char hex"):
+            _parse_sidecar_typed("v1:sha256:zzzz")
+
+    def test_typed_legacy_bad_digest_raises(self):
+        # The legacy bare-hex return path is validated too (both paths).
+        with pytest.raises(ValueError, match="64-char hex"):
+            _parse_sidecar_typed("not-a-digest")
+
+    def test_typed_v1_two_parts_raises(self):
+        with pytest.raises(ValueError, match="without algo:digest body"):
+            _parse_sidecar_typed("v1:sha256")
+
+    # --- _read_sidecar names the real path + bounds the read (item #09) ---
+
+    def test_read_sidecar_names_real_path_on_malformed(self, tmp_dir):
+        sidecar = os.path.join(tmp_dir, "model.pkl.sha256")
+        with open(sidecar, "w") as f:
+            f.write("v1:sha256:zzzz")
+        with pytest.raises(ValueError) as exc:
+            _read_sidecar(sidecar, "sidecar_sha256")
+        # The error names the concrete sidecar path so the operator knows which
+        # file is corrupt (not a generic placeholder).
+        assert sidecar in str(exc.value)
+        assert "malformed integrity sidecar" in str(exc.value)
+
+    def test_read_sidecar_bounds_read(self, tmp_dir):
+        # A multi-megabyte sidecar is not slurped whole: only the first 256
+        # bytes are read, so a giant blob is rejected by the shape guard without
+        # exhausting memory. The 256-byte prefix here is non-hex, so it raises.
+        sidecar = os.path.join(tmp_dir, "model.pkl.sha256")
+        with open(sidecar, "w") as f:
+            f.write("z" * (5 * 1024 * 1024))  # 5 MiB of junk
+        with pytest.raises(ValueError, match="malformed integrity sidecar"):
+            _read_sidecar(sidecar, "sidecar_sha256")
+
+    def test_read_sidecar_valid_legacy_bare_still_reads(self, tmp_dir):
+        # Regression: a legitimate bare-hex sidecar still reads correctly.
+        sidecar = os.path.join(tmp_dir, "model.pkl.sha256")
+        with open(sidecar, "w") as f:
+            f.write(_VALID_DIGEST)
+        assert _read_sidecar(sidecar, "sidecar_sha256") == _VALID_DIGEST
 
 
 # ---------------------------------------------------------------------------
