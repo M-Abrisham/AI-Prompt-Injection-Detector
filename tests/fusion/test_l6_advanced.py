@@ -372,3 +372,47 @@ class TestStackingClassifier:
         label, conf = sl.predict(np.array([0.95, 0.9, 0.8, 0.7, 0.6]))
         assert label == "MALICIOUS"
         assert conf > 0.5
+
+    # -- Integrity gate on the meta-learner pickle (item #05) ---------------
+
+    def test_save_writes_sidecar(self, monkeypatch):
+        monkeypatch.delenv("NA0S_PICKLE_KEY", raising=False)
+        sl = StackingMetaLearner()
+        X, y = self._make_training_data()
+        sl.train(X, y)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "stacking.pkl")
+            sl.save(path)
+            assert os.path.exists(path + ".sha256")
+
+    def test_tampered_model_load_degrades(self, monkeypatch):
+        """A tampered meta-learner pickle is refused; load() degrades to
+        untrained (is_available() False) instead of executing the pickle."""
+        monkeypatch.delenv("NA0S_PICKLE_KEY", raising=False)
+        sl = StackingMetaLearner()
+        X, y = self._make_training_data()
+        sl.train(X, y)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "stacking.pkl")
+            sl.save(path)
+            with open(path, "ab") as f:
+                f.write(b"\x00tamper")
+
+            sl2 = StackingMetaLearner()
+            sl2.load(path)  # must NOT raise — degrades
+            assert sl2.is_available() is False
+
+    def test_missing_sidecar_load_degrades(self, monkeypatch):
+        """A legacy sidecar-less pickle is refused, not silently loaded."""
+        monkeypatch.delenv("NA0S_PICKLE_KEY", raising=False)
+        sl = StackingMetaLearner()
+        X, y = self._make_training_data()
+        sl.train(X, y)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "stacking.pkl")
+            sl.save(path)
+            os.unlink(path + ".sha256")
+
+            sl2 = StackingMetaLearner()
+            sl2.load(path)
+            assert sl2.is_available() is False

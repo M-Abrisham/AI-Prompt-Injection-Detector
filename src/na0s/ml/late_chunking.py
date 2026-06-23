@@ -44,6 +44,13 @@ try:
 except ImportError:
     _HAS_TRANSFORMERS = False
 
+# Pure-python (no transformers dep): hardened from_pretrained kwargs
+# (use_safetensors / trust_remote_code=False / pinned revision).
+from na0s.integrity.hf_loading import (
+    hf_from_pretrained_kwargs,
+    hf_tokenizer_kwargs,
+)
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -330,9 +337,22 @@ def load_late_chunking_model(
         model_name = _HUGGINGFACE_PREFIX + model_name
 
     logger.info("Loading late-chunking model: %s", model_name)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModel.from_pretrained(model_name)
-    model.eval()
+    # A hardened load (use_safetensors=True / trust_remote_code=False / pinned
+    # revision) can raise if the repo lacks a safetensors file or the pin is
+    # unresolvable.  This module-level loader has no caller-side try/except, so
+    # we honor the documented Optional return contract and degrade to None
+    # rather than letting the exception propagate into the scan path.
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name, **hf_tokenizer_kwargs(model_name),
+        )
+        model = AutoModel.from_pretrained(
+            model_name, **hf_from_pretrained_kwargs(model_name),
+        )
+        model.eval()
+    except Exception as exc:  # noqa: BLE001 - degrade, never crash the scan path
+        logger.warning("Failed to load late-chunking model '%s': %s", model_name, exc)
+        return None
 
     return model, tokenizer
 

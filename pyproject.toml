@@ -60,6 +60,24 @@ lang = [
     "langdetect>=1.0.9,<2",
 ]
 embedding = [
+    # NOTE (CVE-2026-4372, CVSS 7.8 HIGH): transformers 4.56.0..<5.3.0 has an
+    # RCE via a malicious config.json `_attn_implementation_internal` that flows
+    # through the optional `kernels` package's get_kernel_hub() dispatch and
+    # imports an attacker repo (verified: NVD CVE-2026-4372, fixed in
+    # transformers>=5.3.0). IMPORTANT: this CVE *bypasses* trust_remote_code=False
+    # — that flag does NOT cover it. The runtime control na0s.integrity.hf_loading
+    # provides against THIS CVE is the PINNED `revision=<trusted SHA>` (a poisoned
+    # upstream config.json can't be pulled); trust_remote_code=False/use_safetensors
+    # there mitigate the SEPARATE custom-code and pickle-.bin RCE paths, not this
+    # one. Two other mitigations live outside this runtime: the transformers>=5.3.0
+    # floor (the advisory's fix), and simply not installing the optional `kernels`
+    # package (the exploit chain requires it). The `transformers>=5.3.0` version
+    # FLOOR is intentionally NOT added here: it conflicts with the pinned
+    # `sentence-transformers<4` below (ST <4 caps transformers<5.0.0), which
+    # would make this extra UNINSTALLABLE. TODO(supply-chain): once the ST floor
+    # is bumped to a v5-compatible release (ST>=5), add
+    # `"transformers>=5.3.0,<6"` here and `transformers==<pin>` to
+    # requirements-benchmark.txt. Tracked as SUP-HF-PIN in ROADMAP_V2.md.
     "sentence-transformers>=2.2,<4",
     "faiss-cpu>=1.7.4",
 ]
