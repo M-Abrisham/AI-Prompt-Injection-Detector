@@ -91,7 +91,20 @@ Evasion is centralized preprocessing applied to every input before class detecti
 | **Leetspeak** | D4 | leet normalizer (keyword-gated) | **11.1%** (7/63) | weakest |
 | **Multi-buff stacking** | MB, CT | recursive decode (depth-4) | **33%** (measured via `na0s.scan`, not harness) | **OPEN GAP** |
 
-Category-level measured (per-category holdout, different pool): **D4 80%, D5 80%, D6 multilingual 67%, D7 delivery 64%**.
+Category-level measured (per-category holdout, different pool): **D4 80%, D5 80%, D7 delivery 64%**.
+
+**D6 Multilingual — measured on the versioned scenario set** (`data/eval/scenarios/v0.1/d6_multilingual_*.yaml`, 26 attacks + 40 benign siblings, 11 languages × 5 difficulty tiers, via `na0s.scan` @ 0.55 on the TfidfCentroid-fallback host). This **replaces** the prior bare "D6 67%" estimate (which came from an unversioned pool not in `data/eval/scenarios/`) with a difficulty-banded, reproducible number — the harder bands are honestly lower than the old optimistic point, this is measurement, not a regression:
+
+| D6 band | leaf | before (PART 1) | after (PART 2) |
+|---|---|---|---|
+| Tier A native direct override | D6.1–.5 | 10/10 | 10/10 |
+| Tier B subtle/indirect extraction | D6.1–.3 (+E1.1) | 0/6 | **4/6** (given-provenance arm-1; 2 must-follow-only attacks are honest xfail — lexically identical to benign, need semantics) |
+| Tier C transliteration / romanization | **D6.7** (new leaf) | 1/5 | **5/5** (romanized override + system-prompt anchors) |
+| Tier D code-switch EN+L2 | D6.6 | 4/4 | 4/4 |
+| Tier E short-input | D6.1 | 1/1 | 1/1 |
+| **overall** | | 16/26 (61.5%) | **24/26 (92.3%)** |
+
+FP-safe: 0/99 fresh benign 2nd-person foreign-language instructions fire (independent sweep incl. the "in this conversation, which instructions must you follow to…" surface); among the 40 benign fixtures the only residual >0.55 is a meta-translate over-refusal that quotes the literal English override string — a language-agnostic E1 request-vs-quote case, not a D6 signal (honest xfail). The subtle-extraction heuristic fires only on the **given-provenance** arm ("the instructions you were *given*/*assigned*"); the generic "must-follow + this-conversation" arm was **removed as FP-unsafe** (benign and attack are lexically identical there) — the 2 must-follow-only attacks it would have caught are honest xfails. **Cascade D6 parity** added behind `_HAS_MULTILINGUAL` (the cascade path had no multilingual reference before); native/transliteration/code-switch attacks now flag in cascade too. **Arabic مساعد roleplay FP fixed** (dual-listed persona noun). Residual: cascade subtle-extraction (the predict force-hit floor is intentionally predict-only) — honest xfail.
 
 **The stacking gap, confirmed by measurement.** [layer2/obfuscation.py](src/na0s/layer2/obfuscation.py) recurses, but its ROT13/Reverse/Leet/Caesar decoders are **keyword-gated per layer** — a chain whose *inner* transform is keyword-gated never peels (the intermediate layer has no plaintext keywords to satisfy the gate). Measured: **33%** overall MB recall, **0%** on every chain with a keyword-gated inner transform (Base64+ROT13, ROT13+Leet, Reverse+ROT13, …), **100%** only when both buffs are non-gated codecs/unicode. This is also visible above: base64 90% vs rot13 32%, leetspeak 11%, reversed 16%, mixed-encoding 21%. **Per-row exceptions:** multimodal (INJ-0003) — decode doesn't reach inside image/audio; samples-only rows (INJ-0016/0017/0024) — no base detector to evade.
 

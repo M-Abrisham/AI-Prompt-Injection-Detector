@@ -194,6 +194,22 @@ try:
 except ImportError:
     _HAS_TOOL_ABUSE = False
 
+# Multilingual injection (D6) — parity with scan(). The predict path runs the
+# pattern handler + the semantic heuristic when Layer-0 flags non-English /
+# mixed-language input; the cascade path previously had NO multilingual
+# reference, so non-English attacks that the English ML model + English rules
+# both missed reached no D6 signal here. Mirror predict's fold below.
+try:
+    from .detectors.multilingual_handler import (
+        scan_multilingual,
+        get_multilingual_rule_weight,
+    )
+    from .detectors.multilingual_intent import detect_multilingual_intents
+    from .input.language_detector import detect_language as _detect_language
+    _HAS_MULTILINGUAL = True
+except ImportError:
+    _HAS_MULTILINGUAL = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 
@@ -674,6 +690,57 @@ class WeightedClassifier:
                         label = "MALICIOUS"
             except Exception:
                 _logger.debug("Tool-abuse detection failed", exc_info=True)
+
+        # --- Multilingual injection (D6) — parity with scan() ---
+        # Mirror predict.scan()'s D6 fold so non-English / transliterated /
+        # code-switched attacks reach a signal in the cascade path too. The
+        # semantic heuristic (detect_multilingual_intents) is gated on the SAME
+        # Layer-0 multilingual flags predict uses, so benign foreign-language
+        # Q&A (no override/extraction target) contributes nothing. The pattern
+        # handler (scan_multilingual) weight is capped at the composite 1.0
+        # ceiling — identical to predict.py — no separate floor mechanism.
+        if _HAS_MULTILINGUAL:
+            try:
+                _ml_flags = _detect_language(text).get("anomaly_flags", [])
+                if raw_text is not None and raw_text != text:
+                    _ml_flags = list(_ml_flags) + [
+                        f for f in _detect_language(raw_text).get("anomaly_flags", [])
+                        if f not in _ml_flags
+                    ]
+                # Semantic heuristic hits (override/extraction/roleplay/...,
+                # incl. subtle-extraction + transliteration). Gated internally
+                # on the multilingual flags + contextual-framing suppression.
+                # These RuleHits carry severities, so reuse the SAME severity
+                # weighting the pattern handler uses (get_multilingual_rule_weight
+                # reads .severity, shared by MultilingualHit and RuleHit) — no
+                # new magic number, capped at the composite 1.0 ceiling.
+                _sem_hits = detect_multilingual_intents(text, _ml_flags)
+                for _mrh in _sem_hits:
+                    if _mrh.name not in hit_names_seen:
+                        detailed_hits.append(_mrh)
+                        hit_names_seen.add(_mrh.name)
+                        hit_names.append(_mrh.name)
+                if _sem_hits:
+                    _sem_w = get_multilingual_rule_weight(_sem_hits)
+                    if _sem_w > 0.0:
+                        composite = min(composite + _sem_w, 1.0)
+                # Pattern-handler weight (capped composite contribution).
+                _ml_hits = scan_multilingual(text)
+                if raw_text is not None and raw_text != text:
+                    _ml_hits = _ml_hits + scan_multilingual(raw_text)
+                if _ml_hits:
+                    _ml_w = get_multilingual_rule_weight(_ml_hits)
+                    if _ml_w > 0.0:
+                        composite = min(composite + _ml_w, 1.0)
+                    for _mh in _ml_hits:
+                        _ml_name = "multilingual:" + _mh.pattern_name
+                        if _ml_name not in hit_names_seen:
+                            hit_names.append(_ml_name)
+                            hit_names_seen.add(_ml_name)
+                if composite >= self.threshold and label == "SAFE":
+                    label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Multilingual (D6) detection failed", exc_info=True)
 
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.

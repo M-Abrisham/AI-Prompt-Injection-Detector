@@ -13,6 +13,12 @@ data/eval/scenarios/*
 data/eval/scenarios/_drafts/*
 !data/eval/scenarios/_drafts/*.yaml
 !data/eval/scenarios/_drafts/README.md
+# v0.1 promoted scenarios are versioned source too (same reason as _drafts):
+# data/eval/scenarios/* re-ignores the nested v0.1 dir, so un-ignore it and its
+# YAMLs explicitly or a scoped `git add` silently drops new v0.1 fixtures.
+!data/eval/scenarios/v0.1/
+data/eval/scenarios/v0.1/*
+!data/eval/scenarios/v0.1/*.yaml
 # Agent approval mail-drop: CI publishes pending_deploy.json to the agent-approvals
 # branch (via git add -f) and the local daemon fetches it read-only. Keep the dir in
 # the repo via .gitkeep but ignore all runtime artifacts (requests, reports, state).
