@@ -42,14 +42,14 @@ rule_count:
   total_ast: 120
 taxonomy:
   category_count: 31
-  technique_count_total: 284
+  technique_count_total: 285
   techniques_by_category:
     D1: 22
     D2: 4
     D3: 4
     D4: 6
     D5: 7
-    D6: 6
+    D6: 7
     D7: 6
     D8: 6
     I1: 8
@@ -76,10 +76,10 @@ taxonomy:
     C1MT: 6
     BEN: 2
 test_count:
-  count: 9853
+  count: 10161
   collection_errors: 0
   pytest_exit_code: 0
-test_files: 325
+test_files: 334
 detection_signals_in_scan:
   filter_doc: Names matching prefixes (detect_, scan_, analyze_, extract_, score_,
     compute_, classify*, predict*, get_, sniff_) plus an exact-match allowlist for

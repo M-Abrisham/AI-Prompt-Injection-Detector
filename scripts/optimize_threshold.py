@@ -333,6 +333,16 @@ def main():
         json.dump(result, f, indent=2)
     print(f"      Saved: {THRESHOLD_JSON_PATH}")
 
+    # Also write a TRACKED, packaged copy so the calibrated threshold ships in the
+    # wheel and `voting.get_decision_threshold()` reads it at runtime (instead of
+    # the uncalibrated fallback).  data/processed/ above is gitignored; this one
+    # is committed by the retrain's deploy/PR.
+    packaged_path = os.path.join(PROJECT_ROOT, 'src', 'na0s', 'models', 'decision_threshold.json')
+    os.makedirs(os.path.dirname(packaged_path), exist_ok=True)
+    with open(packaged_path, 'w') as f:
+        json.dump(result, f, indent=2)
+    print(f"      Saved (packaged): {packaged_path}")
+
     print("\nDone.")
 
 

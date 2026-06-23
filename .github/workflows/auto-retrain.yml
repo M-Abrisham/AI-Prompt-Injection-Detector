@@ -96,6 +96,9 @@ jobs:
       - name: Generate synthetic training samples (D3/D4/D5/D6/D7/D8/E1/E2/C1/O1/P1)
         run: python scripts/gen_all_datasets.py
 
+      - name: Generate taxonomy-probe training samples (IM/IG/AD/M/T/S/... + gap closure)
+        run: python -m scripts.generate_taxonomy_samples
+
       - name: Merge and deduplicate all data
         run: python -m scripts.process_data
 
@@ -125,7 +128,7 @@ jobs:
         id: canary
         continue-on-error: true
         run: |
-          python -m scripts.canary_eval 2>&1 | tee canary_output.txt
+          python -m scripts.canary_eval --model-dir data/processed 2>&1 | tee canary_output.txt
           CANARY_EXIT=${PIPESTATUS[0]}
           echo "exit_code=${CANARY_EXIT}" >> $GITHUB_OUTPUT
           if [ "$CANARY_EXIT" -eq 0 ]; then
@@ -367,6 +370,15 @@ jobs:
 
           print(f"F14 failure report written to {report_path}")
           EOF
+
+      - name: Deploy model + update KNOWN_HASHES
+        # Copies the freshly-trained candidate (data/processed/) into the package
+        # (src/na0s/models/) and rewrites KNOWN_HASHES, so the retrain actually
+        # SHIPS a model.  Without this the "Check for model changes" diff below
+        # always reports unchanged and no PR is ever created.  Gated on the same
+        # approval success as the diff/PR steps, so a failed gate never ships.
+        if: steps.approval.outcome == 'success'
+        run: python scripts/deploy_model.py
 
       - name: Check for model changes
         id: diff

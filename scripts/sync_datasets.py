@@ -23,6 +23,16 @@ import pandas as pd
 
 from scripts.safe_yaml import safe_load_yaml
 
+# Single owner of the ;-joined CSV-cell format for per-source taxonomy codes.
+# Reused (not reinvented) so the stamp here and the read in process_data.py
+# share one encoding. If na0s is not importable in the sync runtime, fall back
+# to a local ";".join so sync never hard-depends on the package being on path.
+try:
+    from na0s.eval.registry import serialize_codes
+except ImportError:  # pragma: no cover - defensive: sync runs from repo root
+    def serialize_codes(codes):
+        return ";".join(str(c) for c in (codes or []))
+
 # Optional — gracefully degrade if not installed
 try:
     from datasets import load_dataset
@@ -91,6 +101,11 @@ def _download_github_csv(cfg, output_path):
         raise KeyError("Column '{}' not found in {}".format(text_col, url))
 
     out = pd.DataFrame({"text": df[text_col], "label": label_val})
+    # Stamp the source's canonical taxonomy code(s) as constant provenance on
+    # every row, carried through process_data.py into combined_data.csv. Empty
+    # for untagged sources. (Scraped/harvest corpora are not synced here and
+    # stay untagged -> "" downstream; no consumer should assume full coverage.)
+    out["taxonomy_codes"] = serialize_codes(cfg.get("taxonomy_codes", []))
     out = out.dropna(subset=["text"])
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     out.to_csv(output_path, index=False)
@@ -159,6 +174,9 @@ def _download_huggingface(cfg, output_path):
         raise ValueError("Source '{}' needs label or label_column".format(repo))
 
     out = pd.DataFrame({"text": texts, "label": labels})
+    # Stamp the source's canonical taxonomy code(s) as constant provenance on
+    # every row (see _download_github_csv). Empty for untagged sources.
+    out["taxonomy_codes"] = serialize_codes(cfg.get("taxonomy_codes", []))
     out = out.dropna(subset=["text"])
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     out.to_csv(output_path, index=False)

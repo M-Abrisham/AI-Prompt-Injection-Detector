@@ -65,7 +65,10 @@ class TestProcessDataStep:
         df = _load_csv(str(synthetic_data["csv_path"]))
         assert df is not None
         assert len(df) == 200
-        assert set(df.columns) == {"text", "label"}
+        # _load_csv now also carries a per-source taxonomy provenance column
+        # (Item A): always present, "" when the raw CSV is untagged.
+        assert set(df.columns) == {"text", "label", "taxonomy_codes"}
+        assert (df["taxonomy_codes"] == "").all()
 
     def test_load_csv_missing_columns(self, tmp_path):
         from process_data import _load_csv

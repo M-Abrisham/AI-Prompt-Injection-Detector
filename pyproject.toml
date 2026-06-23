@@ -71,7 +71,7 @@ docs = [
     "pymupdf>=1.23,<2",
     "python-docx>=1.0,<2",
     "openpyxl>=3.1,<4",
-    "python-pptx>=0.6,<1",
+    "python-pptx>=0.6,<2",
     "striprtf>=0.0.22,<1",
 ]
 llm = [
@@ -128,7 +128,7 @@ include = ["na0s*"]
 
 [tool.setuptools.package-data]
 "na0s" = ["py.typed"]
-"na0s.models" = ["*.pkl", "*.sha256"]
+"na0s.models" = ["*.pkl", "*.sha256", "*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

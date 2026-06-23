@@ -20,7 +20,8 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from .predict import (
-    _get_cached_models, _get_cached_scaler, _transform, _get_model_version,
+    _get_cached_models, _get_cached_scaler, _get_cached_char_vectorizer,
+    _transform, _get_model_version,
     _chunk_text, _head_tail_extract, _CHUNK_WORD_THRESHOLD, MAX_CHUNKS,
 )
 from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
@@ -209,6 +210,14 @@ try:
     _HAS_MULTILINGUAL = True
 except ImportError:
     _HAS_MULTILINGUAL = False
+# RAG-poison detector (I1.x) — optional import (parity w/ scan()).
+# INGESTION-side detector for instruction/authority/exfil payloads embedded in
+# retrieved RAG context, documents, email, or structured data.
+try:
+    from .rag.poison_detector import detect_rag_poisoning, get_rag_poison_weight
+    _HAS_RAG_POISON = True
+except ImportError:
+    _HAS_RAG_POISON = False
 
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
@@ -470,7 +479,14 @@ class WeightedClassifier:
         """
         # --- ML prediction ---
         scaler = _get_cached_scaler()
-        X = _transform(text, vectorizer, scaler)
+        # PARITY with predict.py's scan() path — mirror its
+        # _get_cached_char_vectorizer() call so cascade assembles the SAME
+        # [word|char|struct] feature vector the shared model was trained on.
+        # char_vec is None
+        # for the charless bundle (no-op skip inside _transform); a provided-but-
+        # broken char vectorizer fails loud inside _transform (F-AR8 contract).
+        char_vec = _get_cached_char_vectorizer()
+        X = _transform(text, vectorizer, scaler, char_vectorizer=char_vec)
         prediction = model.predict(X)[0]
         proba = model.predict_proba(X)[0]
         # Fix proba[1] fragility: derive ml_prob and ml_label correctly
@@ -741,6 +757,26 @@ class WeightedClassifier:
                     label = "MALICIOUS"
             except Exception:
                 _logger.debug("Multilingual (D6) detection failed", exc_info=True)
+        # --- RAG-poison (I1.x) — parity with scan() ---
+        # Instruction/authority/exfil payloads embedded in retrieved RAG context,
+        # documents, email, or structured data.  Weight capped at 0.12 inside
+        # get_rag_poison_weight, so a lone hit is a soft signal, never decisive.
+        if _HAS_RAG_POISON:
+            try:
+                _rp = detect_rag_poisoning(text)
+                if _rp.poison_indicators:
+                    _rp_w = get_rag_poison_weight(_rp)
+                    if _rp_w > 0.0:
+                        composite = min(composite + _rp_w, 1.0)
+                    for _ind in _rp.poison_indicators:
+                        _rp_hit = "rag_poison:" + _ind
+                        if _rp_hit not in hit_names_seen:
+                            hit_names.append(_rp_hit)
+                            hit_names_seen.add(_rp_hit)
+                    if composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("RAG-poison detection failed", exc_info=True)
 
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
