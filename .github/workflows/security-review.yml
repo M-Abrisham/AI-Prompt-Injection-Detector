@@ -38,7 +38,7 @@ jobs:
             echo "::notice::CLAUDE_API_KEY secret not set — skipping Claude security review. Add it in Settings > Secrets and variables > Actions to enable."
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.preflight.outputs.enabled == 'true'
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
