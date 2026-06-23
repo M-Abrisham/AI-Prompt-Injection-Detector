@@ -38,6 +38,7 @@ equality, preventing timing side-channels.
 
 import hashlib
 import hmac
+import io
 import json
 import logging
 import os
@@ -185,12 +186,44 @@ def _hash_path(pkl_path):
     return pkl_path + ".sha256"
 
 
+def _read_file_bytes(path):
+    """Read the whole file at *path* into memory with a single ``open()``.
+
+    The TOCTOU-closing primitive for :func:`safe_load`: the bytes returned here
+    are the EXACT bytes that get magic-checked, integrity-hashed, and unpickled,
+    so an attacker cannot swap the file between the integrity check and the load
+    (CWE-367) — there is no second content read to race. ``open(path, "rb")``
+    propagates ``FileNotFoundError`` / ``OSError`` exactly as the previous
+    ``open(path, "rb")`` at the tail of ``safe_load`` did, so no error semantics
+    change. Only the pickle payload (already destined to be fully materialised by
+    ``pickle.load``) is held in memory; the streaming path-based hashers remain
+    for the multi-GiB / torch artifacts that ``safe_load`` never touches.
+    """
+    with open(path, "rb") as f:
+        return f.read()
+
+
 def _sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(INTEGRITY_HASH_CHUNK_BYTES), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _sha256_bytes(data):
+    """SHA-256 hex digest of an in-memory buffer.
+
+    The buffer counterpart to :func:`_sha256` (which streams from disk in
+    ``INTEGRITY_HASH_CHUNK_BYTES`` chunks for arbitrarily large files).
+    ``hashlib.sha256(data).hexdigest()`` over the whole buffer is byte-for-byte
+    identical to the streamed digest of the same bytes, so this is a drop-in
+    for the TOCTOU read-once path in :func:`safe_load` — it hashes the EXACT
+    bytes that will be unpickled, never a re-read of the file. Kept separate so
+    the streaming path-based hashers (used by ``verify_file_digest`` / the torch
+    path on multi-GiB artifacts) are not forced to slurp the whole file.
+    """
+    return hashlib.sha256(data).hexdigest()
 
 
 def _cached_sha256(path):
@@ -281,6 +314,16 @@ def _hmac_sha256(path, key):
         for chunk in iter(lambda: f.read(INTEGRITY_HASH_CHUNK_BYTES), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _hmac_sha256_bytes(data, key):
+    """HMAC-SHA256 hex digest of an in-memory buffer using *key*.
+
+    Buffer counterpart to :func:`_hmac_sha256`; see :func:`_sha256_bytes` for
+    the read-once rationale. ``hmac.new(key, data, sha256).hexdigest()`` over the
+    whole buffer equals the streamed HMAC of the same bytes.
+    """
+    return hmac.new(key, data, hashlib.sha256).hexdigest()
 
 
 def _cached_hmac_sha256(path, key):
@@ -377,14 +420,17 @@ def _parse_sidecar_typed(raw):
     return _extract_and_validate_digest(raw, "<value>")
 
 
-def _validate_pickle_magic(path):
-    """Validate that *path* starts with valid pickle opcodes.
+def _validate_pickle_magic_bytes(data):
+    """Validate that the in-memory buffer *data* starts with valid pickle opcodes.
 
-    Raises ``ValueError`` if the file does not look like a valid pickle.
-    Must be called BEFORE computing any hash (fail fast).
+    Buffer counterpart to :func:`_validate_pickle_magic`: same opcode logic,
+    operating on ``data[:2]`` instead of a 2-byte file read. Used by the
+    read-once path in :func:`safe_load` so the magic check, the integrity hash,
+    and the unpickle all operate on the SAME bytes (TOCTOU closed). Raises
+    ``ValueError`` (message unchanged) if the bytes do not look like a valid
+    pickle. Must be called BEFORE any hash/unpickle (fail fast).
     """
-    with open(path, "rb") as f:
-        header = f.read(2)
+    header = data[:2]
 
     if len(header) < 2:
         raise ValueError(
@@ -407,6 +453,19 @@ def _validate_pickle_magic(path):
     raise ValueError(
         "Invalid pickle format: unexpected first byte 0x{:02x}".format(header[0])
     )
+
+
+def _validate_pickle_magic(path):
+    """Validate that *path* starts with valid pickle opcodes.
+
+    Raises ``ValueError`` if the file does not look like a valid pickle.
+    Must be called BEFORE computing any hash (fail fast). Thin path-based
+    wrapper over :func:`_validate_pickle_magic_bytes` — preserved for the
+    format-agnostic / torch callers and the tests that import it directly.
+    """
+    with open(path, "rb") as f:
+        header = f.read(2)
+    _validate_pickle_magic_bytes(header)
 
 
 def _atomic_write_binary(path, data):
@@ -756,6 +815,60 @@ def safe_dump(obj, path):
     write_digest_sidecar(path, _event="safe_dump", _artifact_label="pickle")
 
 
+def _verify_buffer_digest(path, data):
+    """Constant-time-verify that the in-memory *data* buffer matches the expected
+    integrity digest resolved for *path*.
+
+    This is the TOCTOU-closing companion to :func:`verify_file_digest`. Where
+    ``verify_file_digest`` hashes the bytes *on disk* (a read that races the
+    final ``open`` in the old ``safe_load``), this hashes the bytes ALREADY IN
+    MEMORY — the exact bytes about to be unpickled — so the verified bytes and
+    the executed bytes are provably identical (CWE-367 window eliminated).
+
+    Reuses the same key-aware trust hierarchy as ``verify_file_digest`` via
+    :func:`_resolve_expected_hash` (which reads only sidecar/``KNOWN_HASHES``
+    metadata, never the pickle payload), the same ``hmac.compare_digest``
+    constant-time compare, and the same ``integrity_failure`` /
+    ``Integrity check failed`` audit event + message — so a buffer mismatch is
+    indistinguishable, to callers and the audit log, from the on-disk tamper
+    that ``verify_file_digest`` already raises. The expected-source must resolve
+    to a key when it is an HMAC sidecar (mirrors ``verify_file_digest``'s
+    keyless-lone-``.hmac`` refusal).
+    """
+    expected, source = _resolve_expected_hash(path)
+    key = _get_signing_key()
+
+    if source == "sidecar_hmac":
+        if not key:
+            raise ValueError(
+                "HMAC sidecar exists for {} but {} is not set "
+                "and no plain SHA-256 (.sha256) fallback is present. "
+                "Cannot verify without the signing key.".format(
+                    path, PICKLE_SIGNING_KEY_ENV
+                )
+            )
+        actual = _hmac_sha256_bytes(data, key)
+    else:  # "hardcoded" or "sidecar_sha256" — both plain SHA-256 over the bytes
+        actual = _sha256_bytes(data)
+
+    if not hmac.compare_digest(actual, expected):
+        _audit.error(
+            json.dumps({
+                "event": "integrity_failure",
+                "path": path,
+                "source": source,
+                "stage": "buffer",
+                "expected_prefix": expected[:16],
+                "actual_prefix": actual[:16],
+            })
+        )
+        raise ValueError(
+            "Integrity check failed for {} (source: {}). "
+            "Expected {}, got {}. File may be tampered.".format(
+                path, source, expected, actual
+            )
+        )
+
 
 def safe_load(path):
     """Load a pickle after verifying its integrity digest.
@@ -771,15 +884,36 @@ def safe_load(path):
     3. Plain SHA-256 sidecar (keyless legacy path; or, with a key set, only the
        explicit ``NA0S_ALLOW_SHA256_DOWNGRADE=1`` migration opt-out).
     """
-    # BUG-L11-6: Validate pickle magic bytes before any hash computation.
-    # (Pickle-specific; verify_file_digest is format-agnostic so this guard
-    # stays here and is NOT moved into the shared helper.)
-    _validate_pickle_magic(path)
+    # TOCTOU fix (CWE-367): read the pickle bytes EXACTLY ONCE into memory and
+    # thread that single buffer through magic validation, integrity verification,
+    # AND unpickling. The old flow opened `path` three times — once to sniff the
+    # magic, once (inside verify_file_digest -> _cached_*) to hash, and a third
+    # time to feed pickle.load — so the bytes that were hashed were not the bytes
+    # that were executed. An attacker with write access to the model directory
+    # could swap the file between the verified hash and the final open and run
+    # UN-verified bytes. There is no second content read here: the buffer is the
+    # only source of the executed bytes.
+    data = _read_file_bytes(path)
 
-    # Shared, format-agnostic digest verification: resolves the trust tier and
-    # constant-time-compares, raising ValueError on tamper / FileNotFoundError
-    # when no source exists. One implementation for both pickle and torch.
+    # BUG-L11-6: Validate pickle magic bytes before any hash computation, on the
+    # in-memory buffer. (Pickle-specific; verify_file_digest is format-agnostic
+    # so this guard stays here and is NOT moved into the shared helper.)
+    _validate_pickle_magic_bytes(data)
+
+    # Shared, format-agnostic digest verification over the bytes ON DISK:
+    # resolves the trust tier and constant-time-compares, raising ValueError on
+    # tamper / FileNotFoundError when no source exists. Preserved unchanged so it
+    # keeps populating the digest cache and emitting its verify_file_digest audit
+    # event, and so the torch path (verify_file_digest(path)) is untouched.
     verify_file_digest(path)
+
+    # TOCTOU guard: additionally bind the EXECUTED bytes to the trusted digest by
+    # constant-time-comparing the SAME in-memory buffer against the resolved
+    # expected hash. If the file was swapped between the buffer read above and
+    # verify_file_digest's on-disk read, the buffer no longer matches the
+    # expected digest and this raises "Integrity check failed" (the identical
+    # message/event as an on-disk tamper) before any deserialization.
+    _verify_buffer_digest(path, data)
 
     _audit.info(
         json.dumps({
@@ -795,6 +929,10 @@ def safe_load(path):
     # warning would fire on every cold start. We swallow only that single
     # warning class — all other warnings still propagate normally — and
     # surface the version mismatch once per process via ``predict.py``.
+    #
+    # Unpickle from the verified in-memory buffer (io.BytesIO), NEVER by
+    # re-opening `path` — closing the TOCTOU window. The bytes loaded here are
+    # byte-for-byte the bytes magic-checked and digest-verified above.
     with warnings.catch_warnings():
         try:
             from sklearn.exceptions import InconsistentVersionWarning
@@ -802,5 +940,4 @@ def safe_load(path):
         except ImportError:
             # sklearn not installed — nothing to suppress.
             pass
-        with open(path, "rb") as f:
-            return pickle.load(f)
+        return pickle.load(io.BytesIO(data))

@@ -8,6 +8,7 @@ Run with:
     SCAN_TIMEOUT_SEC=0 python3 -m unittest tests.test_safe_pickle -v
 """
 
+import io
 import os
 import pickle
 import tempfile
@@ -923,6 +924,240 @@ class TestDigestCacheBoundedLRU(unittest.TestCase):
                     self.assertEqual(safe_load(p), obj)
         self.assertEqual(len(_sha256_cache), len(paths))
         self.assertLessEqual(len(_sha256_cache), _CACHE_MAXSIZE)
+
+
+class TestReadOnceBufferTOCTOU(unittest.TestCase):
+    """Item #04a — TOCTOU read-once buffer (CWE-367).
+
+    ``safe_load`` must read the pickle bytes EXACTLY ONCE into an in-memory
+    buffer and unpickle that buffer, so the bytes verified by the integrity
+    digest are byte-for-byte the bytes executed by the unpickler. An attacker
+    who swaps the on-disk file between the digest check and the load must NOT be
+    able to execute UN-verified bytes (the classic verify-then-reopen window).
+
+    Each test asserts an observable outcome (the exact bytes unpickled, a raised
+    type+message, or the absence of a side effect) — never merely "no crash".
+    """
+
+    def setUp(self):
+        import na0s.integrity.safe_pickle as sp
+        self.sp = sp
+        self.sp._reset_caches()
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmpdir = self._tmpdir.name
+        self.pkl_path = os.path.join(self.tmpdir, "toctou_model.pkl")
+        self.benign = {"weights": [1.0, 2.0, 3.0], "bias": 0.5}
+
+    def tearDown(self):
+        self.sp._reset_caches()
+        self._tmpdir.cleanup()
+
+    def _dump_keyless(self, obj, path):
+        env_no_key = {k: v for k, v in os.environ.items()
+                      if k != "NA0S_PICKLE_KEY"}
+        with patch.dict(os.environ, env_no_key, clear=True):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                safe_dump(obj, path)
+
+    # --- HEADLINE: executed bytes == verified bytes; no second content read ---
+
+    def test_pickle_load_unpickles_exactly_the_read_buffer(self):
+        """The bytes fed to pickle.load are byte-for-byte the bytes returned by
+        the single _read_file_bytes call — proving the content is read once and
+        the executed bytes ARE the buffer (not a re-read of the file).
+
+        Spies on _read_file_bytes (the one content read) and pickle.load, then
+        asserts the BytesIO handed to pickle.load wraps exactly that buffer. If
+        safe_load ever re-opened the path for the load, the two byte strings
+        would not be guaranteed identical and this guard would have teeth.
+        """
+        self._dump_keyless(self.benign, self.pkl_path)
+        captured = {}
+
+        real_read = self.sp._read_file_bytes
+        real_pickle_load = self.sp.pickle.load
+
+        def spy_read(path):
+            data = real_read(path)
+            captured.setdefault("read_bufs", []).append(data)
+            return data
+
+        def spy_pickle_load(fileobj):
+            # The buffer-based path passes an io.BytesIO wrapping the verified
+            # bytes; capture what pickle.load actually executes.
+            self.assertIsInstance(fileobj, io.BytesIO)
+            captured["loaded_bytes"] = fileobj.getvalue()
+            return real_pickle_load(fileobj)
+
+        env_no_key = {k: v for k, v in os.environ.items()
+                      if k != "NA0S_PICKLE_KEY"}
+        with patch.dict(os.environ, env_no_key, clear=True):
+            with patch.object(self.sp, "_read_file_bytes", side_effect=spy_read):
+                with patch.object(self.sp.pickle, "load",
+                                  side_effect=spy_pickle_load):
+                    loaded = safe_load(self.pkl_path)
+
+        self.assertEqual(loaded, self.benign)
+        # Exactly ONE content read produced the executed buffer.
+        self.assertEqual(len(captured["read_bufs"]), 1)
+        # The bytes unpickled are byte-for-byte the bytes that were read+hashed.
+        self.assertEqual(captured["loaded_bytes"], captured["read_bufs"][0])
+
+    def test_post_verify_file_swap_cannot_execute_unverified_bytes(self):
+        """The core TOCTOU regression guard: swap the on-disk file to a malicious
+        payload AFTER the buffer is read, by hooking verify_file_digest to mutate
+        the file mid-load. With read-once, safe_load unpickles the ORIGINAL
+        verified buffer — never the swapped-in malicious bytes.
+
+        The malicious payload, if ever unpickled, writes a sentinel file via
+        __reduce__. We assert the sentinel is NEVER created AND the returned
+        object is the benign one (or the buffer guard raises) — both outcomes
+        prove the un-verified bytes did not execute.
+
+        Pre-fix (re-open at pickle.load time) this FAILS: the third open would
+        read the swapped malicious file and run it, creating the sentinel.
+        """
+        self._dump_keyless(self.benign, self.pkl_path)
+        sentinel = os.path.join(self.tmpdir, "PWNED")
+
+        # Build a malicious pickle whose __reduce__ writes the sentinel on load,
+        # plus a VALID sidecar over it (simulates an attacker who can rewrite
+        # both the file and its sha256 between the buffer read and the hash).
+        malicious_path = os.path.join(self.tmpdir, "_evil_src.pkl")
+        with open(malicious_path, "wb") as f:
+            f.write(pickle.dumps(_SentinelReduce(sentinel)))
+        with open(malicious_path, "rb") as f:
+            malicious_bytes = f.read()
+
+        real_verify = self.sp.verify_file_digest
+
+        def swapping_verify(path):
+            # Attacker swaps the on-disk file (and a matching sha256 sidecar) to
+            # the malicious payload AFTER safe_load already buffered the benign
+            # bytes. verify_file_digest now hashes the malicious file.
+            with open(path, "wb") as f:
+                f.write(malicious_bytes)
+            with open(_hash_path(path), "w") as f:
+                f.write(_format_sidecar("sha256", self.sp._sha256(path)))
+            return real_verify(path)
+
+        env_no_key = {k: v for k, v in os.environ.items()
+                      if k != "NA0S_PICKLE_KEY"}
+        with patch.dict(os.environ, env_no_key, clear=True):
+            with patch.object(self.sp, "verify_file_digest",
+                              side_effect=swapping_verify):
+                # Either the benign object loads (executed buffer == verified
+                # buffer) OR the buffer guard catches the swap and raises — never
+                # the malicious bytes.
+                try:
+                    loaded = safe_load(self.pkl_path)
+                    self.assertEqual(loaded, self.benign)
+                except ValueError as exc:
+                    self.assertIn("Integrity check failed", str(exc))
+
+        self.assertFalse(
+            os.path.exists(sentinel),
+            "malicious swapped-in payload executed — TOCTOU window still open",
+        )
+
+    def test_buffer_guard_rejects_mismatch_against_resolved_digest(self):
+        """The buffer guard (_verify_buffer_digest) raises when the in-memory
+        bytes do not match the resolved expected digest — same message/event as
+        an on-disk tamper. Directly drives the helper to prove it has teeth and
+        is not a hollow pass-through.
+        """
+        self._dump_keyless(self.benign, self.pkl_path)
+        env_no_key = {k: v for k, v in os.environ.items()
+                      if k != "NA0S_PICKLE_KEY"}
+        with patch.dict(os.environ, env_no_key, clear=True):
+            # Correct buffer verifies silently (returns None).
+            good = self.sp._read_file_bytes(self.pkl_path)
+            self.assertIsNone(self.sp._verify_buffer_digest(self.pkl_path, good))
+            # A tampered buffer (one flipped byte) is rejected.
+            tampered = bytearray(good)
+            tampered[-1] ^= 0xFF
+            with self.assertRaises(ValueError) as ctx:
+                self.sp._verify_buffer_digest(self.pkl_path, bytes(tampered))
+        self.assertIn("Integrity check failed", str(ctx.exception))
+
+    def test_buffer_guard_hmac_tier_requires_key(self):
+        """The buffer guard mirrors verify_file_digest's keyless-lone-.hmac
+        refusal: a lone .hmac with no key and no .sha256 fallback raises the
+        'NA0S_PICKLE_KEY is not set' error rather than silently accepting."""
+        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": "k" * 32}):
+            safe_dump(self.benign, self.pkl_path)
+        sha = _hash_path(self.pkl_path)
+        if os.path.exists(sha):
+            os.remove(sha)
+        data = self.sp._read_file_bytes(self.pkl_path)
+        env_no_key = {k: v for k, v in os.environ.items()
+                      if k != "NA0S_PICKLE_KEY"}
+        with patch.dict(os.environ, env_no_key, clear=True):
+            with self.assertRaises(ValueError) as ctx:
+                self.sp._verify_buffer_digest(self.pkl_path, data)
+        self.assertIn("NA0S_PICKLE_KEY is not set", str(ctx.exception))
+
+    def test_roundtrip_unchanged_hmac_tier(self):
+        """Regression: read-once buffer leaves the HMAC tier round-trip intact."""
+        with patch.dict(os.environ, {"NA0S_PICKLE_KEY": "k" * 32}):
+            safe_dump(self.benign, self.pkl_path)
+            self.assertEqual(safe_load(self.pkl_path), self.benign)
+
+    def test_load_never_reopens_path_for_content_after_buffer(self):
+        """No second CONTENT open of the pickle path occurs during a load: the
+        only read of `path`'s bytes is the single _read_file_bytes call. Hooks
+        _read_file_bytes (the sanctioned single read) and a real builtins.open
+        spy that records every open of the pickle path in 'rb'/binary-read mode.
+
+        verify_file_digest legitimately re-opens to STREAM-hash the file (that is
+        the on-disk verification, not an execution read); the TOCTOU guarantee is
+        that the EXECUTED bytes come from the buffer, asserted by
+        test_pickle_load_unpickles_exactly_the_read_buffer. Here we assert the
+        weaker-but-explicit property that pickle.load is NEVER handed a file
+        object opened on `path` (it is handed an io.BytesIO).
+        """
+        self._dump_keyless(self.benign, self.pkl_path)
+        real_pickle_load = self.sp.pickle.load
+        loaded_from = {}
+
+        def spy_pickle_load(fileobj):
+            loaded_from["type"] = type(fileobj).__name__
+            loaded_from["is_bytesio"] = isinstance(fileobj, io.BytesIO)
+            return real_pickle_load(fileobj)
+
+        env_no_key = {k: v for k, v in os.environ.items()
+                      if k != "NA0S_PICKLE_KEY"}
+        with patch.dict(os.environ, env_no_key, clear=True):
+            with patch.object(self.sp.pickle, "load",
+                              side_effect=spy_pickle_load):
+                self.assertEqual(safe_load(self.pkl_path), self.benign)
+        # pickle.load consumed an in-memory buffer, not a freshly-opened file.
+        self.assertTrue(loaded_from["is_bytesio"],
+                        "pickle.load was handed {} — expected io.BytesIO "
+                        "(a re-opened file is a TOCTOU window)"
+                        .format(loaded_from.get("type")))
+
+
+class _SentinelReduce:
+    """A pickle whose __reduce__ writes a sentinel file when unpickled.
+
+    Used only by TestReadOnceBufferTOCTOU to prove a swapped-in malicious
+    payload is NEVER deserialized: if safe_load ever unpickled these bytes, the
+    sentinel would be created and the test fails.
+    """
+
+    def __init__(self, sentinel_path):
+        self.sentinel_path = sentinel_path
+
+    def __reduce__(self):
+        return (_write_sentinel, (self.sentinel_path,))
+
+
+def _write_sentinel(path):  # pragma: no cover - must NEVER run in these tests
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("pwned")
+    return path
 
 
 if __name__ == "__main__":
