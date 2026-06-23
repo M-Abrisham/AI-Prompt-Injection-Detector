@@ -1,4 +1,4 @@
-"""Tests for RAG injection detection rules (R1.1–R1.4).
+"""Tests for RAG injection detection rules (I1.x — Data Source Poisoning).
 
 Covers:
     1. rag_policy_update — detects "updated policy supersedes" semantic injections
@@ -40,12 +40,12 @@ class _ParanoiaResetMixin:
 
 
 # ============================================================================
-# 1. rag_policy_update (R1.1) — PL2, severity=high
+# 1. rag_policy_update (I1.2) — PL2, severity=high
 # ============================================================================
 
 
 class TestRAGPolicyUpdate(_ParanoiaResetMixin, unittest.TestCase):
-    """Tests for the rag_policy_update rule (R1.1)."""
+    """Tests for the rag_policy_update rule (I1.2)."""
 
     def setUp(self):
         super().setUp()
@@ -143,12 +143,12 @@ class TestRAGPolicyUpdate(_ParanoiaResetMixin, unittest.TestCase):
 
 
 # ============================================================================
-# 2. rag_knowledge_base_instruction (R1.2) — PL2, severity=high
+# 2. rag_knowledge_base_instruction (I1.4) — PL2, severity=high
 # ============================================================================
 
 
 class TestRAGKnowledgeBaseInstruction(_ParanoiaResetMixin, unittest.TestCase):
-    """Tests for the rag_knowledge_base_instruction rule (R1.2)."""
+    """Tests for the rag_knowledge_base_instruction rule (I1.4)."""
 
     def setUp(self):
         super().setUp()
@@ -286,12 +286,12 @@ class TestRAGKnowledgeBaseInstruction(_ParanoiaResetMixin, unittest.TestCase):
 
 
 # ============================================================================
-# 3. rag_context_separator (R1.3) — PL2, severity=critical
+# 3. rag_context_separator (I1.2) — PL2, severity=critical
 # ============================================================================
 
 
 class TestRAGContextSeparator(_ParanoiaResetMixin, unittest.TestCase):
-    """Tests for the rag_context_separator rule (R1.3)."""
+    """Tests for the rag_context_separator rule (I1.2)."""
 
     def setUp(self):
         super().setUp()
@@ -397,12 +397,12 @@ class TestRAGContextSeparator(_ParanoiaResetMixin, unittest.TestCase):
 
 
 # ============================================================================
-# 4. rag_fake_retrieval_markers (R1.4) — PL3, severity=high
+# 4. rag_fake_retrieval_markers (I1.2) — PL3, severity=high
 # ============================================================================
 
 
 class TestRAGFakeRetrievalMarkers(_ParanoiaResetMixin, unittest.TestCase):
-    """Tests for the rag_fake_retrieval_markers rule (R1.4)."""
+    """Tests for the rag_fake_retrieval_markers rule (I1.2)."""
 
     def setUp(self):
         super().setUp()
@@ -542,7 +542,7 @@ class TestRAGRuleCrossInteraction(_ParanoiaResetMixin, unittest.TestCase):
         rag_hit = [h for h in hits if h.name == "rag_context_separator"]
         self.assertEqual(len(rag_hit), 1)
         self.assertEqual(rag_hit[0].severity, "critical")
-        self.assertEqual(rag_hit[0].technique_ids, ["R1.3"])
+        self.assertEqual(rag_hit[0].technique_ids, ["I1.2"])
 
     def test_detailed_returns_correct_technique_ids(self):
         """rule_score_detailed should return correct technique_ids for RAG rules."""
@@ -552,7 +552,7 @@ class TestRAGRuleCrossInteraction(_ParanoiaResetMixin, unittest.TestCase):
         )
         rag_hit = [h for h in hits if h.name == "rag_policy_update"]
         self.assertEqual(len(rag_hit), 1)
-        self.assertEqual(rag_hit[0].technique_ids, ["R1.1"])
+        self.assertEqual(rag_hit[0].technique_ids, ["I1.2"])
         self.assertEqual(rag_hit[0].severity, "high")
 
 

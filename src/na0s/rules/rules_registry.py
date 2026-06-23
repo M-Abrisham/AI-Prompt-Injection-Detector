@@ -1075,7 +1075,11 @@ RULES = [
          description="Request for harmful substance synthesis instructions"),
 
     # ------------------------------------------------------------------
-    # RAG Injection Detection — 4 rules (R1.1–R1.4)
+    # RAG Injection Detection — 4 rules (I1.x — Data Source Poisoning)
+    # NOTE: these emit I1.x (Indirect/Data-Source injection), NOT R1.x.
+    # R1 is the Resource/Availability category (prompt-stuffing, recursive
+    # output, cost-amplification) — a different attack class. The earlier
+    # R1.x tags were a taxonomy mismap.
     # ------------------------------------------------------------------
     # Research basis:
     #   - PoisonedRAG (arXiv 2402.07867): 90% attack success with 5 texts
@@ -1087,7 +1091,7 @@ RULES = [
          r"(?:policy|guideline)s?\s+"
          r".{0,80}"
          r"(?:supersede|override|replace)",
-         technique_ids=["R1.1"],
+         technique_ids=["I1.2"],
          severity="high",
          paranoia_level=2,
          description="RAG semantic injection claiming policy updates that override constraints"),
@@ -1098,7 +1102,7 @@ RULES = [
          r"(?:always\s+(?:ignore|disregard|forget|override|bypass|skip)"
          r"|never\s+(?:follow|obey|respect|enforce|apply|comply)"
          r"|ignore|disregard|forget|override)",
-         technique_ids=["R1.2"],
+         technique_ids=["I1.4"],
          severity="high",
          paranoia_level=2,
          description="RAG injection in retrieved documents directing AI behavior"),
@@ -1108,7 +1112,7 @@ RULES = [
          r"[\s\S]{0,80}"
          r"(?:NEW\s+INSTRUCTIONS|BEGIN\s+INSTRUCTIONS"
          r"|SYSTEM\s+PROMPT|OVERRIDE)",
-         technique_ids=["R1.3"],
+         technique_ids=["I1.2"],
          severity="critical",
          paranoia_level=2,
          description="Fake RAG context separator followed by new instruction markers"),
@@ -1116,7 +1120,7 @@ RULES = [
     Rule("rag_fake_retrieval_markers",
          r"\[/?(?:RETRIEVED|SOURCE|CONTEXT|DOCUMENT|REFERENCE|KNOWLEDGE)"
          r"\s*(?:TEXT|DATA|BASE|CHUNK)?\]",
-         technique_ids=["R1.4"],
+         technique_ids=["I1.2"],
          severity="high",
          paranoia_level=3,
          description="Spoofed RAG retrieval system markers in user input"),
