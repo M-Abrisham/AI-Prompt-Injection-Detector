@@ -137,6 +137,7 @@ categories:
       D6.4: { name: "Japanese", severity: medium }
       D6.5: { name: "Arabic", severity: medium }
       D6.6: { name: "Mixed-language", severity: high }
+      D6.7: { name: "Transliteration / Romanization / code-switching", severity: medium }
 
   D7:
     name: "Payload Delivery Tricks"
