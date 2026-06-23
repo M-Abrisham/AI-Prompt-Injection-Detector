@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import logging
 import os
-import pickle
 import threading
 from typing import Any, Dict, Optional
 
@@ -194,9 +193,14 @@ class FAISSClassifier:
 
         _get_faiss().write_index(self._index, path)
 
+        # Integrity: write the labels via safe_dump so they ship with a
+        # verifiable sidecar (.hmac or .sha256). A raw pickle.load of a tampered
+        # labels file would be an arbitrary-code-execution surface on first
+        # query; safe_load (in load()) refuses a tampered/sidecar-less file.
+        from na0s.integrity.safe_pickle import safe_dump
+
         labels_path = path + ".labels.pkl"
-        with open(labels_path, "wb") as f:
-            pickle.dump(self._labels, f)
+        safe_dump(self._labels, labels_path)
 
         logger.info("FAISS index saved to %s (%d vectors)", path, self._index.ntotal)
 
@@ -214,9 +218,16 @@ class FAISSClassifier:
 
         self._index = _get_faiss().read_index(path)
 
+        # Integrity: verify the labels sidecar BEFORE unpickling. safe_load
+        # raises ValueError on a digest mismatch (tampered file) and
+        # FileNotFoundError when no sidecar/KNOWN_HASHES entry exists (legacy
+        # artifact). Either propagates up to _ensure_loaded(), which sets
+        # _init_failed=True so classify() degrades to the inert SAFE result
+        # instead of executing an attacker-controlled pickle.
+        from na0s.integrity.safe_pickle import safe_load
+
         labels_path = path + ".labels.pkl"
-        with open(labels_path, "rb") as f:
-            self._labels = pickle.load(f)
+        self._labels = safe_load(labels_path)
 
         self._loaded = True
         self._init_failed = False

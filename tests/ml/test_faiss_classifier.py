@@ -343,6 +343,76 @@ class TestSaveLoad:
 
 
 # ---------------------------------------------------------------------------
+# Test: Integrity gate on the labels pickle (item #05)
+# ---------------------------------------------------------------------------
+
+@requires_faiss
+class TestLabelsIntegrity:
+    """save()/load() route the labels through safe_dump/safe_load so a tampered
+    or sidecar-less labels file is refused before unpickling, and the lazy-load
+    path degrades to the inert SAFE result instead of executing it."""
+
+    def _build_and_save(self, malicious_only_embeddings, tmp_index_path):
+        from na0s.faiss_classifier import FAISSClassifier
+
+        embeddings, labels, mal_center = malicious_only_embeddings
+        clf = FAISSClassifier()
+        clf.build_index(embeddings, labels)
+        clf.save(tmp_index_path)
+        return mal_center
+
+    def test_save_writes_sidecar(self, malicious_only_embeddings, tmp_index_path, monkeypatch):
+        monkeypatch.delenv("NA0S_PICKLE_KEY", raising=False)
+        self._build_and_save(malicious_only_embeddings, tmp_index_path)
+        assert os.path.exists(tmp_index_path + ".labels.pkl.sha256")
+
+    def test_tampered_labels_load_raises(self, malicious_only_embeddings, tmp_index_path, monkeypatch):
+        from na0s.faiss_classifier import FAISSClassifier
+
+        monkeypatch.delenv("NA0S_PICKLE_KEY", raising=False)
+        self._build_and_save(malicious_only_embeddings, tmp_index_path)
+        # Tamper the labels pickle after the sidecar was written.
+        with open(tmp_index_path + ".labels.pkl", "ab") as f:
+            f.write(b"\x00tamper")
+
+        clf = FAISSClassifier()
+        with pytest.raises(ValueError, match="Integrity check failed"):
+            clf.load(tmp_index_path)
+
+    def test_tampered_labels_lazy_load_degrades_to_safe(
+        self, malicious_only_embeddings, tmp_index_path, monkeypatch
+    ):
+        from na0s.faiss_classifier import FAISSClassifier
+
+        monkeypatch.delenv("NA0S_PICKLE_KEY", raising=False)
+        mal_center = self._build_and_save(malicious_only_embeddings, tmp_index_path)
+        with open(tmp_index_path + ".labels.pkl", "ab") as f:
+            f.write(b"\x00tamper")
+
+        # Fresh classifier lazy-loads via _ensure_loaded() -> classify() must
+        # NOT raise; it degrades to the inert SAFE result and disables itself.
+        clf = FAISSClassifier(index_path=tmp_index_path)
+        result = clf.classify(mal_center)
+        assert result["label"] == "SAFE"
+        assert result["score"] == 0.0
+        assert clf._init_failed is True
+
+    def test_missing_sidecar_legacy_labels_refused(
+        self, malicious_only_embeddings, tmp_index_path, monkeypatch
+    ):
+        from na0s.faiss_classifier import FAISSClassifier
+
+        monkeypatch.delenv("NA0S_PICKLE_KEY", raising=False)
+        self._build_and_save(malicious_only_embeddings, tmp_index_path)
+        # Simulate a legacy artifact: delete the sidecar.
+        os.unlink(tmp_index_path + ".labels.pkl.sha256")
+
+        clf = FAISSClassifier()
+        with pytest.raises(FileNotFoundError):
+            clf.load(tmp_index_path)
+
+
+# ---------------------------------------------------------------------------
 # Test: Graceful degradation
 # ---------------------------------------------------------------------------
 

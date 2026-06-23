@@ -7,6 +7,8 @@ Downstream modules import from this file instead of hardcoding values.
 import os
 from dataclasses import dataclass
 
+from na0s._env import safe_int_env
+
 # -- Input length guard (defense-in-depth, checked at scan/classify entry) --
 MAX_INPUT_LENGTH: int = int(os.getenv("NA0S_MAX_INPUT_LENGTH", 50_000))
 
@@ -100,3 +102,32 @@ WHITELIST_CONFIDENCE = 0.99
 WHITELIST_RISK_SCORE = 0.01
 PARANOID_LOWER = 0.35
 PARANOID_UPPER = 0.65
+
+# -- Supply-chain integrity (Layer 11) --
+# Centralizes the in-package L11 integrity knobs that were previously inlined
+# in na0s.integrity.safe_pickle (ROADMAP_V2.md:1177). Defaults are carried over
+# byte-for-byte from the shipped code — they are NOT re-tuned here.
+#
+# INTEGRITY_HASH_CHUNK_BYTES: read-batch size for the incremental SHA-256/HMAC
+# hashing in safe_pickle._sha256 / _hmac_sha256. This is a pure I/O batching
+# choice fed to hashlib/hmac incrementally, so it does NOT affect the resulting
+# digest — changing it can never alter which files verify. The clamp is a
+# guardrail, not a security threshold:
+#   * lo=4096 — a 0/negative chunk would make ``iter(lambda: f.read(n), b"")``
+#     spin forever (read(0) never returns the b"" sentinel); 4 KiB is the
+#     smallest sane page-sized read.
+#   * hi=1<<24 (16 MiB) — rejects a pathological env value that would buffer a
+#     huge per-read allocation. safe_int_env falls back to the 64 KiB default
+#     on any out-of-range / non-integer input.
+INTEGRITY_HASH_CHUNK_BYTES: int = safe_int_env(
+    "NA0S_INTEGRITY_HASH_CHUNK_BYTES", 1 << 16, lo=4096, hi=1 << 24
+)
+
+# PICKLE_SIGNING_KEY_ENV: the NAME of the env var that holds the HMAC signing
+# key (the value is read from the environment at the safe_pickle trust
+# boundary). This is the single source of truth for the name so the string
+# "NA0S_PICKLE_KEY" is not duplicated across safe_pickle's getenv call and its
+# operator-facing messages. It is intentionally a plain constant, NOT
+# env-overridable: the name of the variable that holds a renamed variable is
+# circular, and downstream docs/tests assert the literal "NA0S_PICKLE_KEY".
+PICKLE_SIGNING_KEY_ENV: str = "NA0S_PICKLE_KEY"

@@ -61,6 +61,26 @@ except ImportError as exc:
 from na0s.ml._st_loader import load_pinned_sentence_transformer
 
 
+def _torch_supports_weights_only() -> bool:
+    """True if the installed torch's ``torch.load`` accepts ``weights_only``.
+
+    The kwarg was added in torch 1.13. We introspect the actual signature
+    rather than parse the version string (more robust to vendored/patched
+    builds). Returns False when torch is absent.
+    """
+    if not _HAS_TORCH:
+        return False
+    try:
+        import inspect
+
+        return "weights_only" in inspect.signature(torch.load).parameters
+    except (TypeError, ValueError):  # pragma: no cover - C-impl without signature
+        # Some builds expose torch.load as a C function with no introspectable
+        # signature; assume modern torch (>=1.13 ships the kwarg) and let the
+        # call itself surface any TypeError.
+        return True
+
+
 # ---------------------------------------------------------------------------
 # EmbeddingAdapter — the trainable MLP head
 # ---------------------------------------------------------------------------
@@ -422,6 +442,14 @@ class AdapterClassifier:
             raise RuntimeError("No adapter to save. Call train() first.")
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         torch.save(self._adapter.state_dict(), path)
+        # Integrity: attach a digest sidecar to the torch artifact so load()
+        # can verify it BEFORE deserializing. torch.load reads a pickle inside
+        # the saved zip with full __reduce__ power; a sidecar-less or tampered
+        # file is an arbitrary-code-execution surface. write_digest_sidecar is
+        # format-agnostic (it hashes the file bytes, does not re-serialize).
+        from na0s.integrity.safe_pickle import write_digest_sidecar
+
+        write_digest_sidecar(path)
         logger.info("Adapter saved to %s", path)
 
     def load(self, path: str, input_dim: int = 384) -> None:
@@ -434,12 +462,33 @@ class AdapterClassifier:
         input_dim : int
             Embedding dimension (must match the saved adapter).
         """
+        # Integrity: verify the digest sidecar BEFORE torch.load deserializes
+        # the artifact. verify_file_digest is format-agnostic (safe_load is
+        # pickle-specific and would reject the torch zip header), and raises
+        # ValueError on tamper / FileNotFoundError when no sidecar exists.
+        from na0s.integrity.safe_pickle import verify_file_digest
+
+        verify_file_digest(path)
+
         self._input_dim = input_dim
         self._adapter = EmbeddingAdapter(
             input_dim=input_dim,
             hidden_dim=self._hidden_dim,
             dropout=self._dropout,
         )
-        self._adapter.load_state_dict(torch.load(path, map_location="cpu"))
+        # Defense-in-depth on TOP of the digest gate: weights_only=True blocks
+        # arbitrary __reduce__ execution during unpickling (torch >= 1.13). A
+        # state_dict of plain tensors loads fine under it. On older torch the
+        # kwarg does not exist, so fall back with a warning.
+        if _torch_supports_weights_only():
+            state = torch.load(path, map_location="cpu", weights_only=True)
+        else:
+            logger.warning(
+                "torch %s predates weights_only=True; loading %s without it "
+                "(digest sidecar still verified above).",
+                getattr(torch, "__version__", "?"), path,
+            )
+            state = torch.load(path, map_location="cpu")
+        self._adapter.load_state_dict(state)
         self._adapter.eval()
         logger.info("Adapter loaded from %s", path)

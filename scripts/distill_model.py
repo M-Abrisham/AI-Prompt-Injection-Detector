@@ -22,6 +22,8 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
+from na0s.integrity.safe_pickle import safe_load, safe_dump
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -250,21 +252,6 @@ def main(argv: Optional[List[str]] = None) -> None:
         sys.exit(1)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-
-    # Try to use safe_pickle if available, fall back to regular pickle
-    try:
-        from na0s.safe_pickle import safe_load, safe_dump
-    except ImportError:
-        import pickle
-
-        def safe_load(path):
-            with open(path, "rb") as f:
-                return pickle.load(f)
-
-        def safe_dump(obj, path):
-            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            with open(path, "wb") as f:
-                pickle.dump(obj, f)
 
     # Load TF-IDF features
     print("Loading TF-IDF features from {0}".format(args.tfidf_features))
