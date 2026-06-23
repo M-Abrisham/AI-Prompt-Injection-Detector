@@ -23,6 +23,23 @@ L16 Multi-Turn | L17 Doc Scanning (35%) | L18 RAG Security | L19 Agent/MCP | L20
 
 ---
 
+## Spec-Driven Hardening Campaign (IN PROGRESS 2026-06-23, branch `docs/attack-specs` + per-attack branches)
+
+Per-attack `specs/<attack>.md` (gaps + root-cause plan + GENERAL-Prompt to-do + FP-safety + Q&A), each **grounded by measure-first** (empirical `scan()` probes + live roadmap/taxonomy/matrix reads, not the stale matrix headlines) and shipped via an isolated worktree + build→verify(FP/adversarial/review)→fix workflow. FP validated on the **genuine** benign corpus (`bench_dolly`+`bench_alpaca`, `ground_truth==0`) — NOT `merged_scrape.jsonl`, which an IG-verify agent found is 100% malicious-labeled.
+
+Landed (PRs open against main; each: full suite green + benign-FPR non-regression):
+- [x] **char_split (D7.5)** — generalized char-split reassembly (any consistent pure-punct separator + vertical) + scored the previously-inert `char_level_reassembly` flag (gated run≥4); predict+cascade parity. 0/4000 genuine-benign FP. **PR #451**.
+- [x] **IG ingestion-manipulation** — NEW `detectors/ingestion.py` (was a true 0% gap — all payloads SAFE); self-anchored co-occurrence (ingestion-source noun AND directive-elevation cue), decisive requires co-occurrence; 0/4000 FP; taxonomy IG owasp `llm01→llm06`. **PR #461**.
+- [x] **C1 compliance** — measure-first exposed matrix 24% as stale (live 64%); fixed a real predict↔cascade parity bug (fictional_frame was predict-only) + FP-safe frame broadening; 64→68% + cascade parity, 0 new FP. **PR #465**.
+- [x] **P1/P2 privacy** — closed P2.1 training-data / P2.2 membership / P2.3 PII-elicitation misses (interrogative framing); emit canonical P2.x (were orphaned); cascade parity; FPR held 2.2%. Holdout 20/20 is train-on-test-tuned — honest signal is adversarial 23/25. **PR #466**.
+- [x] **MB chained-obfuscation** — recurse-into English-plausibility gate (cipher-outer chains now peel) + wired the dead `combined_boost` (attack-content-gated — a verify pass caught a structural-depth FP regression and it was root-caused). 33→~52%, benign FP 0/16. **PR #469**.
+- [ ] **RAG/I1** — permission-grant pattern + wire dead `rag_poison_weight` + cascade parity + R1.x→I1.x re-tag (supersedes unmerged `f8fbef3`) + phantom `data_source_poisoning.py` matrix fix. IN PROGRESS.
+- [ ] **multimodal** (modality routing), then **PAYOFF** (GCG/AB measure-first → harvest → retrain — heavy ML-ops).
+
+Discipline that kept earning its keep: measure-first found every gate-fail headline stale; adversarial/FP verify caught real defects pre-commit (P1 "100%" overclaim → corrected; MB structural-boost FP); the Usage-Policy block on attack-variant *generation* was worked around with shipped-probe *measurement* (defensive, policy-clear).
+
+---
+
 ## Incident-to-scenario skill + GTG-1002 T/IM scenarios (DONE 2026-06-20, branch `feat/incident-to-scenario`)
 
 Turned the Anthropic GTG-1002 write-up ("first AI-orchestrated cyber-espionage
