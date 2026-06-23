@@ -134,7 +134,7 @@ except ImportError:
 
 # Privacy probe detector (P1) — optional import
 try:
-    from .detectors.privacy_probe import detect_privacy_probe, get_privacy_probe_weight
+    from .rules.registry.privacy_probe import detect_privacy_probe, get_privacy_probe_weight
     _HAS_PRIVACY_PROBE = True
 except ImportError:
     _HAS_PRIVACY_PROBE = False
@@ -1123,6 +1123,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     # exfiltration, training data extraction, cross-session leakage,
     # serialization injection, membership inference.
     privacy_weight = 0.0
+    privacy_result = None
     if _HAS_PRIVACY_PROBE:
         try:
             privacy_result = detect_privacy_probe(clean)
@@ -1680,6 +1681,25 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
     # of shared "What is..." question structure).  Adding technique tags to
     # safe results creates confusing false-positive metadata.
     if is_mal:
+        # Surface the privacy detector's canonical P2.x leaves.  classify_prompt
+        # contributes a single hit named "privacy:<probe_type>" which has no
+        # _RULE_TECHNIQUE_IDS mapping, so detect_privacy_probe()'s computed
+        # technique_ids (e.g. P2.2 for a membership probe) were otherwise
+        # discarded — the result blocked but surfaced only a misleading generic
+        # tag from the degraded embedding (P1/D1).  Re-derive the leaves on the
+        # SAME sanitized text the classifier saw and merge them here, BEFORE the
+        # embedding matches, so the precise canonical leaf wins.  Bounded ReDoS-
+        # safe regexes; inside the is_mal guard so tags attach only when the
+        # result already blocks — it cannot raise the benign false-positive rate.
+        if _HAS_PRIVACY_PROBE:
+            try:
+                _priv = detect_privacy_probe(l0.sanitized_text)
+                if _priv is not None:
+                    for p_tid in _priv.technique_ids:
+                        if p_tid not in technique_tags:
+                            technique_tags.append(p_tid)
+            except Exception:
+                pass  # tagging is best-effort; never fail the scan
         for emb_tid in embedding_info.get("technique_matches", []):
             if emb_tid not in technique_tags:
                 technique_tags.append(emb_tid)

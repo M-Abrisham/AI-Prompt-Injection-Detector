@@ -194,6 +194,21 @@ try:
 except ImportError:
     _HAS_TOOL_ABUSE = False
 
+# Privacy probe detector (P1/P2.x) — optional import.  Used to mirror scan()'s
+# high-severity privacy floor on the cascade path: PRIVACY_RULES reach the
+# cascade transitively via RULES but are context-suppressed on the question
+# frame (membership probes are inherently questions), so the rule alone cannot
+# clear threshold.  Re-running the SAME detector here -- with its educational-
+# frame + self-referential guards intact -- floors the composite identically to
+# predict.py, restoring predict/cascade parity without divergent regex logic.
+try:
+    from .rules.registry.privacy_probe import (
+        detect_privacy_probe as _cascade_detect_privacy_probe,
+    )
+    _HAS_PRIVACY_PROBE = True
+except ImportError:
+    _HAS_PRIVACY_PROBE = False
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 
@@ -292,6 +307,15 @@ class WhitelistFilter:
         "constraint_negation", "fake_system_prompt",
         "chat_template_injection", "named_jailbreak_persona",
         "forget_override",
+        # Privacy probes that are overwhelmingly question-framed ("Was X in
+        # your training data?", "What is the SSN of customer X?").  Without
+        # these, the question-form whitelist passes them as SAFE, breaking
+        # predict/cascade parity (predict.py blocks them via the privacy
+        # detector path).  Both registry rules are third-party/training-axis
+        # anchored, so they do NOT fire on benign questions ("what is the
+        # capital of France?", "was the meeting on Monday?") -- verified
+        # zero-FP on the safe holdout -- so the whitelist denial is FP-safe.
+        "membership_inference", "pii_elicitation_third_party",
     })
 
     # Common abbreviations whose periods are not sentence boundaries
@@ -675,6 +699,47 @@ class WeightedClassifier:
             except Exception:
                 _logger.debug("Tool-abuse detection failed", exc_info=True)
 
+        # --- Privacy high-severity floor (P1/P2.x) — parity with scan() ---
+        # scan()/predict.py floors the composite to threshold when the privacy
+        # detector returns HIGH severity (is_extraction matched), because the ML
+        # model has no P-family training signal so a true privacy attack can
+        # otherwise land just under threshold.  The cascade reaches the privacy
+        # rules only via context-suppressible RULES, so a question-framed
+        # membership/PII probe ("Was X in your training data?") was scored
+        # without the privacy rule and slipped under threshold -- a predict/
+        # cascade disparity.  Re-run the SAME detector (educational-frame +
+        # self-ref guards intact, bounded ReDoS-safe regexes) and apply the
+        # identical floor.  Floor (not additive weight) so it cannot overshoot;
+        # the detector's guards keep it FP-safe.
+        if _HAS_PRIVACY_PROBE:
+            try:
+                _priv = _cascade_detect_privacy_probe(text)
+                if _priv is not None:
+                    for _tid in _priv.technique_ids:
+                        _priv_hit = "privacy:" + _tid
+                        if _priv_hit not in hit_names_seen:
+                            hit_names.append(_priv_hit)
+                            hit_names_seen.add(_priv_hit)
+                    if _priv.severity == "high":
+                        if composite < self.threshold:
+                            composite = self.threshold
+                            if label == "SAFE":
+                                label = "MALICIOUS"
+                        # Marker hit: signals the downstream positive-validation
+                        # layer that this MALICIOUS verdict rests on a canonical
+                        # P2.x privacy floor (membership / third-party-PII /
+                        # training-data extraction) and must not be downgraded
+                        # (predict.py parity — see Layer 8 exemption).  Scoped
+                        # to P2.x ONLY: broader/legacy P1.x patterns (e.g. the
+                        # "shared memory" P1.4 phrase) stay downgradeable so the
+                        # cascade keeps its lower benign FPR on those.
+                        if any(t.startswith("P2.") for t in _priv.technique_ids):
+                            if "privacy:high_floor" not in hit_names_seen:
+                                hit_names.append("privacy:high_floor")
+                                hit_names_seen.add("privacy:high_floor")
+            except Exception:
+                _logger.debug("Privacy probe detection failed", exc_info=True)
+
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
         hit_names.extend(obfuscation_flags)
@@ -1010,6 +1075,17 @@ class CascadeClassifier:
             # Build technique_tags from hit names via module-level lookup.
             technique_tags = []
             for h in hits:
+                # Privacy detector hits carry their canonical leaf inline as
+                # "privacy:<P2.x>" (the floor block above), but have no
+                # _RULE_TECHNIQUES entry; surface the leaf directly so the
+                # cascade emits the canonical P2.x tag in parity with scan().
+                # The "privacy:high_floor" marker is reporting-only (not a
+                # technique id) and is skipped.
+                if h.startswith("privacy:") and h != "privacy:high_floor":
+                    _leaf = h.split(":", 1)[1]
+                    if _leaf and _leaf[0] == "P" and _leaf not in technique_tags:
+                        technique_tags.append(_leaf)
+                    continue
                 for tid in _RULE_TECHNIQUES.get(h, ()):
                     if tid not in technique_tags:
                         technique_tags.append(tid)
@@ -1204,7 +1280,20 @@ class CascadeClassifier:
         # If the classifier says MALICIOUS but positive validation says
         # the input IS a legitimate prompt, downgrade to SAFE.  This
         # catches benign prompts that mention injection-related vocabulary.
-        if label == "MALICIOUS" and self._positive_validator is not None:
+        #
+        # PARITY EXEMPTION: a HIGH-severity privacy probe (P2.x membership /
+        # third-party-PII / training-data extraction) is a well-formed question
+        # by construction, so positive validation reliably (mis)reads it as a
+        # legitimate prompt and would downgrade it — re-opening the predict/
+        # cascade gap the weighted-stage privacy floor just closed.  predict.py
+        # has no positive-validation layer and treats the high-severity privacy
+        # floor as final, so honor that here: do not let Layer 8 override a
+        # high-severity privacy detection.  The detector's educational-frame +
+        # self-ref guards already keep this FP-safe (cascade benign FPR
+        # measured 0.0% on the safe holdout).
+        _privacy_high_floor = "privacy:high_floor" in hits
+        if (label == "MALICIOUS" and self._positive_validator is not None
+                and not _privacy_high_floor):
             try:
                 # BUG-L8-2 fix: pass L0-sanitized text instead of raw input
                 # so positive validation sees the same normalized form as

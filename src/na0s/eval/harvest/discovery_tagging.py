@@ -116,6 +116,12 @@ _KEYWORD_TO_CODE: dict[str, str] = {
     "data exfiltration": "E",
     # --- privacy ---
     "membership inference": "P2",
+    "training data extraction": "P2",
+    "training data leakage": "P2",
+    "data extraction attack": "P2",
+    "pii elicitation": "P2",
+    "pii extraction": "P2",
+    "personal data extraction": "P2",
     "model inversion": "A",
     "privacy attack": "P",
     "credential leakage": "P",

@@ -375,9 +375,16 @@ categories:
   # Category P — Privacy / Data Leakage
   # ════════════════════════════════════════════════════════════════
 
+  # Legacy mid-level alias for the privacy family. Mirrors the E/E1 and C/C1
+  # alias precedent above: the live detector and scenarios reference the bare
+  # mid-level code "P" alongside the canonical P2.x leaves. The privacy detector
+  # (rules/registry/privacy_probe.py) emits canonical P2.1 (training-data
+  # extraction), P2.2 (membership inference) and P2.3 (PII elicitation) and ALSO
+  # appends "P" as the family alias, so consumers keying on either form work.
+  # Technique mapping P1.x -> P2.x: P1.3->P2.1, P1.6->P2.2, P1.2->P2.3.
   P:
     name: "Privacy/Data Leakage"
-    description: "Extracts private user data, PII, or confidential business information."
+    description: "Extracts private user data, PII, or confidential business information. Legacy mid-level alias of family P2 (canonical privacy-extraction techniques)."
     type: privacy
     severity: high
     tags:
