@@ -80,7 +80,7 @@ Evasion is centralized preprocessing applied to every input before class detecti
 
 | Modifier | Cat | Mechanism (runtime) | Measured detection | Status |
 |----------|-----|---------------------|--------------------|--------|
-| **Base64** | D4 | decode-and-rescan ([obfuscation.py](src/na0s/layer2/obfuscation.py)) | **90.5%** (57/63) | strong |
+| **Base64** | D4 | decode-and-rescan ([obfuscation.py](src/na0s/obfuscation/obfuscation.py)) | **90.5%** (57/63) | strong |
 | **Whitespace stego** | D4/D5 | SNOW/statistical/trailing-WS detectors | **71.4%** (45/63) | good |
 | **Hex (incl. spaced)** | D4 | `_EMBEDDED_HEX_RE` + new `_SPACED_HEX_RE` (≥8 pairs, keyword-gated) | **69.8%** (44/63) | **0%→70% (spaced-hex fix)** |
 | **Syllable-split** | D4 | syllable normalizer | **60.3%** (38/63) | partial |
@@ -89,11 +89,11 @@ Evasion is centralized preprocessing applied to every input before class detecti
 | **Mixed-encoding** | CT | — | **20.6%** (13/63) | weak |
 | **Reversed** | D4 | full + per-word reverse (keyword-gated) | **15.9%** (10/63) | weak |
 | **Leetspeak** | D4 | leet normalizer (keyword-gated) | **11.1%** (7/63) | weakest |
-| **Multi-buff stacking** | MB, CT | recursive decode (depth-4) | **33%** (measured via `na0s.scan`, not harness) | **OPEN GAP** |
+| **Multi-buff stacking** | MB, CT | recursive decode (depth-4) + recurse-into plausibility gate | **~52%** (47/91 via `na0s.scan`, not harness; was 33%; attack-only 47/75=63%, benign-sibling FP 0/16) | **partial (chained-cipher fix landed)** |
 
 Category-level measured (per-category holdout, different pool): **D4 80%, D5 80%, D6 multilingual 67%, D7 delivery 64%**.
 
-**The stacking gap, confirmed by measurement.** [layer2/obfuscation.py](src/na0s/layer2/obfuscation.py) recurses, but its ROT13/Reverse/Leet/Caesar decoders are **keyword-gated per layer** — a chain whose *inner* transform is keyword-gated never peels (the intermediate layer has no plaintext keywords to satisfy the gate). Measured: **33%** overall MB recall, **0%** on every chain with a keyword-gated inner transform (Base64+ROT13, ROT13+Leet, Reverse+ROT13, …), **100%** only when both buffs are non-gated codecs/unicode. This is also visible above: base64 90% vs rot13 32%, leetspeak 11%, reversed 16%, mixed-encoding 21%. **Per-row exceptions:** multimodal (INJ-0003) — decode doesn't reach inside image/audio; samples-only rows (INJ-0016/0017/0024) — no base detector to evade.
+**The stacking gap — chained-cipher decoders now peel.** [obfuscation/obfuscation.py](src/na0s/obfuscation/obfuscation.py) recurses, but its ROT13/Reverse/Leet/Caesar decoders *used to be* keyword-gated per layer — a chain whose **outer** transform is one of these self-gated ciphers never peeled (the intermediate layer has no plaintext keywords to satisfy the gate). Fixed by a **recurse-into English-plausibility gate** (`_is_plausible_english`: KL < 0.8 OR dict-hit-rate > 0.4) that lets a cipher view recurse without raising a flag, plus a high-decode-confidence path so ROT13(Base64)/Reverse(Base64) peel. The flag/score gate is unchanged — only the recurse-into path loosened, and keyword-free intermediates are never surfaced to the classifier (FP-safe; `tests/test_false_positives.py` stays 71/0). Measured via `na0s.scan`: MB recall **33% → ~52%** (47/91; attack-only 47/75=63%, benign-sibling FP 0/16); the chained-cipher cases lifted from 0% (MB1.1 Base64+ROT13, MB1.7 ROT13+Leet, MB1.10 Reverse+ROT13). Residual weak rows: the 3-buff chains (MB2.1 Base64+ROT13+Leet, MB2.5). **Per-row exceptions:** multimodal (INJ-0003) — decode doesn't reach inside image/audio; samples-only rows (INJ-0016/0017/0024) — no base detector to evade.
 
 > **Buff provenance.** Na0S's 8 `_buffs.py` transforms are a superset of garak's 6 built-in buffs; the "29 probes × 8 buffs" framing is inspired-by, not parity-with, garak.
 
