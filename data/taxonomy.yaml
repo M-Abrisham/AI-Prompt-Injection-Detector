@@ -312,6 +312,13 @@ categories:
       - "risk-cards:lmrc:harmful_instructions"
       - "risk-cards:lmrc:weapon_instructions"
       - "risk-cards:lmrc:cyber_weapon_instructions"
+    # O1.x harmful CONTENT is delegated to layer1_ml (content moderation).
+    # O2.x output INJECTION/exfil is detected output-side by output/scanner.py
+    # via na0s.scan_output() (see tests/output/test_o_recall.py): O2.1/O2.2/
+    # O2.6 are caught FP-safely (3/6 techniques). O2.3 (JSON role:system) and
+    # O2.4 (SQL DROP/UNION/OR-1=1) were DROPPED as FP-unsafe -- they tripped the
+    # standard OpenAI chat format and benign SQL-teaching/migration output --
+    # and O2.5 (API-call manipulation) is a residual miss; all honest xfail.
     expected_layers: ["layer1_ml"]
     techniques:
       O1.1: { name: "Violence-instructions", severity: critical }
@@ -319,12 +326,12 @@ categories:
       O1.3: { name: "Social-engineering-scripts", severity: high }
       O1.4: { name: "Disinformation-generation", severity: high }
       O1.5: { name: "CSAM/illegal-content", severity: critical }
-      O2.1: { name: "Markdown-injection", severity: medium }
-      O2.2: { name: "Link-injection", severity: medium }
-      O2.3: { name: "JSON output injection", severity: high }
-      O2.4: { name: "SQL-in-output injection", severity: critical }
-      O2.5: { name: "API call manipulation", severity: high }
-      O2.6: { name: "Code-injection-output", severity: high }
+      O2.1: { name: "Markdown-injection", severity: medium }       # output-side (scan_output) — CAUGHT
+      O2.2: { name: "Link-injection", severity: medium }           # output-side (scan_output) — CAUGHT
+      O2.3: { name: "JSON output injection", severity: high }      # DROPPED (FP-unsafe) — honest xfail
+      O2.4: { name: "SQL-in-output injection", severity: critical } # output-side (scan_output) — CAUGHT (injection-shape only)
+      O2.5: { name: "API call manipulation", severity: high }      # residual MISS — honest xfail
+      O2.6: { name: "Code-injection-output", severity: high }      # output-side (scan_output) — CAUGHT
 
   # ════════════════════════════════════════════════════════════════
   # Category T — Agent/Tool Abuse
