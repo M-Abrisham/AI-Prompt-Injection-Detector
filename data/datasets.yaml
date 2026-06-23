@@ -4,6 +4,17 @@
 # To add a new dataset, add an entry here and run sync_datasets.py.
 # The sync script reads this file, downloads/updates each source,
 # and writes a datasets.lock with commit SHAs for reproducibility.
+#
+# taxonomy_codes:  per-source provenance tag — a list of CANONICAL
+#   data/taxonomy.yaml codes describing the attack class(es) the source's
+#   rows provide provenance for. Benign / safe-baseline corpora use ["BEN"]
+#   (the canonical benign-control sentinel); NEVER an invented attack code.
+#   Validated by na0s.eval.registry.validate_registry_codes (a non-canonical
+#   code fails tests/eval/registry/test_taxonomy_labels.py). For mixed sources
+#   that carry both classes (a label_column), the code describes the ATTACK
+#   rows; the benign (label 0) rows are BEN at row level — the source-level
+#   code is stamped onto every row of that source's raw CSV as provenance,
+#   which is acceptable provenance, not a per-row ground-truth label.
 
 version: "1.0"
 output_dir: "data/raw"
@@ -17,6 +28,7 @@ sources:
     url: "https://raw.githubusercontent.com/verazuo/jailbreak_llms/main/data/prompts/jailbreak_prompts_2023_12_25.csv"
     text_column: "prompt"
     label: 1
+    taxonomy_codes: ["D2"]
     output: "jailbreaks.csv"
 
   awesome_chatgpt_prompts:
@@ -24,6 +36,7 @@ sources:
     url: "https://raw.githubusercontent.com/f/awesome-chatgpt-prompts/main/prompts.csv"
     text_column: "prompt"
     label: 0
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "safe_prompts.csv"
 
   # ── HuggingFace — safe prompt sources ───────────────────────────
@@ -34,6 +47,7 @@ sources:
     split: "train"
     text_column: "instruction"
     label: 0
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_alpaca.csv"
 
   dolly:
@@ -42,6 +56,7 @@ sources:
     split: "train"
     text_column: "instruction"
     label: 0
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_dolly.csv"
 
   openassistant:
@@ -52,6 +67,7 @@ sources:
     label: 0
     filter:
       role: "prompter"
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_openassistant.csv"
 
   chatbot_instruction_prompts:
@@ -60,6 +76,7 @@ sources:
     split: "train"
     text_column: "prompt"
     label: 0
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_chatbot_instruction_prompts.csv"
 
   llm_lat_benign:
@@ -68,6 +85,7 @@ sources:
     split: "train"
     text_column: "prompt"
     label: 0
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_llm_lat_benign.csv"
 
   wizardlm_evol_instruct:
@@ -76,6 +94,7 @@ sources:
     split: "train"
     text_column: "instruction"
     label: 0
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_wizardlm_evol_instruct.csv"
 
   ultrachat_200k:
@@ -84,6 +103,7 @@ sources:
     split: "train_sft"
     text_column: "prompt"
     label: 0
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_ultrachat_200k.csv"
 
   # ── HuggingFace — prompt injection datasets ─────────────────────
@@ -97,6 +117,7 @@ sources:
     label_map:
       0: 0
       1: 1
+    taxonomy_codes: ["CT"]
     output: "hf_deepset_injections.csv"
 
   safeguard:
@@ -108,6 +129,7 @@ sources:
     label_map:
       0: 0
       1: 1
+    taxonomy_codes: ["CT"]
     output: "hf_safeguard.csv"
 
   spml:
@@ -119,6 +141,7 @@ sources:
     label_map:
       0: 0
       1: 1
+    taxonomy_codes: ["CT"]
     output: "hf_spml.csv"
 
   hackaprompt:
@@ -128,6 +151,7 @@ sources:
     text_column: "user_input"
     label: 1
     gated: true
+    taxonomy_codes: ["CT"]
     output: "hf_hackaprompt.csv"
 
   # ── HuggingFace — large aggregated datasets (uncapped) ──────────
@@ -141,6 +165,7 @@ sources:
     label_map:
       0: 0
       1: 1
+    taxonomy_codes: ["CT"]
     output: "hf_imoxto_cleaned.csv"
 
   geekyrakshit:
@@ -152,6 +177,7 @@ sources:
     label_map:
       0: 0
       1: 1
+    taxonomy_codes: ["CT"]
     output: "hf_geekyrakshit.csv"
 
   gandalf_rct:
@@ -166,6 +192,7 @@ sources:
     filter:
       kind: "prompt"
     max_samples: 100000
+    taxonomy_codes: ["E"]
     output: "hf_gandalf_rct.csv"
 
   llmail_inject:
@@ -174,6 +201,7 @@ sources:
     split: "Phase1"
     text_column: "body"
     label: 1
+    taxonomy_codes: ["I1"]
     output: "hf_llmail_inject.csv"
 
   ctf_satml24:
@@ -183,6 +211,7 @@ sources:
     split: "attack"
     text_column: "history"
     label: 1
+    taxonomy_codes: ["CT"]
     output: "hf_ctf_satml24.csv"
 
   # ── HuggingFace — NEW large datasets ────────────────────────────
@@ -196,6 +225,7 @@ sources:
     label_map:
       0: 0
       1: 1
+    taxonomy_codes: ["CT"]
     output: "hf_guychuk_classification.csv"
 
   # gentelbench: DISABLED — parquet CastError in jailbreaking_attack_dataset.parquet
@@ -217,6 +247,7 @@ sources:
     split: "test"
     text_column: "prompt"
     label: 1
+    taxonomy_codes: ["O"]
     output: "hf_alert_standard.csv"
 
   alert_adversarial:
@@ -226,6 +257,7 @@ sources:
     split: "test"
     text_column: "prompt"
     label: 1
+    taxonomy_codes: ["O", "D2"]
     output: "hf_alert_adversarial.csv"
 
   jailbreakv_28k:
@@ -235,6 +267,7 @@ sources:
     split: "JailBreakV_28K"
     text_column: "jailbreak_query"
     label: 1
+    taxonomy_codes: ["D2"]
     output: "hf_jailbreakv_28k.csv"
 
   salad_data_base:
@@ -244,6 +277,7 @@ sources:
     split: "train"
     text_column: "question"
     label: 1
+    taxonomy_codes: ["O"]
     output: "hf_salad_data_base.csv"
 
   salad_data_attack:
@@ -253,6 +287,7 @@ sources:
     split: "train"
     text_column: "augq"
     label: 1
+    taxonomy_codes: ["O", "D2"]
     output: "hf_salad_data_attack.csv"
 
   jailbreakhub:
@@ -264,6 +299,7 @@ sources:
     label_map:
       true: 1
       false: 0
+    taxonomy_codes: ["D2"]
     output: "hf_jailbreakhub.csv"
 
   qualifire_benchmark:
@@ -276,6 +312,7 @@ sources:
       0: 0
       1: 1
     trust_tier: 2
+    taxonomy_codes: ["CT"]
     output: "hf_qualifire_benchmark.csv"
 
   # ── Jailbreak / Adversarial datasets ─────────────────────────────
@@ -290,6 +327,7 @@ sources:
     license: "CC-BY-4.0"
     category: "jailbreak"
     enabled: true
+    taxonomy_codes: ["D2", "D1"]
     output: "hf_wildjailbreak.csv"
 
   prompt_injection_mixed_techniques:
@@ -304,6 +342,7 @@ sources:
     license: "unknown"
     category: "jailbreak"
     enabled: true
+    taxonomy_codes: ["CT"]
     output: "hf_prompt_injection_mixed_techniques.csv"
 
   decodingtrust:
@@ -316,6 +355,7 @@ sources:
     license: "CC-BY-SA-4.0"
     category: "jailbreak"
     enabled: true
+    taxonomy_codes: ["D2"]
     output: "hf_decodingtrust.csv"
 
   advbench:
@@ -327,6 +367,7 @@ sources:
     license: "MIT"
     category: "jailbreak"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_advbench.csv"
 
   chatgpt_jailbreak_prompts:
@@ -338,6 +379,7 @@ sources:
     license: "unknown"
     category: "jailbreak"
     enabled: true
+    taxonomy_codes: ["D2"]
     output: "hf_chatgpt_jailbreak_prompts.csv"
 
   refuse_to_answer:
@@ -349,6 +391,7 @@ sources:
     license: "unknown"
     category: "jailbreak"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_refuse_to_answer.csv"
 
   in_the_wild_jailbreak:
@@ -361,6 +404,7 @@ sources:
     license: "unknown"
     category: "jailbreak"
     enabled: true
+    taxonomy_codes: ["D2"]
     output: "hf_in_the_wild_jailbreak.csv"
 
   # ── Trust / Safety datasets ──────────────────────────────────────
@@ -379,6 +423,7 @@ sources:
     category: "mixed"
     gated: true
     enabled: false
+    taxonomy_codes: ["E", "D1"]
     output: "hf_tensor_trust.csv"
 
   toxic_chat:
@@ -395,6 +440,7 @@ sources:
     license: "CC-BY-NC-4.0"
     category: "mixed"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_toxic_chat.csv"
 
   beavertails:
@@ -412,6 +458,7 @@ sources:
     license: "CC-BY-NC-4.0"
     category: "mixed"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_beavertails.csv"
 
   hh_rlhf:
@@ -424,6 +471,7 @@ sources:
     license: "MIT"
     category: "safe_baseline"
     enabled: true
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_hh_rlhf.csv"
 
   # ── Prompt Injection Specific datasets ───────────────────────────
@@ -440,6 +488,7 @@ sources:
     license: "unknown"
     category: "mixed"
     enabled: true
+    taxonomy_codes: ["CT"]
     output: "hf_jasper_prompt_injections.csv"
 
   gandalf_ignore_instructions:
@@ -451,6 +500,7 @@ sources:
     license: "unknown"
     category: "jailbreak"
     enabled: true
+    taxonomy_codes: ["D1"]
     output: "hf_gandalf_ignore_instructions.csv"
 
   awesome_chatgpt_prompts_hf:
@@ -462,6 +512,7 @@ sources:
     license: "CC0-1.0"
     category: "safe_baseline"
     enabled: true
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_awesome_chatgpt_prompts_hf.csv"
 
   openorca:
@@ -474,6 +525,7 @@ sources:
     license: "MIT"
     category: "safe_baseline"
     enabled: true
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_openorca.csv"
 
   # ── Multilingual datasets ────────────────────────────────────────
@@ -489,6 +541,7 @@ sources:
     license: "CC-BY-NC-4.0"
     category: "multilingual"
     enabled: true
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_xnli.csv"
 
   xp3:
@@ -501,6 +554,7 @@ sources:
     license: "Apache-2.0"
     category: "multilingual"
     enabled: true
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_xp3.csv"
 
   # ── Red-teaming datasets ─────────────────────────────────────────
@@ -515,6 +569,7 @@ sources:
     license: "MIT"
     category: "red_team"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_red_team_attempts.csv"
 
   harmbench:
@@ -527,6 +582,7 @@ sources:
     license: "MIT"
     category: "red_team"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_harmbench.csv"
 
   pile_safe_subset:
@@ -539,6 +595,7 @@ sources:
     license: "MIT"
     category: "safe_baseline"
     enabled: true
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_pile_safe_subset.csv"
 
   dolly_15k:
@@ -551,6 +608,7 @@ sources:
     license: "CC-BY-SA-3.0"
     category: "safe_baseline"
     enabled: true
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_dolly_15k.csv"
 
   # ── Additional jailbreak / adversarial datasets ──────────────────
@@ -564,6 +622,7 @@ sources:
     license: "CC-BY-NC-SA-4.0"
     category: "jailbreak"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_do_not_answer.csv"
 
   xstest:
@@ -578,6 +637,7 @@ sources:
     license: "MIT"
     category: "mixed"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_xstest.csv"
 
   safe_rlhf:
@@ -595,6 +655,7 @@ sources:
     license: "CC-BY-NC-4.0"
     category: "mixed"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_safe_rlhf.csv"
 
   strongreject:
@@ -606,6 +667,7 @@ sources:
     license: "MIT"
     category: "red_team"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_strongreject.csv"
 
   toxigen:
@@ -621,6 +683,7 @@ sources:
     license: "MIT"
     category: "mixed"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_toxigen.csv"
 
   harmful_qa:
@@ -632,6 +695,7 @@ sources:
     license: "MIT"
     category: "red_team"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_harmful_qa.csv"
 
   real_toxicity_prompts:
@@ -644,6 +708,7 @@ sources:
     license: "Apache-2.0"
     category: "mixed"
     enabled: true
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_real_toxicity_prompts.csv"
 
   malicious_instruct:
@@ -655,6 +720,7 @@ sources:
     license: "unknown"
     category: "jailbreak"
     enabled: true
+    taxonomy_codes: ["O"]
     output: "hf_malicious_instruct.csv"
 
   safe_conversations:
@@ -667,6 +733,7 @@ sources:
     license: "CC-BY-4.0"
     category: "safe_baseline"
     enabled: true
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_safe_conversations.csv"
 
   lima:
@@ -679,6 +746,7 @@ sources:
     category: "safe_baseline"
     gated: true
     enabled: false
+    taxonomy_codes: ["BEN"]      # benign/baseline corpus (no attack rows)
     output: "hf_lima.csv"
 
   # ── Morris II / ComPromptMized — worm detection dataset ─────────
@@ -692,6 +760,7 @@ sources:
     label: 1
     license: "MIT"
     category: "worm_payload"
+    taxonomy_codes: ["IM"]
     output: "morris2_jailbreaks.csv"
 
   # ── Additional attacker-sample datasets (added 2026-04-25) ──────
@@ -712,6 +781,7 @@ sources:
     license: "MIT"
     category: "jailbreak_benchmark"
     enabled: false
+    taxonomy_codes: ["D2"]
     output: "hf_jailbreakbench.csv"
 
   wmdp:
@@ -723,6 +793,7 @@ sources:
     license: "MIT"
     category: "harmful_knowledge"
     enabled: false
+    taxonomy_codes: ["O"]
     output: "hf_wmdp.csv"
 
   wildguardmix:
@@ -738,6 +809,7 @@ sources:
     category: "safety_classification"
     gated: true
     enabled: false
+    taxonomy_codes: ["O"]
     output: "hf_wildguardmix.csv"
 
   aegis_content_safety:
@@ -752,6 +824,7 @@ sources:
     license: "CC-BY-4.0"
     category: "safety_classification"
     enabled: false
+    taxonomy_codes: ["O"]
     output: "hf_aegis_content_safety.csv"
 
   simple_safety_tests:
@@ -763,6 +836,7 @@ sources:
     license: "CC-BY-4.0"
     category: "safety_red_team"
     enabled: false
+    taxonomy_codes: ["O"]
     output: "hf_simple_safety_tests.csv"
 
   lakera_mosscap:
@@ -774,6 +848,7 @@ sources:
     license: "Apache-2.0"
     category: "prompt_injection"
     enabled: false
+    taxonomy_codes: ["CT"]
     output: "hf_lakera_mosscap.csv"
 
   prompt_inject_perez:
@@ -785,6 +860,7 @@ sources:
     license: "MIT"
     category: "prompt_injection_seminal"
     enabled: false
+    taxonomy_codes: ["CT"]
     output: "hf_prompt_inject_perez.csv"
 
   attaq:
@@ -796,6 +872,7 @@ sources:
     license: "Apache-2.0"
     category: "adversarial_qa"
     enabled: false
+    taxonomy_codes: ["O"]
     output: "hf_attaq.csv"
 
   # ── Tier 2: agent / tool-injection benchmarks ───────────────────
@@ -811,6 +888,7 @@ sources:
     category: "agent_harm"
     gated: true
     enabled: false
+    taxonomy_codes: ["T"]
     output: "hf_agentharm.csv"
 
   injecagent:
@@ -822,6 +900,7 @@ sources:
     license: "MIT"
     category: "agent_injection"
     enabled: false
+    taxonomy_codes: ["T", "I1"]
     output: "hf_injecagent.csv"
 
   # ── Tier 3: specialty / multilingual / moderation ───────────────
@@ -835,6 +914,7 @@ sources:
     license: "MIT"
     category: "moderation_eval"
     enabled: false
+    taxonomy_codes: ["O"]
     output: "hf_openai_moderation_eval.csv"
 
   promptbench:
@@ -846,6 +926,7 @@ sources:
     license: "MIT"
     category: "adversarial_robustness"
     enabled: false
+    taxonomy_codes: ["O"]
     output: "hf_promptbench.csv"
 
   multijail:
@@ -857,6 +938,7 @@ sources:
     license: "Apache-2.0"
     category: "multilingual_jailbreak"
     enabled: false
+    taxonomy_codes: ["D6", "D2"]
     output: "hf_multijail.csv"
 
   dices_350:
@@ -868,4 +950,5 @@ sources:
     license: "CC-BY-4.0"
     category: "safety_diversity"
     enabled: false
+    taxonomy_codes: ["O"]
     output: "hf_dices_350.csv"

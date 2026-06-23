@@ -1,0 +1,267 @@
+{
+  "summary": {
+    "total_scenarios": 57,
+    "total_codes": 31,
+    "covered": 8,
+    "zero_data": 23,
+    "non_canonical_codes": [
+      "E1_benign"
+    ]
+  },
+  "rows": [
+    {
+      "code": "A",
+      "severity": "critical",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "AB",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "AD",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "BEN",
+      "severity": "low",
+      "scenario_count": 9,
+      "attack_count": 0,
+      "benign_count": 9,
+      "status": "COVERED"
+    },
+    {
+      "code": "C",
+      "severity": "medium",
+      "scenario_count": 3,
+      "attack_count": 2,
+      "benign_count": 1,
+      "status": "COVERED"
+    },
+    {
+      "code": "C1",
+      "severity": "medium",
+      "scenario_count": 3,
+      "attack_count": 3,
+      "benign_count": 0,
+      "status": "COVERED"
+    },
+    {
+      "code": "C1MT",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "CT",
+      "severity": "critical",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "D1",
+      "severity": "critical",
+      "scenario_count": 3,
+      "attack_count": 3,
+      "benign_count": 0,
+      "status": "COVERED"
+    },
+    {
+      "code": "D2",
+      "severity": "high",
+      "scenario_count": 6,
+      "attack_count": 6,
+      "benign_count": 0,
+      "status": "COVERED"
+    },
+    {
+      "code": "D3",
+      "severity": "high",
+      "scenario_count": 3,
+      "attack_count": 0,
+      "benign_count": 3,
+      "status": "COVERED"
+    },
+    {
+      "code": "D4",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "D5",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "D6",
+      "severity": "medium",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "D7",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "D8",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "E",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "E1",
+      "severity": "high",
+      "scenario_count": 25,
+      "attack_count": 23,
+      "benign_count": 2,
+      "status": "COVERED"
+    },
+    {
+      "code": "I1",
+      "severity": "critical",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "I2",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "IG",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "IM",
+      "severity": "critical",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "M",
+      "severity": "high",
+      "scenario_count": 3,
+      "attack_count": 3,
+      "benign_count": 0,
+      "status": "COVERED"
+    },
+    {
+      "code": "MB",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "O",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "P",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "P2",
+      "severity": "high",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "P3",
+      "severity": "critical",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "R",
+      "severity": "medium",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "S",
+      "severity": "critical",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    },
+    {
+      "code": "T",
+      "severity": "critical",
+      "scenario_count": 0,
+      "attack_count": 0,
+      "benign_count": 0,
+      "status": "ZERO-DATA"
+    }
+  ],
+  "non_canonical": [
+    {
+      "code": "E1_benign",
+      "count": 2
+    }
+  ]
+}
