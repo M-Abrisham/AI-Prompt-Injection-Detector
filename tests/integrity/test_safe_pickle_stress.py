@@ -60,7 +60,6 @@ from na0s.integrity.safe_pickle import (
     _sha256,
     safe_dump,
     safe_load,
-    write_digest_sidecar,
 )
 from na0s.models import KNOWN_HASHES
 
@@ -124,9 +123,13 @@ class TestKnownHashesPrecedenceUnderTamper(_StressBase):
     def test_resolution_picks_hardcoded_over_forged_sidecars(self):
         """``_resolve_expected_hash`` returns the HARDCODED digest+source even
         when self-consistent ``.sha256`` and ``.hmac`` sidecars are present on
-        disk (precedence is config-driven, not attacker-file-driven)."""
+        disk (precedence is config-driven, not attacker-file-driven).
+
+        Post-#457 the hardcoded tier is path-scoped to the SHIPPED artifact, so
+        ``_is_packaged_model`` is forced True to treat the temp fixture as the
+        packaged model and exercise the precedence tier in isolation."""
         path = self._tampered_bundled_with_forged_sidecars()
-        with self._patched_no_key():
+        with self._patched_packaged_no_key():
             expected, source = _resolve_expected_hash(path)
         self.assertEqual(source, "hardcoded")
         self.assertEqual(expected, KNOWN_HASHES["model.pkl"])
@@ -137,9 +140,12 @@ class TestKnownHashesPrecedenceUnderTamper(_StressBase):
         """End-to-end: ``safe_load`` of a tampered bundled artifact raises
         ``ValueError('Integrity check failed')`` even though both a valid forged
         ``.sha256`` and a ``.hmac`` sidecar exist — the hardcoded tier is
-        authoritative and a sidecar cannot rescue a stale/tampered artifact."""
+        authoritative and a sidecar cannot rescue a stale/tampered artifact.
+
+        ``_is_packaged_model`` is forced True so the temp fixture is treated as
+        the shipped artifact (the hardcoded tier is path-scoped post-#457)."""
         path = self._tampered_bundled_with_forged_sidecars()
-        with self._patched_no_key():
+        with self._patched_packaged_no_key():
             with self.assertRaises(ValueError) as ctx:
                 safe_load(path)
         msg = str(ctx.exception)
@@ -166,6 +172,26 @@ class TestKnownHashesPrecedenceUnderTamper(_StressBase):
     def _patched_no_key(self):
         from unittest.mock import patch
         return patch.dict(os.environ, _no_key_env(), clear=True)
+
+    def _patched_packaged_no_key(self):
+        """Keyless env AND ``_is_packaged_model`` -> True, so a temp-dir fixture
+        is treated as the SHIPPED artifact. The hardcoded KNOWN_HASHES tier is
+        path-scoped (#457) to files under na0s/models/; this lets the precedence
+        tests exercise that tier without tampering the real bundled file. The
+        complementary 'same basename outside the package uses its sidecar' case
+        is covered by TestHardcodedHashPathScoping in test_safe_pickle.py."""
+        import contextlib
+        from unittest.mock import patch
+
+        @contextlib.contextmanager
+        def _cm():
+            with patch.dict(os.environ, _no_key_env(), clear=True):
+                with patch(
+                    "na0s.integrity.safe_pickle._is_packaged_model",
+                    return_value=True,
+                ):
+                    yield
+        return _cm()
 
 
 class TestTruncatedPickleRejected(_StressBase):
