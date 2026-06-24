@@ -23,6 +23,38 @@ L16 Multi-Turn | L17 Doc Scanning (35%) | L18 RAG Security | L19 Agent/MCP | L20
 
 ---
 
+## Progress Overview
+
+| Layer  | Progress               | Done/Total | Status   |
+| ---    | ---------------------- | --------   | ------   |
+| **L0** | `████████████████████` | **58/58**  | COMPLETE |
+| **L1** | `████████████████████` | **53/53**  | COMPLETE |
+| **L2** | `████████████████████` | **41/41**  | COMPLETE |
+| **L3** | `████████████████████` | **21/21**  | COMPLETE |
+| **L4** | `████████████████████` | **38/38**  | COMPLETE |
+| **L5** | `████████████████████` | **37/37**  | COMPLETE |
+| **L6** | `████████████████████` | **32/32**  | COMPLETE |
+| **L7** | `████████████████████` | **37/37**  | COMPLETE |
+| **L8** | `████████████████████` | **26/26**  | COMPLETE |
+| **L9** | `████████████████████` | **28/28**  | COMPLETE |
+| **L10**| `████████████████████` | **25/25**  | COMPLETE |
+| **L11**| `████████████████████` | **24/24**  | CORE COMPLETE · +17 hardening open (specs/hardening/) |
+| **L12**| `████████████████████` | **55/55**  | COMPLETE |
+| **L13**| `████████████████████` | **41/41**  | COMPLETE |
+| **L14**| `████████████████████` | **21/21**  | COMPLETE |
+| **L15**| `████████████████████` | **18/18**  | COMPLETE |
+| **L16**| `████████████████████` | **17/17**  | COMPLETE |
+| **L17**| `███████░░░░░░░░░░░░░` | **7/20**   | 35% |
+| **L18**| `░░░░░░░░░░░░░░░░░░░░` | **0/18**   | NOT STARTED |
+| **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
+| **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
+| **L21**| `░░░░░░░░░░░░░░░░░░░░` | **0/8**    | DRAFT (NEW 2026-04-23) |
+| **Hardening** | `██████████████░░░░░░` | **10/14** | 71% (earlier pass; the 2026-06 supply-chain audit's 17 items are tracked under L11 → Open-Security-Hardening, not double-counted here) |
+| **Infra** | `████████████████████` | **—** | Repo reorg (13 phases), CI, Dependabot, CodeQL, SECURITY.md |
+|        |                        | **608/768** | **79%** |
+
+---
+
 ## Incident-to-scenario skill + GTG-1002 T/IM scenarios (DONE 2026-06-20, branch `feat/incident-to-scenario`)
 
 Turned the Anthropic GTG-1002 write-up ("first AI-orchestrated cyber-espionage
@@ -229,38 +261,6 @@ Fix order (clear bugs/cleanup → decontaminate+calibrate → one calibrated fus
   config (`NA0S_ABSTAIN_BAND`/`NA0S_DISAGREEMENT_WIDEN`), and the active judge escalation
   is the existing cascade band. New `tests/test_uncertainty_band.py`.
 - [ ] **GAP-14** [L] — persist+version a calibrator; ECE/Brier CI gate; production score-drift monitoring.
-
----
-
-## Progress Overview
-
-| Layer  | Progress               | Done/Total | Status   |
-| ---    | ---------------------- | --------   | ------   |
-| **L0** | `████████████████████` | **58/58**  | COMPLETE |
-| **L1** | `████████████████████` | **53/53**  | COMPLETE |
-| **L2** | `████████████████████` | **41/41**  | COMPLETE |
-| **L3** | `████████████████████` | **21/21**  | COMPLETE |
-| **L4** | `████████████████████` | **38/38**  | COMPLETE |
-| **L5** | `████████████████████` | **37/37**  | COMPLETE |
-| **L6** | `████████████████████` | **32/32**  | COMPLETE |
-| **L7** | `████████████████████` | **37/37**  | COMPLETE |
-| **L8** | `████████████████████` | **26/26**  | COMPLETE |
-| **L9** | `████████████████████` | **28/28**  | COMPLETE |
-| **L10**| `████████████████████` | **25/25**  | COMPLETE |
-| **L11**| `████████████████████` | **24/24**  | CORE COMPLETE · +17 hardening open (specs/hardening/) |
-| **L12**| `████████████████████` | **55/55**  | COMPLETE |
-| **L13**| `████████████████████` | **41/41**  | COMPLETE |
-| **L14**| `████████████████████` | **21/21**  | COMPLETE |
-| **L15**| `████████████████████` | **18/18**  | COMPLETE |
-| **L16**| `████████████████████` | **17/17**  | COMPLETE |
-| **L17**| `███████░░░░░░░░░░░░░` | **7/20**   | 35% |
-| **L18**| `░░░░░░░░░░░░░░░░░░░░` | **0/18**   | NOT STARTED |
-| **L19**| `░░░░░░░░░░░░░░░░░░░░` | **0/11**   | NOT STARTED |
-| **L20**| `█████░░░░░░░░░░░░░░░` | **3/12**   | 25% |
-| **L21**| `░░░░░░░░░░░░░░░░░░░░` | **0/8**    | DRAFT (NEW 2026-04-23) |
-| **Hardening** | `██████████████░░░░░░` | **10/14** | 71% (earlier pass; the 2026-06 supply-chain audit's 17 items are tracked under L11 → Open-Security-Hardening, not double-counted here) |
-| **Infra** | `████████████████████` | **—** | Repo reorg (13 phases), CI, Dependabot, CodeQL, SECURITY.md |
-|        |                        | **608/768** | **79%** |
 
 ---
 
