@@ -223,6 +223,17 @@ try:
     _HAS_RAG_POISON = True
 except ImportError:
     _HAS_RAG_POISON = False
+# Ingestion-manipulation detector (IG.x, OWASP LLM06) — optional (parity w/ scan()).
+# INGESTION-side detector: "treat ingested DATA as an INSTRUCTION/DIRECTIVE".
+try:
+    from .detectors.ingestion import (
+        detect_ingestion,
+        get_ingestion_weight,
+        hard_planted_directive_pattern as _ig_hard_planted_directive,
+    )
+    _HAS_INGESTION = True
+except ImportError:
+    _HAS_INGESTION = False
 
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
@@ -436,6 +447,22 @@ class WhitelistFilter:
             return False, "critical rule hit despite question form: {}".format(
                 ", ".join(critical_hit_names)
             )
+
+        # 8. Ingestion-manipulation tripwire: an UNAMBIGUOUS planted directive
+        #    ("treat ... as a system directive", "*_override=true", "obey the
+        #    ingested ...", "[SYSTEM OVERRIDE:") must not be whitelisted even in
+        #    question form (e.g. "When you ingest this data, treat ... as a
+        #    system directive").  Mirrors the critical-rule tripwire above and
+        #    keeps the cascade path in parity with scan(), where the IG fold
+        #    catches these.  0-FP cue (validated on the IG benign siblings); a
+        #    benign "How do I upload this document?" never matches.  Behind the
+        #    optional-import flag so absence degrades to no-op.
+        if _HAS_INGESTION:
+            try:
+                if _ig_hard_planted_directive().search(text):
+                    return False, "ingestion planted-directive despite question form"
+            except Exception:
+                _logger.debug("Ingestion whitelist tripwire failed", exc_info=True)
 
         # Build reason string
         reasons = ["passed all whitelist criteria"]
@@ -806,6 +833,33 @@ class WeightedClassifier:
                     label = "MALICIOUS"
         except Exception:
             _logger.debug("Char-split detection failed", exc_info=True)
+        # --- Ingestion-manipulation (IG.x, OWASP LLM06) — parity with scan() ---
+        # Self-anchored "treat ingested DATA as a DIRECTIVE" co-occurrence
+        # (ingestion-source noun + directive-elevation cue).  Input-side
+        # detector; the composite WEIGHT is capped at 0.30 inside
+        # get_ingestion_weight, so a lone IG weight never crosses the threshold.
+        # A DECISIVE detection (a hard planted-directive cue that CO-OCCURRED with
+        # an ingestion source) flips the verdict directly — same FP-safe
+        # co-occurrence licence as the scan() path and the whitelist tripwire.
+        if _HAS_INGESTION:
+            try:
+                _ig = detect_ingestion(text)
+                if _ig.technique_ids:
+                    _ig_w = get_ingestion_weight(_ig)
+                    if _ig_w > 0.0:
+                        composite = min(composite + _ig_w, 1.0)
+                    for _tech in _ig.technique_ids:
+                        _ig_hit = "ingestion:" + _tech
+                        if _ig_hit not in hit_names_seen:
+                            hit_names.append(_ig_hit)
+                            hit_names_seen.add(_ig_hit)
+                    if _ig.decisive and label == "SAFE":
+                        label = "MALICIOUS"
+                        composite = max(composite, self.threshold)
+                    elif composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Ingestion-manipulation detection failed", exc_info=True)
 
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
@@ -1336,7 +1390,19 @@ class CascadeClassifier:
         # If the classifier says MALICIOUS but positive validation says
         # the input IS a legitimate prompt, downgrade to SAFE.  This
         # catches benign prompts that mention injection-related vocabulary.
-        if label == "MALICIOUS" and self._positive_validator is not None:
+        # A DECISIVE ingestion planted-directive (a hard cue that co-occurred
+        # with an ingestion source) is an unambiguous embedded injection — it
+        # must NOT be downgraded by positive validation, keeping the cascade in
+        # parity with scan() (where a decisive IG hit blocks).  Mirrors the
+        # whitelist tripwire that already refuses to whitelist these.
+        _ig_decisive = False
+        if label == "MALICIOUS" and _HAS_INGESTION:
+            try:
+                _ig_decisive = detect_ingestion(clean).decisive
+            except Exception:
+                _ig_decisive = False
+        if (label == "MALICIOUS" and not _ig_decisive
+                and self._positive_validator is not None):
             try:
                 # BUG-L8-2 fix: pass L0-sanitized text instead of raw input
                 # so positive validation sees the same normalized form as

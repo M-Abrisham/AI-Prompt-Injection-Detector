@@ -607,7 +607,7 @@ categories:
     type: indirect
     severity: high
     tags:
-      - "owasp-llm:2025:llm01"
+      - "owasp-llm:2025:llm06"
     expected_layers: ["L1", "L9"]
     techniques:
       IG1.1: { name: "RAG context poisoning", severity: critical }

@@ -200,6 +200,16 @@ try:
 except ImportError:
     _HAS_TOOL_ABUSE = False
 
+# Ingestion-manipulation detector (IG.x, OWASP LLM06) — optional import.
+# INGESTION-side detector: "treat ingested DATA as an INSTRUCTION/DIRECTIVE".
+# Self-anchored (ingestion-source noun + directive-elevation cue co-occurrence),
+# so a bare ingestion noun never fires.
+try:
+    from .detectors.ingestion import detect_ingestion, get_ingestion_weight
+    _HAS_INGESTION = True
+except ImportError:
+    _HAS_INGESTION = False
+
 # N5: PromptGuard classifier — transformer-based injection/jailbreak detection.
 # Opt-in via NA0S_ENABLE_PROMPTGUARD=1 (requires downloading a model).
 try:
@@ -1457,6 +1467,51 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         composite = min(composite + tool_abuse_weight, 1.0)
         if composite >= threshold and label in ("SAFE", "safe", "benign"):
             label = "MALICIOUS"
+
+    # --- Ingestion-manipulation detection (IG.x, OWASP LLM06) ---
+    # Detect a directive planted in data the pipeline INGESTS (poisoned RAG
+    # chunk, uploaded doc carrying a hidden NOTE, metadata/config field
+    # assistant_override=true) so it acts as a downstream instruction.  Every
+    # matcher is a self-anchored co-occurrence of an INGESTION-SOURCE noun AND a
+    # DIRECTIVE-ELEVATION cue, so the benign ingestion siblings (which reuse the
+    # nouns with legitimate ops) never fire.
+    ingestion_weight = 0.0
+    ingestion_decisive = False
+    if _HAS_INGESTION:
+        try:
+            ig_result = detect_ingestion(clean)
+            if ig_result.technique_ids:
+                ingestion_weight = get_ingestion_weight(ig_result)
+                ingestion_decisive = ig_result.decisive
+                for tech in ig_result.technique_ids:
+                    hit_name = "ingestion:" + tech
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        # Severity mirrors inter_model/rag_poison: multiple
+                        # distinct families co-firing = high, a single = medium.
+                        _sev = "high" if len(ig_result.family_ids) >= 2 else "medium"
+                        _local_severities[hit_name] = _sev
+        except Exception:
+            pass  # Ingestion-manipulation detection failure is non-fatal
+
+    # Wire ingestion signal into composite scoring.  The weight is capped at 0.30
+    # inside get_ingestion_weight (the corroborating cap), so it is ALWAYS a soft
+    # signal: a lone IG weight can never cross the threshold on its own.  A
+    # DECISIVE detection (a hard planted-directive cue that CO-OCCURRED with an
+    # ingestion source — a bare hard cue alone never sets decisive) is an
+    # unambiguous embedded injection and flips the verdict directly, mirroring the
+    # cascade whitelist tripwire; the FP-safety co-occurrence requirement is what
+    # licenses the direct flip.
+    if ingestion_weight > 0.0:
+        composite = min(composite + ingestion_weight, 1.0)
+    if ingestion_decisive and label in ("SAFE", "safe", "benign"):
+        label = "MALICIOUS"
+        composite = max(composite, threshold)
+    elif ingestion_weight > 0.0 and composite >= threshold and label in (
+        "SAFE", "safe", "benign"
+    ):
+        label = "MALICIOUS"
 
     # --- Position-weighted RAG context scan (D8.3/D8.4) ---
     # When the input looks like concatenated retrieved context (multiple
