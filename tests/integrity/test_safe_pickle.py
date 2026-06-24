@@ -998,39 +998,41 @@ class TestReadOnceBufferTOCTOU(unittest.TestCase):
     # --- HEADLINE: executed bytes == verified bytes; no second content read ---
 
     def test_pickle_load_unpickles_exactly_the_read_buffer(self):
-        """The bytes fed to pickle.load are byte-for-byte the bytes returned by
+        """The bytes fed to the unpickler are byte-for-byte the bytes returned by
         the single _read_file_bytes call — proving the content is read once and
         the executed bytes ARE the buffer (not a re-read of the file).
 
-        Spies on _read_file_bytes (the one content read) and pickle.load, then
-        asserts the BytesIO handed to pickle.load wraps exactly that buffer. If
-        safe_load ever re-opened the path for the load, the two byte strings
-        would not be guaranteed identical and this guard would have teeth.
+        Spies on _read_file_bytes (the one content read) and the _SafeUnpickler
+        constructor (the buffer-based unpickle entry that replaced the bare
+        pickle.load — item #04b/R5), then asserts the BytesIO handed to the
+        unpickler wraps exactly that buffer. If safe_load ever re-opened the path
+        for the load, the two byte strings would not be guaranteed identical and
+        this guard would have teeth.
         """
         self._dump_keyless(self.benign, self.pkl_path)
         captured = {}
 
         real_read = self.sp._read_file_bytes
-        real_pickle_load = self.sp.pickle.load
+        real_unpickler = self.sp._SafeUnpickler
 
         def spy_read(path):
             data = real_read(path)
             captured.setdefault("read_bufs", []).append(data)
             return data
 
-        def spy_pickle_load(fileobj):
+        def spy_unpickler(fileobj):
             # The buffer-based path passes an io.BytesIO wrapping the verified
-            # bytes; capture what pickle.load actually executes.
+            # bytes; capture what the unpickler actually executes.
             self.assertIsInstance(fileobj, io.BytesIO)
             captured["loaded_bytes"] = fileobj.getvalue()
-            return real_pickle_load(fileobj)
+            return real_unpickler(fileobj)
 
         env_no_key = {k: v for k, v in os.environ.items()
                       if k != "NA0S_PICKLE_KEY"}
         with patch.dict(os.environ, env_no_key, clear=True):
             with patch.object(self.sp, "_read_file_bytes", side_effect=spy_read):
-                with patch.object(self.sp.pickle, "load",
-                                  side_effect=spy_pickle_load):
+                with patch.object(self.sp, "_SafeUnpickler",
+                                  side_effect=spy_unpickler):
                     loaded = safe_load(self.pkl_path)
 
         self.assertEqual(loaded, self.benign)
@@ -1149,27 +1151,28 @@ class TestReadOnceBufferTOCTOU(unittest.TestCase):
         the on-disk verification, not an execution read); the TOCTOU guarantee is
         that the EXECUTED bytes come from the buffer, asserted by
         test_pickle_load_unpickles_exactly_the_read_buffer. Here we assert the
-        weaker-but-explicit property that pickle.load is NEVER handed a file
-        object opened on `path` (it is handed an io.BytesIO).
+        weaker-but-explicit property that the unpickler is NEVER handed a file
+        object opened on `path` (it is handed an io.BytesIO). The unpickle entry
+        is _SafeUnpickler (item #04b/R5), which replaced the bare pickle.load.
         """
         self._dump_keyless(self.benign, self.pkl_path)
-        real_pickle_load = self.sp.pickle.load
+        real_unpickler = self.sp._SafeUnpickler
         loaded_from = {}
 
-        def spy_pickle_load(fileobj):
+        def spy_unpickler(fileobj):
             loaded_from["type"] = type(fileobj).__name__
             loaded_from["is_bytesio"] = isinstance(fileobj, io.BytesIO)
-            return real_pickle_load(fileobj)
+            return real_unpickler(fileobj)
 
         env_no_key = {k: v for k, v in os.environ.items()
                       if k != "NA0S_PICKLE_KEY"}
         with patch.dict(os.environ, env_no_key, clear=True):
-            with patch.object(self.sp.pickle, "load",
-                              side_effect=spy_pickle_load):
+            with patch.object(self.sp, "_SafeUnpickler",
+                              side_effect=spy_unpickler):
                 self.assertEqual(safe_load(self.pkl_path), self.benign)
-        # pickle.load consumed an in-memory buffer, not a freshly-opened file.
+        # The unpickler consumed an in-memory buffer, not a freshly-opened file.
         self.assertTrue(loaded_from["is_bytesio"],
-                        "pickle.load was handed {} — expected io.BytesIO "
+                        "_SafeUnpickler was handed {} — expected io.BytesIO "
                         "(a re-opened file is a TOCTOU window)"
                         .format(loaded_from.get("type")))
 
