@@ -6,6 +6,7 @@ import logging
 import math
 import os
 import re
+import time
 import unicodedata
 import urllib.parse
 import zlib
@@ -30,6 +31,10 @@ class DecodedView:
     encoding_type: str     # "base64", "hex", "url_encoded", "rot13", "morse", etc.
     depth: int             # 0 = first decode from original, 1 = decode of a decode, etc.
     parent_index: int = -1 # index into decoded_chain list; -1 = decoded from original text
+    recurse_only: bool = False  # True = peeled for recursion (MB chains) but
+                                # keyword-free → MUST NOT be surfaced to the
+                                # downstream ML/rule classifier (historic FP
+                                # lesson) and contributes no flag/score.
 
 
 PUNCTUATION_PATTERN = re.compile(r"[^\w\s]")
@@ -635,6 +640,30 @@ def _decode_base64(text):
         return ""
 
 
+def _is_mostly_printable(text: str) -> bool:
+    """True if *text* is predominantly printable/whitespace characters.
+
+    Used to tell a REAL structural decode (base64/hex of actual text) from a
+    coincidental one (e.g. ROT13(Base64) is itself valid base64 but decodes
+    to binary noise).  A real decode suppresses the redundant recurse-only
+    cipher peel; a garbage decode does not.  Reuses the same printable-ratio
+    threshold (``MIN_PRINTABLE_RATIO``) as the embedded-base64 extractor.
+
+    The Unicode REPLACEMENT CHARACTER (U+FFFD), emitted by lossy
+    ``decode(errors="replace")`` on undecodable bytes, counts as NON-printable
+    here even though ``str.isprintable()`` returns True for it — otherwise a
+    base64 blob that decodes to pure binary noise (all U+FFFD) would falsely
+    read as printable text.
+    """
+    if not text:
+        return False
+    printable = sum(
+        1 for c in text
+        if (c.isprintable() or c.isspace()) and c != "�"
+    )
+    return printable / max(len(text), 1) >= MIN_PRINTABLE_RATIO
+
+
 def _decode_hex(text):
     stripped = "".join(text.split())
     try:
@@ -724,11 +753,19 @@ def _decode_rot13(text):
 def _is_rot13_candidate(text):
     """Check if text might be ROT13-encoded.
 
-    Returns (is_candidate, decoded_text) tuple.
+    Returns (flag_eligible, decoded_text, recurse_only) tuple:
+    - flag_eligible : the decoded view contains attack keywords → raise a flag
+    - decoded_text  : the ROT13-decoded text (empty if no view to emit)
+    - recurse_only  : the view is keyword-free but plausibly English, so it
+                      should be RECURSED INTO (next transform tried) WITHOUT
+                      raising a flag.  This unwraps multi-buff chains whose
+                      outer layer is ROT13 (e.g. ROT13(Base64(...))).
 
     Detection strategy:
     - If text has an explicit ROT13 label, extract and decode the payload
-    - Otherwise, apply ROT13 and check if result contains attack keywords
+    - Otherwise, apply ROT13 and:
+        * raise a flag if the decode contains attack keywords; else
+        * emit a recurse-only view if the decode is plausibly English.
     - Requires >= 10 alpha characters to avoid noise on short strings
     """
     # Check for explicit ROT13 label
@@ -737,20 +774,26 @@ def _is_rot13_candidate(text):
         payload = label_match.group(1).strip()
         if payload:
             decoded = _decode_rot13(payload)
-            return True, decoded
+            return True, decoded, False
 
     # Skip very short text or text with too few letters
     alpha_count = sum(1 for c in text if c.isalpha())
     if alpha_count < MIN_CANDIDATE_ALPHA:
-        return False, ""
+        return False, "", False
 
     decoded = _decode_rot13(text)
 
-    # Only flag if decoded text contains attack keywords
+    # Flag only if decoded text contains attack keywords.
     if _has_attack_keywords(decoded):
-        return True, decoded
+        return True, decoded, False
 
-    return False, ""
+    # Recurse-into (no flag): the ROT13 view may itself wrap another
+    # transform — peel it when it is plausible English OR a further-encoding
+    # blob (ROT13(Base64(...))).  See _is_recurse_worthy for the FP guards.
+    if _is_recurse_worthy(decoded, text):
+        return False, decoded, True
+
+    return False, "", False
 
 
 # ---------------------------------------------------------------------------
@@ -884,6 +927,166 @@ def _validate_english(
     attack_hits = len(set(m.lower().strip() for m in matches))
 
     return english_ratio, attack_hits, total_words
+
+
+# ---------------------------------------------------------------------------
+# English-plausibility gate for RECURSE-INTO decoding (MB chained obfuscation)
+# ---------------------------------------------------------------------------
+# Multi-buff / chained obfuscation stacks >=2 transforms so that no single
+# decoder's keyword gate ever fires on its OWN single-layer output (e.g.
+# ROT13(Base64(...)) — the outer ROT13 view is still base64, keyword-free, so
+# the ROT13 decoder refused to emit it and the recursion never reached the
+# inner payload).  The fix is to let a cipher decoder emit its decoded view
+# *for recursion only* when that view is plausibly English (so the next
+# transform can be tried), WITHOUT raising any flag.  The flag/score gate
+# stays exactly where it was: a flag is raised only when a FINAL unwrapped
+# view satisfies the keyword gate.  Benign nested encodings (base64 of a
+# JSON config, a reversed string of prose) decode to plausible-but-keyword-
+# free text → they recurse, find no inner attack, and emit NO flag.
+#
+# Plausibility = (KL-divergence from English letter freq < _KL_THRESHOLD)
+#                OR (dictionary-hit-rate > _DICT_HIT_RATE_THRESHOLD).
+# These reuse the existing _kl_divergence_from_english() and
+# _validate_english() so there is ONE source of truth, not a parallel scorer.
+# Both cutoffs are FP-gated: see the benign-nested-encoding tests.
+# ---------------------------------------------------------------------------
+
+# Dictionary-hit-rate above this fraction makes a decoded view plausible
+# English even when its letter distribution is borderline (e.g. a short
+# reversed sentence).  0.40 mirrors Roadmap §3043's "dict-hit-rate > 0.4".
+_DICT_HIT_RATE_THRESHOLD = safe_float_env(
+    "NA0S_DICT_HIT_RATE_THRESHOLD", 0.40, lo=0.0, hi=1.0
+)
+
+# Minimum letters required before the plausibility gate will pass anything.
+# Below this there is too little signal; we refuse to recurse (avoids
+# fanning out on tiny noise strings).
+_MIN_PLAUSIBLE_LETTERS = safe_int_env(
+    "NA0S_MIN_PLAUSIBLE_LETTERS", 8, lo=0
+)
+
+
+def _is_plausible_english(text: str) -> bool:
+    """Return True if *text* reads plausibly as English (recurse-into gate).
+
+    Used ONLY to decide whether a keyword-free decoded view is worth
+    recursing into for the next transform — it never raises a flag.  A view
+    is plausible when EITHER its letter-frequency KL-divergence from English
+    is below ``_KL_THRESHOLD`` OR its dictionary-hit-rate exceeds
+    ``_DICT_HIT_RATE_THRESHOLD``.
+
+    The two signals are complementary: KL catches longer prose with an
+    English-like letter mix (even with a few out-of-dictionary tokens),
+    while the dict-hit-rate catches shorter strings whose letter histogram
+    is too small for a stable KL estimate.
+
+    Returns False for text with too few letters (insufficient signal),
+    which keeps the loosened recursion from fanning out on noise.
+    """
+    letters = sum(1 for c in text if c.isalpha())
+    if letters < _MIN_PLAUSIBLE_LETTERS:
+        return False
+
+    # Signal 1: letter-frequency distance from English.
+    kl = _kl_divergence_from_english(text)
+    if kl < _KL_THRESHOLD:
+        return True
+
+    # Signal 2: dictionary hit-rate (real English words / total tokens).
+    dict_ratio, _attack_hits, total_words = _validate_english(text)
+    if total_words >= 2 and dict_ratio > _DICT_HIT_RATE_THRESHOLD:
+        return True
+
+    return False
+
+
+def _looks_like_further_encoding(text: str) -> bool:
+    """True if *text* is itself a high-confidence encoded blob to peel next.
+
+    The plausibility gate (``_is_plausible_english``) decides "is this a
+    natural-language layer worth recursing into".  But a multi-buff chain
+    like ROT13(Base64(payload)) has an INTERMEDIATE view that is NOT English
+    — it is a base64 string.  Such a view should also be recursed into so the
+    inner base64 (then the attack) peels.  This helper recognizes those
+    high-decode-confidence intermediates (valid whole-blob base64 / hex /
+    embedded-base64) WITHOUT raising any flag — emission stays recurse-only.
+
+    Cheap, allocation-light checks reusing the existing decode detectors;
+    keeps the loosened path from fanning out on arbitrary noise (the blob
+    must actually be a decodable base64/hex form, not just high-entropy).
+    """
+    return bool(_base64(text) or _hex(text) or _extract_embedded_base64(text))
+
+
+def _is_recurse_worthy(decoded: str, original: str) -> bool:
+    """Recurse-into gate for keyword-free cipher decodes (MB chains).
+
+    A cipher decoder emits a decoded view *for recursion only* (no flag)
+    when its decode is EITHER:
+      - plausibly English that is MORE English-like than the input (so the
+        cipher actually peeled a natural-language layer worth re-scanning), OR
+      - a high-confidence further-encoding blob (valid base64/hex) that
+        DECODES to a distinct, mostly-printable payload — i.e. the cipher
+        exposed a real next encoding layer (ROT13(Base64(...)),
+        Reverse(Base64(...))) for the next decoder to peel.
+
+    FP/fan-out guards:
+      - English branch: requires the decode to be MORE English-like than the
+        input, so a cipher applied to benign plaintext (which only produces
+        gibberish) does not recurse.
+      - Encoding branch: requires the blob to actually decode to a distinct,
+        mostly-printable string (not the original, not binary garbage).  The
+        recursion's own cycle-detection then prevents reverse/ROT13 ping-pong.
+    """
+    if decoded == original or not decoded.strip():
+        return False
+
+    # Coherence gate: never recurse-only into binary noise.  A cipher applied
+    # to binary garbage (e.g. the base64-decode of coincidentally-valid-base64
+    # plaintext) yields more garbage that downstream decoders would "decode"
+    # into yet more garbage — an FP-prone, budget-wasting fan-out.  The further-
+    # encoding branch below is exempt (a base64 blob is intentionally not
+    # printable English) and does its own printable-decode check.
+    _decoded_printable = _is_mostly_printable(decoded)
+
+    if _decoded_printable and _is_plausible_english(decoded) and not _is_plausible_english(original):
+        return True
+
+    # Further-encoding branch: the decoded view must be a valid base64/hex
+    # blob whose decode is a distinct, mostly-printable payload.  This is the
+    # ROT13(Base64) / Reverse(Base64) intermediate.
+    if _looks_like_further_encoding(decoded):
+        inner = _decode_base64(decoded) or _decode_hex(decoded)
+        if (
+            inner
+            and inner != decoded
+            and inner != original
+            and len(inner.strip()) >= MIN_PRINTABLE_CHARS
+            and _is_mostly_printable(inner)
+        ):
+            return True
+
+    # Cipher-peel branch: the decoded view is itself a ROT13 layer whose
+    # ROT13-decode is plausible English (Leet(ROT13(...)) — leet-normalize
+    # exposes a ROT13 string that is neither English nor base64 on its own,
+    # but ROT13 of it is the inner plaintext).  Probe ROT13 only (cheap,
+    # self-inverse); the recursion's cycle-detect bounds the fan-out.
+    #
+    # CRITICAL FP guard: do NOT fire when the ORIGINAL input is already
+    # plausible English.  Otherwise any plaintext message (e.g. a JS error
+    # message) yields a recurse-only ROT13 view whose double-ROT13 is the
+    # original — an infinite supply of FP-prone gibberish intermediates.
+    if _is_plausible_english(original):
+        return False
+    # The ROT13-cipher-peel branch only applies to printable cipher views
+    # (Leet/ROT13 over text), never to binary noise.
+    if not _decoded_printable:
+        return False
+    rot = _decode_rot13(decoded)
+    if rot != decoded and _is_plausible_english(rot) and not _is_plausible_english(decoded):
+        return True
+
+    return False
 
 
 def _caesar_brute_force(text: str) -> "tuple[bool, str, int]":
@@ -1142,13 +1345,17 @@ def _reverse_words(text):
 def _is_reversed_candidate(text):
     """Check if text might be reversed.
 
-    Returns (is_candidate, decoded_list) tuple where decoded_list is a
-    list of (decoded_text, reverse_type) tuples.
+    Returns (flag_eligible, candidates) where candidates is a list of
+    ``(decoded_text, reverse_type, recurse_only)`` triples:
+    - flag_eligible : at least one variant contains attack keywords →
+                      raise the ``reversed_text`` flag.
+    - recurse_only  : the variant is keyword-free but plausibly English,
+                      so it is recursed INTO (next transform) WITHOUT a
+                      flag.  This unwraps chains whose outer layer is a
+                      reversal (e.g. Reverse(Base64(...)) once base64 has
+                      already peeled, or ROT13(Reverse(...))).
 
-    Tries both full string reversal and per-word reversal, returning
-    all variants that contain attack keywords.  This ensures L1 rules
-    can match the correctly ordered decoded text regardless of reversal
-    strategy.
+    Tries both full string reversal and per-word reversal.
 
     Requires >= 10 alpha characters.
     """
@@ -1157,18 +1364,26 @@ def _is_reversed_candidate(text):
         return False, []
 
     candidates = []
+    flag_eligible = False
 
     # Try full reversal
     full_rev = _reverse_full(text)
     if _has_attack_keywords(full_rev):
-        candidates.append((full_rev, "full_reverse"))
+        candidates.append((full_rev, "full_reverse", False))
+        flag_eligible = True
+    elif _is_recurse_worthy(full_rev, text):
+        candidates.append((full_rev, "full_reverse", True))
 
     # Try per-word reversal
     word_rev = _reverse_words(text)
-    if _has_attack_keywords(word_rev) and word_rev != full_rev:
-        candidates.append((word_rev, "word_reverse"))
+    if word_rev != full_rev:
+        if _has_attack_keywords(word_rev):
+            candidates.append((word_rev, "word_reverse", False))
+            flag_eligible = True
+        elif _is_recurse_worthy(word_rev, text):
+            candidates.append((word_rev, "word_reverse", True))
 
-    return len(candidates) > 0, candidates
+    return flag_eligible, candidates
 
 
 # ---------------------------------------------------------------------------
@@ -1239,26 +1454,39 @@ def _leet_density(text):
 def _is_leetspeak_candidate(text):
     """Check if text might be leetspeak-encoded.
 
-    Returns (is_candidate, normalized_text) tuple.
+    Returns (flag_eligible, normalized_text, recurse_only) tuple:
+    - flag_eligible : normalized text contains attack keywords → raise flag.
+    - recurse_only  : normalized text is keyword-free but plausibly English,
+                      so it is recursed INTO (next transform) WITHOUT a
+                      flag.  This unwraps chains whose outer layer is leet
+                      (e.g. Leet(ROT13(...)) — leet-normalize, then the
+                      ROT13 view becomes recurse-eligible).
 
     Requires:
     - At least 10 characters
     - Leet density above threshold (>= 10% of alpha+digit chars are leet subs)
-    - Normalized text contains attack keywords
     """
     if len(text) < MIN_CANDIDATE_ALPHA:
-        return False, ""
+        return False, "", False
 
     density = _leet_density(text)
     if density < _LEET_DENSITY_THRESHOLD:
-        return False, ""
+        return False, "", False
 
     normalized = _normalize_leetspeak(text)
+    if normalized == text:
+        return False, "", False
 
     if _has_attack_keywords(normalized):
-        return True, normalized
+        return True, normalized, False
 
-    return False, ""
+    # Recurse-into (no flag): leet-normalized view may wrap another
+    # transform (Leet(ROT13(...))).  Emit when normalization yields plausible
+    # English OR a further-encoding blob.  See _is_recurse_worthy.
+    if _is_recurse_worthy(normalized, text):
+        return False, normalized, True
+
+    return False, "", False
 
 
 # ---------------------------------------------------------------------------
@@ -1401,15 +1629,22 @@ def _scan_invisible_chars(text):
 def _scan_single_layer(text):
     """Scan a single layer of text for obfuscation signals.
 
-    Returns (flags, decoded_views) where flags is a list of string
-    evasion flags and decoded_views is a list of (decoded_text, encoding_type)
-    tuples for each successful decode operation.
+    Returns (flags, decoded_pairs, recurse_only_pairs):
+      - flags : list of string evasion flag names.
+      - decoded_pairs : list of (decoded_text, encoding_type) for FLAG-bearing
+        decodes — these are surfaced to the downstream ML/rule classifier.
+      - recurse_only_pairs : list of (decoded_text, encoding_type) for
+        keyword-free decodes peeled ONLY to let the recursion reach an inner
+        payload (MB chained obfuscation).  These are recursed into but MUST
+        NOT be surfaced to the downstream classifier (historic FP lesson) and
+        contribute no flag/score on their own.
 
     This function is the building block for the recursive obfuscation_scan().
     It does NOT recurse into decoded views — that is handled by the caller.
     """
     flags = []
-    decoded_pairs = []  # list of (decoded_text, encoding_type)
+    decoded_pairs = []  # list of (decoded_text, encoding_type) — flag-bearing
+    recurse_only_pairs = []  # list of (decoded_text, encoding_type) — peel-only
 
     # --- Invisible character detection ---
     # Detect invisible Unicode chars used for token splitting, payload
@@ -1559,11 +1794,32 @@ def _scan_single_layer(text):
 
     # --- ROT13 / Caesar detection (D4.4) ---
     # Apply ROT13 decode and check if result contains attack keywords.
-    # Explicit "ROT13:" labels are also detected.
-    is_rot13, rot13_decoded = _is_rot13_candidate(text)
-    if is_rot13 and rot13_decoded:
-        decoded_pairs.append((rot13_decoded, "rot13"))
-        flags.append("rot13")
+    # Explicit "ROT13:" labels are also detected.  recurse_only views are
+    # added to decoded_pairs (so the recursion peels the next layer of a
+    # multi-buff chain) but do NOT raise the rot13 flag — only a final
+    # keyword-bearing unwrap raises a flag.
+    # Recurse-only cipher peels (ROT13/Reverse/Leet) are SUPPRESSED when a
+    # HIGH-CONFIDENCE STRUCTURAL decode (base64/hex/url) already produced a
+    # MOSTLY-PRINTABLE result for this layer: that layer's encoding is then
+    # unambiguously identified, and a cipher peel on the same raw bytes only
+    # yields redundant gibberish (and inflates the decode budget).
+    #
+    # Crucially, a structural decode whose output is BINARY GARBAGE does NOT
+    # suppress: ROT13(Base64(payload)) is itself coincidentally valid base64
+    # that decodes to noise — the real layer is the ROT13 peel, which must
+    # still fire.  Low-confidence brute-force decodes (caesar/pig-latin) also
+    # never suppress.
+    _structural_decode = any(
+        enc in _STRUCTURAL_DECODE_FLAGS and _is_mostly_printable(dec)
+        for dec, enc in decoded_pairs
+    )
+    is_rot13, rot13_decoded, rot13_recurse_only = _is_rot13_candidate(text)
+    if rot13_decoded:
+        if is_rot13 and not rot13_recurse_only:
+            decoded_pairs.append((rot13_decoded, "rot13"))
+            flags.append("rot13")
+        elif rot13_recurse_only and not _structural_decode:
+            recurse_only_pairs.append((rot13_decoded, "rot13"))
 
     # --- Caesar cipher brute-force (D4.4b) ---
     is_caesar, caesar_decoded, caesar_shift = _caesar_brute_force(text)
@@ -1578,19 +1834,33 @@ def _scan_single_layer(text):
         flags.append("pig_latin")
 
     # --- Reversed text detection (D4.6) ---
-    # Try full string reversal and per-word reversal.
-    is_reversed, rev_candidates = _is_reversed_candidate(text)
-    if is_reversed and rev_candidates:
-        for rev_decoded, rev_type in rev_candidates:
-            decoded_pairs.append((rev_decoded, rev_type))
-        flags.append("reversed_text")
+    # Try full string reversal and per-word reversal.  recurse_only
+    # variants are peeled but raise no flag (multi-buff chain unwrap).
+    rev_flag_eligible, rev_candidates = _is_reversed_candidate(text)
+    if rev_candidates:
+        for rev_decoded, rev_type, rev_recurse_only in rev_candidates:
+            if rev_recurse_only:
+                # Suppress recurse-only reversal when a structural decode
+                # already identified this layer (see ROT13 note above).
+                if not _structural_decode:
+                    recurse_only_pairs.append((rev_decoded, rev_type))
+            else:
+                decoded_pairs.append((rev_decoded, rev_type))
+        if rev_flag_eligible:
+            flags.append("reversed_text")
 
     # --- Leetspeak normalization (D4.5) ---
     # Normalize leet substitutions and check for attack keywords.
-    is_leet, leet_normalized = _is_leetspeak_candidate(text)
-    if is_leet and leet_normalized:
-        decoded_pairs.append((leet_normalized, "leetspeak"))
-        flags.append("leetspeak")
+    # recurse_only normalized view is peeled but raises no flag.
+    is_leet, leet_normalized, leet_recurse_only = _is_leetspeak_candidate(text)
+    if leet_normalized:
+        if is_leet and not leet_recurse_only:
+            decoded_pairs.append((leet_normalized, "leetspeak"))
+            flags.append("leetspeak")
+        elif leet_recurse_only and not _structural_decode:
+            # Suppress recurse-only leet when a structural decode already
+            # identified this layer (see ROT13 note above).
+            recurse_only_pairs.append((leet_normalized, "leetspeak"))
 
     # --- Morse code detection (D4.7) ---
     # Decode Morse-encoded text and check for attack keywords.
@@ -1624,13 +1894,71 @@ def _scan_single_layer(text):
         decoded_pairs.append((stripped_zw, "whitespace_injection"))
         flags.append("whitespace_injection")
 
-    return flags, decoded_pairs
+    return flags, decoded_pairs, recurse_only_pairs
 
 
 # Default limits for recursive obfuscation scanning.
 _DEFAULT_MAX_DEPTH = 4
 _DEFAULT_MAX_TOTAL_DECODES = 8
 _MAX_EXPANSION_FACTOR = 10  # stop if decoded > 10x original size
+
+# ---------------------------------------------------------------------------
+# Decode-explosion / DoS budgets (MB chained obfuscation)
+# ---------------------------------------------------------------------------
+# Loosening the recurse-into emission gate (recurse_only views) lets a cipher
+# decoder peel keyword-free layers, which fans the recursion out further than
+# the keyword-gated path ever did.  Two env-overridable budgets bound the
+# blast radius on adversarial input:
+#
+#   NA0S_MAX_CHAIN_DECODES (50)        — hard cap on the TOTAL number of
+#       decode operations across all recursion levels for one scan.  This is
+#       the union budget over both the legacy keyword-gated path and the new
+#       recurse-only path (max() with the legacy per-call max_total so the
+#       loosened path never *shrinks* the existing budget).
+#   NA0S_CHAIN_DECODE_TIMEOUT_MS (200) — wall-clock ceiling for the recursive
+#       unwrap.  Once exceeded the recursion stops descending (partial result
+#       is still returned).  Belt-and-suspenders against pathological inputs
+#       that stay under the decode count but are individually expensive.
+#
+# Both are ARBITRARY-but-FP/perf-GATED (na0s-review-checklist §7): the
+# <500ms/500-char perf regression test pins the upper bound, and the
+# benign-nested-encoding tests pin the FP floor.  They are env-overridable
+# (not frozen) precisely so operators can re-tune without a code change.
+_DEFAULT_MAX_CHAIN_DECODES = 50
+_DEFAULT_CHAIN_DECODE_TIMEOUT_MS = 200
+
+# Heuristic flags suppressed while scanning a keyword-free recurse-only peel.
+# A cipher/encoding intermediate (e.g. the ROT13 view of a plausible-English
+# error message) is high-entropy gibberish that legitimately trips these
+# heuristics — but it is not an attack, so surfacing the flag is a false
+# positive.  Decode-type and attack-keyword flags are NOT in this set, so a
+# real inner payload reached via a recurse-only outer layer still flags.
+_RECURSE_ONLY_SUPPRESSED_FLAGS = frozenset({
+    "high_entropy",
+    "weird_casing",
+    "punctuation_flood",
+    "invisible_chars",
+})
+
+# High-confidence STRUCTURAL decode flags.  When one of these fires on a
+# layer, the layer's encoding is unambiguously identified — so the low-
+# confidence recurse-only cipher peels (ROT13/Reverse/Leet) are suppressed
+# on that same layer to avoid redundant gibberish intermediates.  Brute-force
+# decodes (caesar / pig-latin) are deliberately excluded: a coincidental hit
+# must not starve a legitimate chained-cipher peel.
+_STRUCTURAL_DECODE_FLAGS = frozenset({
+    "base64",
+    "entire_input_base64",
+    "hex",
+    "url_encoded",
+})
+
+MAX_CHAIN_DECODES = safe_int_env(
+    "NA0S_MAX_CHAIN_DECODES", _DEFAULT_MAX_CHAIN_DECODES, lo=1
+)
+CHAIN_DECODE_TIMEOUT_MS = safe_int_env(
+    "NA0S_CHAIN_DECODE_TIMEOUT_MS", _DEFAULT_CHAIN_DECODE_TIMEOUT_MS, lo=0
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1645,6 +1973,31 @@ _MAX_EXPANSION_FACTOR = 10  # stop if decoded > 10x original size
 # Maximum combined boost from encoding chain analysis
 _MAX_COMBINED_BOOST = 0.20
 
+# MB chained-obfuscation FP gate: the depth/diversity boost is awarded ONLY
+# when the decoded chain actually carries attack CONTENT — i.e. at least one
+# decoded view contains >= _CHAIN_ATTACK_KEYWORD_HITS distinct attack keywords
+# (the same keyword gate that _has_attack_keywords uses for flag emission).
+#
+# WHY (root cause of the MB FP): depth/diversity are purely STRUCTURAL.  A
+# stack of base64-over-base64 of benign prose peels N coherent, printable
+# layers — every intermediate is itself a valid base64 string, so it is
+# flag-bearing (recurse_only=False) and counts toward depth.  The earlier
+# `_is_mostly_printable` filter does NOT exclude it (base64 IS printable),
+# so benign nested base64 earned +0.05/+0.10 and flipped SAFE -> MALICIOUS.
+# Keyword-gating the boost makes it fire on deliberate multi-buff ATTACKS
+# (whose terminus decodes to attack keywords) but never on benign nested
+# encodings (whose terminus is keyword-free prose / config).  Empirically a
+# perfect discriminator: all 6 MB attack chains have >=1 keyword-bearing
+# view; all benign nested encodings have 0.  This is recurse-only-loosening:
+# it removes boost from benign inputs, never adds it.
+#
+# THRESHOLD JUSTIFICATION (flagged, not hardcode-and-forget): 2 distinct
+# hits mirrors _MIN_ATTACK_KEYWORD_HITS — a single common word ("show",
+# "prompt") is insufficient signal; >=2 distinct keywords is the same bar
+# the decode-and-rescan flag emitter already uses, so the chain boost can
+# never be MORE permissive than flag emission itself.
+_CHAIN_ATTACK_KEYWORD_HITS = _MIN_ATTACK_KEYWORD_HITS
+
 
 def _analyze_encoding_chain(
     decoded_chain: list,
@@ -1656,6 +2009,9 @@ def _analyze_encoding_chain(
     ----------
     decoded_chain : list[DecodedView]
         The full decoded chain metadata from recursive obfuscation scanning.
+        Pass the FULL chain (including recurse_only intermediates) so the
+        attack-content gate can see attack keywords that surface only at a
+        recurse-only ROT13/reverse intermediate.
     evasion_flags : list[str]
         The evasion flags detected during scanning.
 
@@ -1666,15 +2022,60 @@ def _analyze_encoding_chain(
         diversity.
     reasons : list[str]
         Human-readable list of which chain signals contributed.
+
+    FP guard 1 (MB chained-obfuscation, ATTACK-CONTENT gate): the boost is
+    awarded ONLY when at least one decoded view carries actual attack content
+    (>= _CHAIN_ATTACK_KEYWORD_HITS distinct attack keywords).  Structural
+    depth/diversity alone — the hallmark of a benign nested encoding such as
+    base64(base64(prose)) — earns NO boost.  This is the keyword gate that
+    keeps benign multi-layer base64 SAFE (the most common benign nested case,
+    which raises decode-type flags like base64/entire_input_base64 and so was
+    NOT protected by the obs_flags gate downstream).
+
+    FP guard 2: only COHERENT decode views (mostly printable, not binary
+    garbage) count toward depth/diversity.  Benign plaintext that is
+    coincidentally valid base64 decodes to binary noise, on which Caesar/ROT13
+    then "fire" — that is NOT a deliberate multi-buff chain and must earn no
+    boost.  Without this filter the wired boost flipped benign creative-writing
+    prompts (test_hacker_ai_dialogue).
     """
     if not decoded_chain:
+        return 0.0, []
+
+    # FP guard 1 — ATTACK-CONTENT gate (root-cause fix for the benign nested
+    # base64 false positive).  No decoded view carries attack keywords ->
+    # this is structural-only nesting (benign), award nothing.  Scanned over
+    # the FULL chain so attack content surfacing at a recurse_only ROT13/
+    # reverse intermediate still counts.
+    has_attack_content = any(
+        hasattr(dv, "text")
+        and _has_attack_keywords(dv.text, min_hits=_CHAIN_ATTACK_KEYWORD_HITS)
+        for dv in decoded_chain
+    )
+    if not has_attack_content:
+        return 0.0, []
+
+    # FP guard 2 — keep only coherent (mostly-printable) decode views; discard
+    # binary noise produced by coincidental decodes of plaintext.  Depth and
+    # diversity count only FLAG-BEARING views (recurse_only=False): recurse-only
+    # intermediates are redundant re-derivations (e.g. full/word-reverse +
+    # ROT13 round-trips) that would otherwise inflate depth (the observed
+    # depth_7 over-count).  The keyword gate above already consumed the full
+    # chain, so excluding recurse_only here does not drop attack content.
+    coherent = [
+        dv for dv in decoded_chain
+        if hasattr(dv, "text")
+        and not getattr(dv, "recurse_only", False)
+        and _is_mostly_printable(dv.text)
+    ]
+    if not coherent:
         return 0.0, []
 
     boost = 0.0
     reasons: list = []
 
-    # 1. Chain depth: how many decode layers were peeled?
-    depth = len(decoded_chain)
+    # 1. Chain depth: how many COHERENT decode layers were peeled?
+    depth = len(coherent)
     if depth >= 3:
         boost += 0.10
         reasons.append("encoding_chain_depth_{0}".format(depth))
@@ -1682,9 +2083,10 @@ def _analyze_encoding_chain(
         boost += 0.05
         reasons.append("encoding_chain_depth_{0}".format(depth))
 
-    # 2. Encoding diversity: how many different encoder types used?
+    # 2. Encoding diversity: how many different encoder types (over coherent
+    #    views) were used?
     encoding_types = set()
-    for dv in decoded_chain:
+    for dv in coherent:
         if hasattr(dv, 'encoding_type'):
             # Normalize encoding type: "caesar_shift_7" -> "caesar"
             encoding_types.add(dv.encoding_type.split('_')[0])
@@ -1764,17 +2166,45 @@ def obfuscation_scan(text, max_decodes=DEFAULT_MAX_DECODES, max_depth=_DEFAULT_M
     seen_hashes = set()
     total_decodes = [0]       # mutable counter for recursion
     max_depth_seen = [0]      # mutable tracker for deepest decode level
-    max_total = max(int(max_decodes), _DEFAULT_MAX_TOTAL_DECODES)
+    # Total-decode budget: union of the legacy hint, the historic floor, and
+    # the env-overridable chain-decode cap.  The loosened recurse-only path
+    # fans out further than the keyword-gated path, so we honor the larger
+    # MAX_CHAIN_DECODES ceiling while never shrinking the legacy budget.
+    max_total = max(
+        int(max_decodes), _DEFAULT_MAX_TOTAL_DECODES, MAX_CHAIN_DECODES
+    )
     original_len = max(len(text), 1)
+
+    # Wall-clock deadline (0 = disabled).  Bounds individually-expensive
+    # inputs that stay under the decode count.  Checked at each recursion
+    # entry; on expiry the recursion stops descending and returns partial.
+    _deadline = (
+        time.monotonic() + CHAIN_DECODE_TIMEOUT_MS / 1000.0
+        if CHAIN_DECODE_TIMEOUT_MS > 0
+        else None
+    )
 
     def _content_hash(content):
         return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
 
-    def _recurse(current_text, depth, parent_idx=-1):
-        """Recursively scan and unwrap one level of encoding."""
+    def _recurse(current_text, depth, parent_idx=-1, in_recurse_only=False):
+        """Recursively scan and unwrap one level of encoding.
+
+        ``in_recurse_only`` is True once the recursion has descended through a
+        keyword-free recurse-only peel.  While inside such a branch, HEURISTIC
+        single-layer flags (high_entropy, weird_casing, punctuation_flood,
+        invisible_chars) are SUPPRESSED — they are noise on a cipher/encoding
+        intermediate (e.g. the ROT13 view of a plausible-English message is
+        high-entropy gibberish) and surfacing them was a false-positive
+        source.  Decode-type flags (base64/rot13/...) that come WITH a
+        keyword-gated decoded_pair still propagate, so a real inner attack
+        reached through a recurse-only outer layer is still flagged.
+        """
         if depth <= 0:
             return
         if total_decodes[0] >= max_total:
+            return
+        if _deadline is not None and time.monotonic() >= _deadline:
             return
 
         # Cycle detection
@@ -1784,55 +2214,87 @@ def obfuscation_scan(text, max_decodes=DEFAULT_MAX_DECODES, max_depth=_DEFAULT_M
         seen_hashes.add(text_hash)
 
         # Scan this layer
-        layer_flags, decoded_pairs = _scan_single_layer(current_text)
+        layer_flags, decoded_pairs, recurse_only_pairs = _scan_single_layer(
+            current_text
+        )
 
-        # Deduplicate flags — only add flags not already present
+        # Deduplicate flags — only add flags not already present.  Inside a
+        # recurse-only branch, drop heuristic noise flags (see docstring).
         for flag in layer_flags:
+            if in_recurse_only and flag in _RECURSE_ONLY_SUPPRESSED_FLAGS:
+                continue
             if flag not in all_flags:
                 all_flags.append(flag)
 
-        # Recurse into each decoded view
-        for decoded_text, enc_type in decoded_pairs:
-            if total_decodes[0] >= max_total:
-                break
+        def _emit(decoded_text, enc_type, recurse_only):
+            """Record one decoded view and recurse into it.
 
+            recurse_only views are tracked (for provenance + cycle-detect)
+            and recursed INTO so deeper layers peel, but flagged so that
+            obfuscation_scan excludes them from ``decoded_views`` — they are
+            never surfaced to the downstream ML/rule classifier.
+            """
+            if total_decodes[0] >= max_total:
+                return
+            if _deadline is not None and time.monotonic() >= _deadline:
+                return
             # Expansion limit: reject if decoded is absurdly larger
             if len(decoded_text) > original_len * _MAX_EXPANSION_FACTOR:
-                continue
-
+                return
             # Skip empty or trivially short decodes
             if len(decoded_text.strip()) < MIN_DECODED_STRIP_LENGTH:
-                continue
+                return
 
             # Compute actual depth: max_depth counts down, so actual
-            # depth = max_depth - depth + 1 (1-indexed counting of
-            # decode layers).  We store 0-indexed in DecodedView.depth
-            # so depth 0 means "first decode from original text".
+            # depth = max_depth - depth + 1 (1-indexed counting of decode
+            # layers).  Stored 0-indexed in DecodedView.depth.
             actual_depth = max_depth - depth + 1
             if actual_depth > max_depth_seen[0]:
                 max_depth_seen[0] = actual_depth
 
-            # Create chain-tracked DecodedView
             dv = DecodedView(
                 text=decoded_text,
                 encoding_type=enc_type,
                 depth=actual_depth - 1,  # 0-indexed
                 parent_index=parent_idx,
+                recurse_only=recurse_only,
             )
             current_idx = len(all_decoded_chain)
             all_decoded_chain.append(dv)
-
             total_decodes[0] += 1
 
-            # Recurse into the decoded output to peel more layers
-            _recurse(decoded_text, depth - 1, parent_idx=current_idx)
+            # Recurse into the decoded output to peel more layers.  Once a
+            # recurse-only peel is entered, the branch stays recurse-only.
+            _recurse(
+                decoded_text,
+                depth - 1,
+                parent_idx=current_idx,
+                in_recurse_only=in_recurse_only or recurse_only,
+            )
+
+        # Flag-bearing decodes first (these surface to the classifier);
+        # then recurse-only peels (kept internal to the unwrap).
+        for decoded_text, enc_type in decoded_pairs:
+            if total_decodes[0] >= max_total:
+                break
+            _emit(decoded_text, enc_type, recurse_only=False)
+        for decoded_text, enc_type in recurse_only_pairs:
+            if total_decodes[0] >= max_total:
+                break
+            _emit(decoded_text, enc_type, recurse_only=True)
 
     _recurse(text, max_depth)
 
     encoding_chains = _build_encoding_chains(all_decoded_chain)
 
-    # Track D: Combined obfuscation scoring -- analyze encoding chain
-    # depth and diversity for an additive boost signal.
+    # Track D: Combined obfuscation scoring -- analyze encoding chain depth
+    # and diversity for an additive boost signal.  The FULL chain is passed so
+    # the attack-CONTENT gate in _analyze_encoding_chain can see attack
+    # keywords that surface only at a recurse_only ROT13/reverse intermediate;
+    # depth/diversity are still counted over flag-bearing views only.  A benign
+    # nested encoding (base64 of prose) carries no attack keywords anywhere in
+    # the chain, so it earns ZERO boost — this is the root-cause FP fix for the
+    # benign-multi-layer-base64 false positive.
     combined_boost, combined_reasons = _analyze_encoding_chain(
         all_decoded_chain, all_flags,
     )
@@ -1840,7 +2302,13 @@ def obfuscation_scan(text, max_decodes=DEFAULT_MAX_DECODES, max_depth=_DEFAULT_M
     return {
         # --- Existing keys (backward compatible) ---
         "obfuscation_score": len(all_flags),
-        "decoded_views": [dv.text for dv in all_decoded_chain],
+        # decoded_views surfaces ONLY flag-bearing decodes to the downstream
+        # ML/rule classifier.  recurse_only peels (keyword-free MB-chain
+        # intermediates) are excluded — surfacing them flooded the classifier
+        # and flipped benign nested encodings (historic FP lesson).
+        "decoded_views": [
+            dv.text for dv in all_decoded_chain if not dv.recurse_only
+        ],
         "evasion_flags": all_flags,
         # --- New keys ---
         "decoded_chain": all_decoded_chain,

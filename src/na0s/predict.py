@@ -1015,6 +1015,16 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     obs = obfuscation_scan(clean)
     obs_flags = obs["evasion_flags"] if obs["evasion_flags"] else []
 
+    # Multi-buff chained-obfuscation boost (previously computed-then-discarded,
+    # same class as the historic dead rag_poison_weight).  A stack of >=2
+    # encodings (chain depth/diversity) is a strong deliberate-evasion signal.
+    # Additive + capped at 0.20 (in _analyze_encoding_chain); applied AFTER
+    # the weighted decision so it mirrors the existing _l2_extra_boost path.
+    # It is computed ONLY over flag-bearing decoded views, so a benign nested
+    # encoding (base64 of prose) earns no boost.
+    _chain_boost = float(obs.get("combined_boost", 0.0) or 0.0)
+    _chain_reasons = obs.get("combined_reasons", []) or []
+
     # Bridge L0 invisible-char detection into L2 evasion flags.
     # L0 strips invisible chars BEFORE L2 runs, so L2's own invisible_chars
     # detector won't fire on already-cleaned text.  We bridge the L0 flag
@@ -1589,6 +1599,24 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     # ML-uncertain-zone cap or override protection logic inside that function.
     if _l2_extra_boost > 0:
         composite = min(composite + _l2_extra_boost, 1.0)
+
+    # --- Multi-buff chained-obfuscation boost (Track D, capped 0.20) ---
+    # Only compounds when a REAL evasion/attack signal already fired (obs_flags
+    # non-empty): the boost reflects deliberate multi-layer stacking, not the
+    # mere presence of a nested encoding.  This keeps benign nested encodings
+    # (base64 of a JSON config / prose), which raise no flag, from being
+    # pushed over threshold by the boost alone.  FP-validated against the
+    # benign-nested-encoding corpus (0% FP at the measured baseline).
+    if _chain_boost > 0 and obs_flags:
+        composite = min(composite + _chain_boost, 1.0)
+        # Surface the chain reasons (depth/diversity) in hits for auditability,
+        # consuming the previously-discarded combined_reasons.
+        for _cr in _chain_reasons:
+            if _cr not in hit_names_seen:
+                hits.append(_cr)
+                hit_names_seen.add(_cr)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
 
     # --- Layer 4: Perplexity-based adversarial signal ---
     # Compute pseudo-perplexity on sanitized text.  If the text looks

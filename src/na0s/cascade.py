@@ -624,6 +624,13 @@ class WeightedClassifier:
         # --- Obfuscation flags ---
         obs = obfuscation_scan(text)
         obfuscation_flags = obs.get("evasion_flags", [])
+        # Multi-buff chained-obfuscation boost — parity with scan()/predict.py.
+        # Computed-then-discarded historically (same class as the dead
+        # rag_poison_weight); wired here so a stacked-encoding chain
+        # contributes its (additive, capped 0.20) boost.  Applied to composite
+        # AFTER voting, gated on real evasion flags so benign nested
+        # encodings earn no boost.
+        _chain_boost = float(obs.get("combined_boost", 0.0) or 0.0)
         # BUG-L2-03 FIX: Do NOT extend hit_names with obs_flags before
         # calling _voting.  obs_flags are scored separately as obf_weight;
         # adding them to hits would double-count them as medium-severity rules.
@@ -679,6 +686,14 @@ class WeightedClassifier:
                 extra_severities=None,
                 hit_weights=hit_weights,
             )
+
+        # --- Multi-buff chained-obfuscation boost (Track D, capped 0.20) ---
+        # Parity with predict.py: only compounds when a real evasion flag
+        # already fired, so benign nested encodings get no boost.
+        if _chain_boost > 0 and obfuscation_flags:
+            composite = min(composite + _chain_boost, 1.0)
+            if composite >= self.threshold and label == "SAFE":
+                label = "MALICIOUS"
 
         # --- N5: PromptGuard transformer classifier signal ---
         # When enabled, blend the mDeBERTa signal with weight 0.35.
