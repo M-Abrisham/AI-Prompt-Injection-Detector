@@ -72,18 +72,35 @@ HF_QUERIES = [
     "prompt security",
     "guardrail bypass",
     "LLM safety",
+    # Adversarial-ML / automated-jailbreak families (category A / INJ-0023, D7.5).
+    # Discovery targets only — the harvester acquires these PUBLIC datasets so a
+    # data/CI environment can retrain the ML classifier on category-A coverage.
+    "GCG adversarial suffix",
+    "AdvBench harmful behaviors",
+    "AutoDAN jailbreak",
+    "HarmBench",
+    "PAIR jailbreak",
+    "TAP tree of attacks",
 ]
 
 ARXIV_QUERIES = [
     "all:prompt+injection+LLM",
     "all:jailbreak+large+language+model",
     "all:adversarial+prompt+attack",
+    # Category-A source papers (for provenance + linked dataset discovery).
+    "all:GCG+adversarial+suffix+aligned+language+model",
+    "all:AutoDAN+jailbreak",
+    "all:HarmBench+red+teaming",
 ]
 
 GITHUB_QUERIES = [
     "prompt+injection+dataset",
     "jailbreak+LLM+dataset",
     "adversarial+prompt+dataset",
+    # Canonical category-A attack-corpus repos (dataset acquisition).
+    "llm-attacks+GCG",
+    "AdvBench+harmful+behaviors",
+    "HarmBench+behaviors",
 ]
 
 # Dataset IDs already used in Na0S (pre-populated for known_datasets.txt)
@@ -100,6 +117,10 @@ SEED_KNOWN_DATASETS = [
     "reshabhs/SPML_Chatbot_Prompt_Injection",
     "ethz-spylab/ctf-satml24",
     "OpenAssistant/oasst1",
+    # Category-A (adversarial-ML / GCG) public corpora — known dataset IDs so
+    # the harvester pulls them for the deferred category-A retrain (INJ-0023).
+    "walledai/AdvBench",
+    "walledai/HarmBench",
 ]
 
 DEFAULT_OUTPUT_DIR = "data/harvest"
