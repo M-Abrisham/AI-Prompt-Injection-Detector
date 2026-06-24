@@ -34,7 +34,19 @@ _TECHNIQUE_MAP: Dict[str, str] = {
     "compliance_echo": "D1",
     "system_prompt_leak": "E1.2",
     "encoded_data": "D4",
-    "pii": "P1",
+    "pii": "P1.2",   # PII-extraction leaf; bare "P1" is NOT a valid taxonomy code
+}
+
+# Output-injection technique codes (O2.x).  Emitted by the markdown/HTML,
+# exfiltration-URL, and egress checks so OutputScanResult.technique_ids
+# carries an O2 code when an output-side injection fires.  Previously those
+# checks set flags + score but never a technique_id, leaving any consumer
+# that keys on codes (eval harness, coverage matrix) blind to every
+# output-injection detection.
+_O2_TECHNIQUE_MAP: Dict[str, str] = {
+    "markdown": "O2.1",   # Markdown-injection (image beacon, hidden HTML comment)
+    "link": "O2.2",       # Link-injection (javascript: link, exfil / egress URL)
+    "code": "O2.6",       # Code-injection-output (script / iframe / event-handler)
 }
 
 # ---------------------------------------------------------------------------
@@ -419,10 +431,8 @@ class OutputScanner:
             if echo_flags:
                 technique_ids.append(_TECHNIQUE_MAP["compliance_echo"])
 
-        # 3. Secret patterns -- produces initial redacted text
-        secret_score, secret_flags, redacted = self._check_secret_patterns(
-            output_text
-        )
+        # 3. Secret patterns
+        secret_score, secret_flags, _ = self._check_secret_patterns(output_text)
         raw_score += secret_score * weight
         flags.extend(secret_flags)
         if secret_flags:
@@ -443,63 +453,51 @@ class OutputScanner:
             technique_ids.append(_TECHNIQUE_MAP["encoded_data"])
 
         # 6. PII detection (medium / high sensitivity only)
-        if self.sensitivity in ("medium", "high"):
-            pii_score, pii_flags, redacted = self._check_pii(redacted)
+        include_pii = self.sensitivity in ("medium", "high")
+        if include_pii:
+            pii_score, pii_flags, _ = self._check_pii(output_text)
             raw_score += pii_score * weight
             flags.extend(pii_flags)
             if pii_flags:
                 technique_ids.append(_TECHNIQUE_MAP["pii"])
 
         # 7. Markdown / HTML injection detection
-        md_score, md_flags = self._check_markdown_injection(output_text)
+        md_score, md_flags, _, md_tids = self._check_markdown_injection(output_text)
         raw_score += md_score * weight
         flags.extend(md_flags)
+        technique_ids.extend(md_tids)
 
         # 8. Data exfiltration URL detection
-        exf_score, exf_flags = self._check_exfiltration_urls(output_text)
+        exf_score, exf_flags, _ = self._check_exfiltration_urls(output_text)
         raw_score += exf_score * weight
         flags.extend(exf_flags)
+        if exf_flags:
+            technique_ids.append(_O2_TECHNIQUE_MAP["link"])  # O2.2 Link-injection
 
         # 9. Egress pattern detection (raw IP URLs, email exfil, data-in-URL, DNS exfil)
-        egr_score, egr_flags = self._check_egress_patterns(output_text)
+        egr_score, egr_flags, _ = self._check_egress_patterns(output_text)
         raw_score += egr_score * weight
         flags.extend(egr_flags)
+        if egr_flags:
+            technique_ids.append(_O2_TECHNIQUE_MAP["link"])  # O2.2 Link-injection
 
         # 10. Structured-output injection (O2.3 JSON role / O2.4 SQL)
         struct_score, struct_flags = self._check_structured_injection(output_text)
         raw_score += struct_score * weight
         flags.extend(struct_flags)
 
-        # BUG-L9-2 fix: comprehensive redaction pass.
-        if role_flags:
-            for pat in _ROLE_BREAK_PATTERNS:
-                redacted = pat.sub("[REDACTED]", redacted)
-        if leak_flags:
-            for lflag in leak_flags:
-                if "matched '" in lflag:
-                    fragment = lflag.split("matched '", 1)[1].rstrip("'")
-                    if fragment:
-                        redacted = re.sub(
-                            re.escape(fragment), "[REDACTED]", redacted,
-                            flags=re.IGNORECASE,
-                        )
-
-        # BUG-L9-2 fix: comprehensive redaction pass.
-        # _check_secret_patterns() already handled secrets in `redacted`.
-        # Now also redact role-break phrases and system prompt leak fragments.
-        if role_flags:
-            for pat in _ROLE_BREAK_PATTERNS:
-                redacted = pat.sub("[REDACTED]", redacted)
-        if leak_flags:
-            for flag in leak_flags:
-                # Flag format: "System prompt leak: matched 'the trigram text'"
-                if "matched '" in flag:
-                    fragment = flag.split("matched '", 1)[1].rstrip("'")
-                    if fragment:
-                        redacted = re.sub(
-                            re.escape(fragment), "[REDACTED]", redacted,
-                            flags=re.IGNORECASE,
-                        )
+        # Single-pass redaction over the ORIGINAL output.  Every sensitive
+        # family -- secrets, PII, role-break phrases, leaked system-prompt
+        # fragments, markdown/HTML beacons, exfiltration and egress URLs -- is
+        # collected as character spans and merged before substitution.  This
+        # closes the redact-exfil gap (a beacon/exfil URL previously only set a
+        # flag and leaked through `redacted_text` verbatim) and dissolves the
+        # old double-redaction pass: a secret nested inside an exfil URL now
+        # collapses to a SINGLE [REDACTED] instead of the host surviving past an
+        # inner secret redaction.
+        redacted = self._redact_output(
+            output_text, leak_flags=leak_flags, include_pii=include_pii
+        )
 
         risk_score = min(1.0, raw_score)
         threshold = self._THRESHOLD[self.sensitivity]
@@ -533,6 +531,90 @@ class OutputScanner:
         for pat in patterns:
             result = pat.sub("[REDACTED]", result)
         return result
+
+    # ---- internal: unified redaction --------------------------------------
+
+    def _redact_output(
+        self,
+        text: str,
+        leak_flags: Optional[List[str]] = None,
+        include_pii: bool = True,
+    ) -> str:
+        """Redact every sensitive family from *text* in a single merged pass.
+
+        Spans are collected against the ORIGINAL *text* (so offsets stay
+        valid), merged, then replaced left-to-right with ``[REDACTED]``.
+        Collecting on the original avoids the ordering bug where an inner
+        secret redaction mutates a URL and lets the surrounding exfil host
+        leak through; merging avoids emitting nested/adjacent markers.
+        """
+        spans: List[tuple] = []
+
+        # Secrets
+        for pat in _SECRET_PATTERNS:
+            spans.extend(m.span() for m in pat.finditer(text))
+
+        # PII (medium / high sensitivity only)
+        if include_pii:
+            for pat in _PII_PATTERNS.values():
+                spans.extend(m.span() for m in pat.finditer(text))
+
+        # Markdown / HTML static injection (script / iframe / event-handler / md-js)
+        for pat in _MARKDOWN_INJECTION_PATTERNS:
+            spans.extend(m.span() for m in pat.finditer(text))
+
+        # Image beacons -- redact only the URL span, and only for beacon shapes
+        for img_pat in (_MARKDOWN_IMAGE, _HTML_IMAGE):
+            for m in img_pat.finditer(text):
+                if self._is_image_beacon(m.group(1)):
+                    spans.append(m.span(1))
+
+        # javascript: href/src + hidden AI-directed HTML comments
+        spans.extend(m.span() for m in _JAVASCRIPT_HREF.finditer(text))
+        spans.extend(m.span() for m in _HIDDEN_AI_COMMENT.finditer(text))
+
+        # Exfiltration + egress URLs
+        for pat in _EXFILTRATION_URL_PATTERNS:
+            spans.extend(m.span() for m in pat.finditer(text))
+        for pat in _EGRESS_PATTERNS.values():
+            spans.extend(m.span() for m in pat.finditer(text))
+
+        # Role-break phrases
+        for pat in _ROLE_BREAK_PATTERNS:
+            spans.extend(m.span() for m in pat.finditer(text))
+
+        # Leaked system-prompt fragments (only the n-gram-match flags carry one)
+        for lflag in leak_flags or []:
+            if "matched '" in lflag:
+                fragment = lflag.split("matched '", 1)[1].rstrip("'")
+                if fragment:
+                    spans.extend(
+                        m.span()
+                        for m in re.finditer(re.escape(fragment), text, re.IGNORECASE)
+                    )
+
+        return self._apply_spans(text, spans)
+
+    @staticmethod
+    def _apply_spans(text: str, spans: List[tuple]) -> str:
+        """Replace each merged ``(start, end)`` span in *text* with ``[REDACTED]``."""
+        spans = sorted(s for s in spans if s[0] < s[1])
+        if not spans:
+            return text
+        merged: List[tuple] = []
+        for start, end in spans:
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        out: List[str] = []
+        prev = 0
+        for start, end in merged:
+            out.append(text[prev:start])
+            out.append("[REDACTED]")
+            prev = end
+        out.append(text[prev:])
+        return "".join(out)
 
     # ---- Feature: cross-reference scan ------------------------------------
 
@@ -826,6 +908,8 @@ class OutputScanner:
         host is still independently caught by ``_check_exfiltration_urls``.
         """
         flags: List[str] = []
+        redactions: List[str] = []
+        technique_ids: List[str] = []
         score = 0.0
 
         # Static injection patterns (script/iframe/event-handler/md-js-link)
@@ -834,6 +918,13 @@ class OutputScanner:
             if match:
                 flags.append(f"Markdown/HTML injection: '{match.group()[:50]}'")
                 score = max(score, 0.5)
+                redactions.append(match.group())
+                # The markdown javascript: link (index 0) is a Link-injection
+                # (O2.2); iframe/script/event-handler are Code-injection (O2.6).
+                if pat is _MARKDOWN_INJECTION_PATTERNS[0]:
+                    technique_ids.append(_O2_TECHNIQUE_MAP["link"])
+                else:
+                    technique_ids.append(_O2_TECHNIQUE_MAP["code"])
 
         # Image beacons -- markdown and bare HTML -- with host allowlist
         for img_pat in (_MARKDOWN_IMAGE, _HTML_IMAGE):
@@ -841,19 +932,26 @@ class OutputScanner:
                 if self._is_image_beacon(url):
                     flags.append(f"Markdown/HTML injection: '{url[:50]}'")
                     score = max(score, 0.5)
+                    redactions.append(url)
+                    technique_ids.append(_O2_TECHNIQUE_MAP["markdown"])
 
         # javascript: in any href/src attribute (HTML form)
-        if _JAVASCRIPT_HREF.search(text):
+        jm = _JAVASCRIPT_HREF.search(text)
+        if jm:
             flags.append("Markdown/HTML injection: 'javascript: in href/src'")
             score = max(score, 0.5)
+            redactions.append(jm.group())
+            technique_ids.append(_O2_TECHNIQUE_MAP["link"])
 
         # Hidden AI-directed instruction in an HTML comment
         m = _HIDDEN_AI_COMMENT.search(text)
         if m:
             flags.append(f"Hidden instruction in HTML comment: '{m.group()[:50]}'")
             score = max(score, 0.5)
+            redactions.append(m.group())
+            technique_ids.append(_O2_TECHNIQUE_MAP["markdown"])
 
-        return (score, flags)
+        return (score, flags, redactions, technique_ids)
 
     @staticmethod
     def _is_image_beacon(url: str) -> bool:
@@ -901,21 +999,36 @@ class OutputScanner:
         return (score, flags)
 
     def _check_exfiltration_urls(self, text: str) -> tuple:
-        """Detect data exfiltration URL patterns in output."""
+        """Detect data exfiltration URL patterns in output.
+
+        Returns ``(score, flags, redactions)`` -- *redactions* is the list of
+        matched URL spans so the caller can strip the exfil vector from
+        ``redacted_text`` (previously these matches only set a flag, so the
+        beacon URL leaked through verbatim in the redacted output).
+        """
         flags: List[str] = []
+        redactions: List[str] = []
         score = 0.0
 
         for pat in _EXFILTRATION_URL_PATTERNS:
-            match = pat.search(text)
-            if match:
-                flags.append(f"Data exfiltration URL: '{match.group()[:60]}'")
-                score = max(score, 0.7)
+            matched = False
+            for match in pat.finditer(text):
+                redactions.append(match.group())
+                if not matched:
+                    flags.append(f"Data exfiltration URL: '{match.group()[:60]}'")
+                    score = max(score, 0.7)
+                    matched = True
 
-        return (score, flags)
+        return (score, flags, redactions)
 
     def _check_egress_patterns(self, text: str) -> tuple:
-        """Detect egress patterns: raw IP URLs, email exfil, data-in-URL, DNS exfil."""
+        """Detect egress patterns: raw IP URLs, email exfil, data-in-URL, DNS exfil.
+
+        Returns ``(score, flags, redactions)`` -- *redactions* lists the matched
+        egress spans so the caller can strip them from ``redacted_text``.
+        """
         flags: List[str] = []
+        redactions: List[str] = []
         score = 0.0
 
         _SEVERITY: Dict[str, float] = {
@@ -926,12 +1039,15 @@ class OutputScanner:
         }
 
         for label, pat in _EGRESS_PATTERNS.items():
-            match = pat.search(text)
-            if match:
-                flags.append(f"Egress pattern ({label}): '{match.group()[:60]}'")
-                score = max(score, _SEVERITY.get(label, 0.5))
+            matched = False
+            for match in pat.finditer(text):
+                redactions.append(match.group())
+                if not matched:
+                    flags.append(f"Egress pattern ({label}): '{match.group()[:60]}'")
+                    score = max(score, _SEVERITY.get(label, 0.5))
+                    matched = True
 
-        return (score, flags)
+        return (score, flags, redactions)
 
     # ---- helpers ----------------------------------------------------------
 
