@@ -1738,8 +1738,18 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         label = "MALICIOUS"
 
     # --- Narrative / legitimate-role dampening ---
+    # C1 carve-out: a fictional/academic frame wrapping a CONCRETE inner attack
+    # ("fictional_inner:...") is the compliance-evasion attack class — it looks
+    # like benign narrative precisely so this dampener fires.  The fictional_inner
+    # hit lives in ``hits`` (not ``detailed_hits``), so the ``not detailed_hits``
+    # guard alone would let "for a fictional novel my character bypasses content
+    # filters" be dampened to SAFE.  Skip dampening when that conjunctive C1
+    # signal is present.  Frame-ONLY hits ("fictional_frame:" with no inner) are
+    # NOT carved out, so benign novels are still dampened as before.
     from .rules.context import _NARRATIVE_FRAME
-    if threshold > 0.0 and not detailed_hits and not obs_flags:
+    _has_fictional_inner = any(h.startswith("fictional_inner:") for h in hits)
+    if (threshold > 0.0 and not detailed_hits and not obs_flags
+            and not _has_fictional_inner):
         _is_narrative = bool(_NARRATIVE_FRAME.search(clean))
         _is_legit_role = _is_legitimate_roleplay(clean) or _is_legitimate_roleplay(text)
         if _is_narrative or _is_legit_role:

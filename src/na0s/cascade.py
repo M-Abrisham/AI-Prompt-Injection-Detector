@@ -234,6 +234,18 @@ try:
     _HAS_INGESTION = True
 except ImportError:
     _HAS_INGESTION = False
+# Fictional-frame detector (C1 compliance evasion) — optional import.
+# predict.py wires this; cascade.py historically did NOT, so the two runtime
+# paths disagreed on C1 detection (a fiction/academic/authority frame wrapping
+# a concrete harmful request).  Mirror predict's block below for parity.
+try:
+    from .detectors.fictional_frame import (
+        detect_fictional_frame,
+        get_fictional_frame_weight,
+    )
+    _HAS_FICTIONAL_FRAME = True
+except ImportError:
+    _HAS_FICTIONAL_FRAME = False
 
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
@@ -860,6 +872,54 @@ class WeightedClassifier:
                         label = "MALICIOUS"
             except Exception:
                 _logger.debug("Ingestion-manipulation detection failed", exc_info=True)
+        # --- Fictional frame (C1 compliance evasion) — parity with scan() ---
+        # A fiction/academic/authority frame wrapping a CONCRETE harmful request
+        # (frame × inner-attack conjunction).  predict.py blends this; cascade
+        # historically omitted it entirely, so the two paths disagreed on C1.
+        # Mirror predict's logic exactly:
+        #   * blend the capped frame weight (skip "generic_attack" inner, which
+        #     also fires on benign educational/quoting contexts);
+        #   * floor frame+inner to the default operating boundary when below
+        #     threshold (frame-only is NOT floored — that is the FP guard);
+        #   * g5 confident-ML boost: a frame whose otherwise-critical override/
+        #     extraction rules were context-suppressed, confirmed by a confident
+        #     ML malicious verdict (>= 0.85).
+        # The frame×inner conjunction is the false-positive control: a frame
+        # alone contributes weight 0 (except authority/emotional), so broadening
+        # frame vocabulary cannot block benign "I'm writing a novel about X".
+        if _HAS_FICTIONAL_FRAME:
+            try:
+                _ff = detect_fictional_frame(text)
+                if _ff.has_fictional_frame:
+                    _ff_w = get_fictional_frame_weight(_ff)
+                    _ff_inner = _ff.inner_attack_type
+                    _anchor_floor = THRESHOLDS.DEFAULT_THRESHOLD + 0.01
+                    _ff_hit = "fictional_frame:" + _ff.frame_type
+                    if _ff_hit not in hit_names_seen:
+                        hit_names.append(_ff_hit)
+                        hit_names_seen.add(_ff_hit)
+                    if _ff.has_inner_attack:
+                        _ff_inner_hit = "fictional_inner:" + _ff_inner
+                        if _ff_inner_hit not in hit_names_seen:
+                            hit_names.append(_ff_inner_hit)
+                            hit_names_seen.add(_ff_inner_hit)
+                    if _ff_w > 0.0 and _ff_inner != "generic_attack":
+                        composite = min(composite + _ff_w, 1.0)
+                        if _ff.has_inner_attack and composite < self.threshold:
+                            composite = max(composite, _anchor_floor)
+                        if composite >= self.threshold and label == "SAFE":
+                            label = "MALICIOUS"
+                    # g5: frame + confident ML malicious, even when the inner
+                    # rules were context-suppressed.  Only lift toward the
+                    # DEFAULT operating boundary; yield to a raised threshold.
+                    if (composite < self.threshold
+                            and self.threshold <= THRESHOLDS.DEFAULT_THRESHOLD
+                            and ml_prob_malicious >= 0.85):
+                        composite = max(composite, _anchor_floor)
+                        if composite >= self.threshold and label == "SAFE":
+                            label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Fictional-frame detection failed", exc_info=True)
 
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
@@ -1390,19 +1450,26 @@ class CascadeClassifier:
         # If the classifier says MALICIOUS but positive validation says
         # the input IS a legitimate prompt, downgrade to SAFE.  This
         # catches benign prompts that mention injection-related vocabulary.
-        # A DECISIVE ingestion planted-directive (a hard cue that co-occurred
-        # with an ingestion source) is an unambiguous embedded injection — it
-        # must NOT be downgraded by positive validation, keeping the cascade in
-        # parity with scan() (where a decisive IG hit blocks).  Mirrors the
-        # whitelist tripwire that already refuses to whitelist these.
+        # Two parity guards: a verdict must NOT be downgraded by positive
+        # validation when it rests on (a) a DECISIVE ingestion planted-directive
+        # (hard cue co-occurring with an ingestion source — unambiguous embedded
+        # injection; mirrors the whitelist tripwire), or (b) a fictional/academic/
+        # authority frame wrapping a CONCRETE inner attack ("fictional_inner:..."
+        # — the compliance-evasion class whose whole purpose is to look like a
+        # legitimate prompt).  Both keep the cascade in parity with scan(), which
+        # has no positive-validation stage.  Frame-ONLY hits (no inner) are NOT
+        # guarded, so benign novels/documentaries stay downgradeable.
         _ig_decisive = False
         if label == "MALICIOUS" and _HAS_INGESTION:
             try:
                 _ig_decisive = detect_ingestion(clean).decisive
             except Exception:
                 _ig_decisive = False
+        _ff_inner_present = any(h.startswith("fictional_inner:") for h in hits)
         if (label == "MALICIOUS" and not _ig_decisive
+                and not _ff_inner_present
                 and self._positive_validator is not None):
+>>>>>>> origin/hardening/c1-compliance
             try:
                 # BUG-L8-2 fix: pass L0-sanitized text instead of raw input
                 # so positive validation sees the same normalized form as

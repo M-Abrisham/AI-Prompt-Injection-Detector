@@ -77,6 +77,36 @@ def test_jailbreak_keyword_maps_to_d2():
     assert tag_discovery({"relevance_keywords": ["jailbreak"]}) == "D2"
 
 
+def test_c1_compliance_evasion_keywords_map_to_c1_codes():
+    """C1 social-engineering framings tag to canonical C1 / C1.x codes.
+
+    Previously the table only knew "jailbreak" -> D2 (persona), so C1
+    compliance-evasion framing (fiction / academia / emotion / authority) was
+    never auto-tagged.  Each target is a real data/taxonomy.yaml code.
+    """
+    cases = {
+        "compliance evasion": "C1",
+        "social engineering jailbreak": "C1",
+        "fictional framing": "C1.2",
+        "analogical bypass": "C1.2",
+        "academic framing": "C1.3",
+        "emotional manipulation": "C1.4",
+        "authority impersonation": "C1.5",
+        "sycophancy exploitation": "C1.6",
+        "crescendo attack": "C1.1",
+    }
+    v = TaxonomyValidator()
+    for phrase, code in cases.items():
+        assert tag_discovery({"relevance_keywords": [phrase]}) == code, phrase
+        assert v.validate_code(code) is True, code
+
+
+def test_c1_framing_beats_generic_jailbreak():
+    """A C1-framed record tags as C1.2, not the generic D2 (longest wins)."""
+    rec = {"relevance_keywords": ["fictional framing", "jailbreak"]}
+    assert tag_discovery(rec) == "C1.2"
+
+
 def test_rag_poisoning_punctuation_insensitive():
     """RAG-poisoning / RAG poisoning / rag_poisoning all hit the same key."""
     for kw in ("RAG poisoning", "RAG-poisoning", "rag_poisoning"):

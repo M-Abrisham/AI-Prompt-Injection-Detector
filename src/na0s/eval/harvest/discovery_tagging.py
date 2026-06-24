@@ -97,6 +97,31 @@ _KEYWORD_TO_CODE: dict[str, str] = {
     "guardrail bypass": "D2",
     "safety bypass": "D2",
     "dan prompt": "D2",
+    # --- C1 compliance / policy / safety evasion (social-engineering jailbreak) ---
+    # Distinct from D2 persona-hijack: C1 wraps a disallowed request in a
+    # *legitimising frame* (fiction / academia / emotion / authority) so the
+    # surface looks benign.  Bare/ambiguous "jailbreak" stays D2 (above); these
+    # are the specific compliance-evasion framings.  Sub-codes are canonical
+    # (data/taxonomy.yaml C1.1-C1.8) and re-validated at construction time.
+    "compliance evasion": "C1",
+    "policy evasion": "C1",
+    "safety evasion": "C1",
+    "social engineering jailbreak": "C1",
+    "fictional framing": "C1.2",
+    "fictional frame attack": "C1.2",
+    "roleplay jailbreak": "C1.2",
+    "analogical bypass": "C1.2",
+    "coded language attack": "C1.2",
+    "academic framing": "C1.3",
+    "research framing": "C1.3",
+    "educational pretext": "C1.3",
+    "emotional manipulation": "C1.4",
+    "urgency manipulation": "C1.4",
+    "authority impersonation": "C1.5",
+    "credential framing": "C1.5",
+    "sycophancy exploitation": "C1.6",
+    "crescendo attack": "C1.1",
+    "gradual escalation": "C1.1",
     # --- obfuscation / encoding ---
     "prompt obfuscation": "D4",
     "encoding attack": "D4",
