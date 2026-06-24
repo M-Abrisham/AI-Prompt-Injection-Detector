@@ -617,7 +617,14 @@ RULES = [
          r"(?:your\s+|the\s+)?training\s+(?:data|examples?|text|corpus|set|samples?)"
          r"|(?:extract|show|reveal|dump|list|output)\s+"
          r"(?:(?:your|the)\s+)?training\s+(?:data|examples?|text|corpus|set)"
-         r"|membership\s+inference|training\s+data\s+(?:extraction|leakage|poisoning))",
+         # Bare topic phrases ("training data extraction", "membership
+         # inference") are AMBIGUOUS: a directive ("perform/conduct/run training
+         # data extraction") is an attack, but "explain/what is training data
+         # extraction for my security course" is benign education.  Require an
+         # attack-intent verb within a bounded window so the educational/
+         # definitional framing no longer FPs (ReDoS-safe, bounded .{0,20}?).
+         r"|(?:perform|conduct|run|execute|do|attempt|carry\s+out|launch)\b.{0,20}?"
+         r"\b(?:membership\s+inference|training\s+data\s+(?:extraction|leakage|poisoning)))",
          technique_ids=["P1.3"],
          severity="critical",
          paranoia_level=1,
@@ -2111,9 +2118,9 @@ from ..detectors.recon import RECON_RULES as _RECON_RULES  # noqa: E402
 RULES.extend(_RECON_RULES)
 
 # ---------------------------------------------------------------------------
-# Track B: P1 Privacy Leakage rules (from privacy_probe_detector.py)
+# Track B: P1 Privacy Leakage rules (from rules/registry/privacy_probe.py)
 # ---------------------------------------------------------------------------
-from ..detectors.privacy_probe import PRIVACY_RULES as _PRIVACY_RULES  # noqa: E402
+from .registry.privacy_probe import PRIVACY_RULES as _PRIVACY_RULES  # noqa: E402
 RULES.extend(_PRIVACY_RULES)
 
 # ---------------------------------------------------------------------------

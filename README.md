@@ -48,7 +48,7 @@ Optional extras live in [pyproject.toml](pyproject.toml). Once a `pyproject_extr
 ## What it detects
 
 - **Encoding tricks** — base64, hex, ROT13, leetspeak, ASCII art, Unicode invisibles, whitespace stego. <!-- src: src/na0s/layer2/__init__.py:25 -->
-- **Pattern attacks** — instruction overrides, role hijacking, structural boundary injection. **120** regex rules. <!-- src: src/na0s/layer1/rules_registry.py:65; total via facts.yaml#rule_count.total_ast -->
+- **Pattern attacks** — instruction overrides, role hijacking, structural boundary injection. **122** regex rules. <!-- src: src/na0s/layer1/rules_registry.py:65; total via facts.yaml#rule_count.total_ast -->
 - **Semantic attacks** — fictional framing, indirect extraction, RAG poisoning, multilingual obfuscation. <!-- src: src/na0s/detectors/, src/na0s/multilingual_handler.py -->
 - **Multi-turn attacks** — fabricated history, escalation, payload splitting, scheming. **8** detectors over session state. <!-- src: src/na0s/layer16/detectors/; count via facts.yaml#L16_detectors -->
 
