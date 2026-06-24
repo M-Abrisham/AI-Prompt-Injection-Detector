@@ -193,6 +193,21 @@ try:
 except ImportError:
     _HAS_INTER_MODEL = False
 
+# Multimodal hidden-channel boost (M1/M2/M3) — corroborating, FP-safe.
+# Single source of truth for the taxonomy-correct M-flag map + the bounded
+# corroborating boost shared by predict.scan and the cascade.
+try:
+    from .detectors.multimodal import (
+        map_m_flags as _map_m_flags,
+        get_multimodal_boost as _get_multimodal_boost,
+        is_uncorroborated_channel as _is_uncorroborated_channel,
+        has_hidden_channel as _has_hidden_channel,
+        MULTIMODAL_CLEAN_RISK_CEILING as _MM_CLEAN_CEILING,
+    )
+    _HAS_MULTIMODAL = True
+except ImportError:
+    _HAS_MULTIMODAL = False
+
 # In-prose tool-abuse detector (T1.x, GTG-1002 terminal pivot) — optional import
 try:
     from .detectors.tool_abuse import detect_tool_abuse, get_tool_abuse_weight
@@ -2188,31 +2203,34 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         "magic_bytes_html": "I2",
         "html_parse_error": "I2",
         "html_depth_exceeded": "A1",
-        # content_type mismatch (declared vs detected)
-        "content_type_mismatch": "M1.4",
+        # content_type mismatch (declared vs detected) — type-smuggling
+        # obfuscation (D4.1), NOT a document/image code.
+        "content_type_mismatch": "D4.1",
         # content_type.py — category-level flags
-        "embedded_executable": "M1.4",
-        "embedded_document": "M1.4",
+        "embedded_executable": "D4.1",
+        "embedded_document": "M3.1",
         "embedded_image": "M1.1",
-        "embedded_archive": "M1.4",
-        "embedded_audio": "M1.3",
-        "embedded_video": "M1.4",
-        # content_type.py — CRITICAL: executables
-        "embedded_exe": "M1.4",
-        "embedded_elf": "M1.4",
-        "embedded_macho": "M1.4",
-        "embedded_java_class": "M1.4",
-        "embedded_wasm": "M1.4",
-        "embedded_shebang": "M1.4",
-        # content_type.py — HIGH: documents
-        "embedded_pdf": "M1.4",
+        "embedded_archive": "D4.1",
+        # Audio is M2 (was mis-mapped to M1.3, a steganographic-IMAGE code).
+        "embedded_audio": "M2.1",
+        "embedded_video": "D4.1",
+        # content_type.py — CRITICAL: executables (binary-in-text smuggling,
+        # D4.1 — no valid M-code; M1.4 does not exist in the taxonomy).
+        "embedded_exe": "D4.1",
+        "embedded_elf": "D4.1",
+        "embedded_macho": "D4.1",
+        "embedded_java_class": "D4.1",
+        "embedded_wasm": "D4.1",
+        "embedded_shebang": "D4.1",
+        # content_type.py — HIGH: documents (M3 — was mis-mapped to M1.4)
+        "embedded_pdf": "M3.1",
         "embedded_rtf": "D4",
-        "embedded_ole2": "M1.4",
-        "embedded_docx": "M1.4",
-        "embedded_xlsx": "M1.4",
-        "embedded_pptx": "M1.4",
-        "embedded_ooxml": "M1.4",
-        "embedded_odf": "M1.4",
+        "embedded_ole2": "M3.1",
+        "embedded_docx": "M3.1",
+        "embedded_xlsx": "M3.1",
+        "embedded_pptx": "M3.1",
+        "embedded_ooxml": "M3.1",
+        "embedded_odf": "M3.1",
         # content_type.py — HIGH: images
         "embedded_png": "M1.1",
         "embedded_jpeg": "M1.1",
@@ -2224,45 +2242,47 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         "embedded_webp": "M1.1",
         # ocr_extractor.py — EXIF/XMP metadata text in images
         "image_metadata_text": "M1.1",
-        # content_type.py — HIGH: archives
-        "embedded_zip": "M1.4",
-        "embedded_gzip": "M1.4",
-        "embedded_7z": "M1.4",
-        "embedded_rar": "M1.4",
-        "embedded_bzip2": "M1.4",
-        "embedded_xz": "M1.4",
-        "embedded_lzma": "M1.4",
-        "embedded_tar": "M1.4",
-        "embedded_jar": "M1.4",
-        # content_type.py — MEDIUM: audio
-        "embedded_mp3": "M1.3",
-        "embedded_flac": "M1.3",
-        "embedded_ogg": "M1.3",
-        "embedded_aac": "M1.3",
-        "embedded_midi": "M1.3",
-        "embedded_wav": "M1.3",
-        "embedded_aiff": "M1.3",
-        # content_type.py — MEDIUM: video
-        "embedded_webm": "M1.4",
-        "embedded_flv": "M1.4",
-        "embedded_wmv": "M1.4",
-        "embedded_avi": "M1.4",
-        "embedded_mp4": "M1.4",
+        # content_type.py — HIGH: archives (binary-in-text smuggling, D4.1)
+        "embedded_zip": "D4.1",
+        "embedded_gzip": "D4.1",
+        "embedded_7z": "D4.1",
+        "embedded_rar": "D4.1",
+        "embedded_bzip2": "D4.1",
+        "embedded_xz": "D4.1",
+        "embedded_lzma": "D4.1",
+        "embedded_tar": "D4.1",
+        "embedded_jar": "D4.1",
+        # content_type.py — MEDIUM: audio (M2 — was mis-mapped to M1.3)
+        "embedded_mp3": "M2.1",
+        "embedded_flac": "M2.1",
+        "embedded_ogg": "M2.1",
+        "embedded_aac": "M2.1",
+        "embedded_midi": "M2.1",
+        "embedded_wav": "M2.1",
+        "embedded_aiff": "M2.1",
+        # content_type.py — MEDIUM: video (D4.1 — no valid M-code)
+        "embedded_webm": "D4.1",
+        "embedded_flv": "D4.1",
+        "embedded_wmv": "D4.1",
+        "embedded_avi": "D4.1",
+        "embedded_mp4": "D4.1",
         # content_type.py — misc
-        "embedded_riff_unknown": "M1.4",
+        "embedded_riff_unknown": "D4.1",
         # content_type.py — polyglot detection
-        "polyglot_detected": "M1.4",
+        "polyglot_detected": "D4.1",
         # content_type.py / sniff_binary() — base64 / data URI flags
         "base64_blob_detected": "D4.1",
         "data_uri_detected": "D4.1",
         # content_type.py / sniff_binary() — base64 decode + re-scan flags
         "base64_hidden_executable": "D4.1",
-        "base64_hidden_pdf": "M1.4",
-        "base64_hidden_document": "M1.4",
+        # Documents -> M3 (was mis-mapped to the non-existent M1.4).
+        "base64_hidden_pdf": "M3.1",
+        "base64_hidden_document": "M3.1",
         "base64_hidden_image": "M1.1",
-        "base64_hidden_archive": "M1.4",
-        "base64_hidden_audio": "M1.3",
-        "base64_hidden_video": "M1.4",
+        "base64_hidden_archive": "D4.1",
+        # Audio -> M2 (was mis-mapped to M1.3, a stego-IMAGE code).
+        "base64_hidden_audio": "M2.1",
+        "base64_hidden_video": "D4.1",
         "base64_payload_too_large": "D4.1",
         # encoding.py flags
         "encoding_fallback_utf8": "D5",
@@ -2307,8 +2327,9 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         "pii_phone": "E1",
         "pii_ipv4": "E1",
         # doc_extractor.py — PDF JavaScript / action detection flags
-        "pdf_javascript": "M1.4",
-        "pdf_auto_action": "M1.4",
+        # PDF active-content surfaces are document-injection (macro-like) -> M3.4
+        "pdf_javascript": "M3.4",
+        "pdf_auto_action": "M3.4",
         "pdf_external_action": "E1",
         # sanitizer.py — timeout flags (possible ReDoS / resource exhaustion)
         "timeout_normalize": "A1.1",
@@ -2416,8 +2437,6 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
     })
     if _IMAGE_FLAGS & set(l0.anomaly_flags):
         try:
-            from .detectors.visual_injection import scan_image as _visual_scan
-
             # If L0 extracted OCR or metadata text, scan it via the visual
             # detector pattern-based analysis.  We pass the extracted text
             # through _scan_text_for_injection for injection indicators.
@@ -2426,17 +2445,74 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
             _visual_score, _visual_inds, _visual_tids = _scan_text_for_injection(
                 l0.sanitized_text
             )
-            if _visual_inds:
+            # FP-FIX: the "ocr_injection" indicator is a SELF-RESCAN of the
+            # SAME sanitized text (visual_injection re-runs na0s_scan on it
+            # with threshold 0.40).  It echoes the text's own score and is
+            # NOT independent corroboration — risk already reflects it.  Only
+            # genuinely independent indicators (regex instruction patterns,
+            # repeated-text, metadata) may lift risk; the echo is recorded as
+            # a tag/hit for telemetry only.
+            _independent_inds = [
+                ind for ind in _visual_inds
+                if ind.indicator_type != "ocr_injection"
+            ]
+            if _independent_inds:
                 risk = max(risk, _visual_score)
                 for tid in _visual_tids:
                     if tid not in technique_tags:
                         technique_tags.append(tid)
-                for ind in _visual_inds:
-                    hit_name = "visual:" + ind.indicator_type
-                    if hit_name not in hits:
-                        hits.append(hit_name)
+            # Record indicator hits (incl. the echo) for telemetry.  These
+            # carry no risk weight on their own; the dampener below keeps a
+            # clean image below threshold.
+            for ind in _visual_inds:
+                hit_name = "visual:" + ind.indicator_type
+                if hit_name not in hits:
+                    hits.append(hit_name)
         except Exception:
             logger.debug("Visual injection detector not available", exc_info=True)
+
+    # --- Multimodal hidden-channel scoring (M1/M2/M3) — FP-safe ---
+    # Presence of a modality is NOT malicious.  Two mutually-exclusive paths:
+    #   (1) DAMPENER: a hidden-channel flag (embedded image/audio/doc, or a
+    #       base64-hidden binary) is present but the only signals are
+    #       blob-shape artefacts (ML on the raw base64, high_entropy,
+    #       weird_casing, PII-false-match, the OCR self-rescan echo) — i.e.
+    #       a clean attachment that the byte-level signals false-fired on.
+    #       Clamp risk just below threshold so modality presence alone never
+    #       blocks (this is the binding FP-safety guarantee).
+    #   (2) BOOST: a hidden-channel flag is present AND an *independent*
+    #       injection indicator also fired (a real rule/detector hit, or the
+    #       composite was already elevated by genuine injection text).  Add a
+    #       small bounded corroborating boost (cap 0.30, mirrors obfuscation).
+    if _HAS_MULTIMODAL and _has_hidden_channel(l0.anomaly_flags):
+        try:
+            # Independent corroboration = a non-blob-shape hit fired.  Note:
+            # we deliberately do NOT treat "risk already >= threshold" as
+            # corroboration here, because a base64 blob self-elevates via the
+            # ML/entropy signals — that is exactly the FP we must suppress.
+            for _mm_tid in _map_m_flags(l0.anomaly_flags):
+                if _mm_tid not in technique_tags:
+                    technique_tags.append(_mm_tid)
+
+            if _is_uncorroborated_channel(l0.anomaly_flags, hits):
+                # Clean attachment — clamp byte-level over-scoring below
+                # threshold.  Only lowers risk; never raises it.
+                if risk > _MM_CLEAN_CEILING:
+                    risk = _MM_CLEAN_CEILING
+                    if risk < DECISION_THRESHOLD:
+                        is_mal = False
+                    if "multimodal:clean_image_dampened" not in hits:
+                        hits.append("multimodal:clean_image_dampened")
+            else:
+                _mm_boost = _get_multimodal_boost(
+                    l0.anomaly_flags, hits, corroborated=is_mal,
+                )
+                if _mm_boost > 0.0:
+                    risk = min(risk + _mm_boost, 1.0)
+                    if risk >= DECISION_THRESHOLD:
+                        is_mal = True
+        except Exception:
+            logger.debug("Multimodal scoring unavailable", exc_info=True)
 
     # --- MCP tool-manifest scan (T1.x) — optional, gated on tool_calls ---
     # When the caller supplies a declared tool manifest, scan each tool
