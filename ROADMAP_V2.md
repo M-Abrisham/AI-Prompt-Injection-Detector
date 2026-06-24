@@ -23,6 +23,71 @@ L16 Multi-Turn | L17 Doc Scanning (35%) | L18 RAG Security | L19 Agent/MCP | L20
 
 ---
 
+## Spec-Driven Hardening Campaign (DONE 2026-06-23)
+
+A measure-first, FP-safe hardening pass across 8 attack categories. Each item below
+is an **open PR against `main`** — every PR is full-suite-green and verified to NOT
+regress benign FPR on the hard-negative safe holdout. "Measure-first" is the theme:
+several PRs found that the `docs/COVERAGE_MATRIX.md` estimate was stale and corrected
+it against a live measurement before (or instead of) touching detector code.
+
+- [x] **#451 char_split (D7.5)** — generalized char-split reassembly to ANY consistent
+  pure-punctuation separator + vertical stacks, and scored the previously-INERT
+  `char_level_reassembly` flag (gated at run length ≥ 4). predict + cascade parity.
+  **0/4000 genuine-benign FP.**
+- [x] **#461 IG ingestion-manipulation** — NEW `detectors/ingestion.py` closing a true
+  **0%** category gap. Self-anchored co-occurrence (an ingestion-source noun AND a
+  directive-elevation cue; a decisive verdict requires the co-occurrence, so a bare
+  noun never fires). **0/4000 FP.** Taxonomy IG OWASP tag corrected `llm01 → llm06`.
+- [x] **#465 C1 compliance** — measure-first found the matrix C1 row 24% stale (live
+  **64%**); fixed a real predict↔cascade parity bug (`fictional_frame` was predict-only)
+  plus FP-safe frame broadening. **64% → 68%, 0 new FP.**
+- [x] **#466 P1/P2 privacy** — closed the P2.1 training-data / P2.2 membership /
+  P2.3 PII-elicitation misses (interrogative framing) and now emits the canonical
+  **P2.x** codes (previously orphaned). Cascade parity; benign **FPR held at 2.2%.**
+  (The holdout 20/20 is train-on-test-tuned; the honest adversarial signal is 23/25.)
+- [x] **#469 MB chained-obfuscation** — added a recurse-into-English-plausibility gate
+  so cipher-outer chains peel, and wired the dead `combined_boost` (attack-content-gated).
+  **33% → ~52%, benign FP 0/16.** Residual: 3-buff chains.
+- [x] **#471 RAG / I1** — re-tagged 4 `rag_*` rules `R1.x → I1.x` (taxonomy
+  correctness only; #460 already did the detector wiring + cascade parity). Supersedes
+  the unmerged `f8fbef3`.
+- [x] **#472 multimodal (M)** — measure-first found a **44% benign-image FP** (clean
+  data-URI avatars were being flagged); built a corroborating M-flag dampener
+  (**44% → 0%**) plus an `M1.3 → M2.1` / `M1.4 → M3.1` taxonomy mismap fix + cascade parity.
+- [x] **#473 PAYOFF (A / GCG, INJ-0023)** — corrected the matrix estimate (48 →
+  measured **35%**) and enabled the GCG / AdvBench / AutoDAN / HarmBench harvester
+  discovery queue. The retrain itself is CI-deferred.
+
+### Harvester / data-pipeline findings (2026-06-23)
+
+Verified facts surfaced while enabling the A-category GCG queue (#473), recorded here
+so they are not lost:
+
+- **AdvBench + HarmBench are ALREADY in `data/datasets.yaml`** (both `enabled: true`,
+  `label: 1`) — so the training registry already includes GCG-style data. The gap is
+  not registration; it is the **retrain actually running green** (F-AR1 was the blocker,
+  marked DONE but still needs a verified green run on `main`) plus confirming
+  A-category recall actually rises after that run.
+- AdvBench/HarmBench are taxonomy-tagged `taxonomy_codes: ["O"]` in `datasets.yaml` —
+  they should also carry `"A"` so the A-category eval reflects them (small open fix).
+- **The weekly harvester is DISCOVERY-ONLY**: it writes a candidate list
+  (`data/harvest/latest_scan.json`) and opens a review PR; it does NOT download data
+  into training. The discovered-dataset **download → ingest bridge is the open gap**
+  (cross-ref **B2 attack-ingester**).
+- **DVC is dead scaffolding**: `.dvc/config` points at a bare `gdrive://` folder with
+  NO credentials wired, `dvc` is not installed, `data/raw/` is absent, and NO workflow
+  runs `dvc pull/push` (auto-retrain rebuilds from HuggingFace instead). Decide:
+  either **remove the dead DVC scaffolding** or **wire a real private + credentialed
+  remote** — and the GDrive folder's share setting should be confirmed restricted.
+- Poisoning-safety items **M1 (two-key provenance gate, P0)** and **M7 (poisoning
+  detector, P1)** should land **before** scaling attack-data ingestion.
+
+> **L18 RAG ingestion-validation remains 0/18** (parked, awaiting a go decision on the
+> L18-core P1 wrapper slice).
+
+---
+
 ## Incident-to-scenario skill + GTG-1002 T/IM scenarios (DONE 2026-06-20, branch `feat/incident-to-scenario`)
 
 Turned the Anthropic GTG-1002 write-up ("first AI-orchestrated cyber-espionage
@@ -717,7 +782,7 @@ Core pipeline: Shannon entropy with 2-of-3 composite voting (KL-divergence from 
 
 - [x] **`scripts/technique_analysis.py` upgraded to a two-sided harness** — was recall-only (misleading: a block-everything detector scores 100%). Now adds **Part 3 benign FPR** (`safe_holdout.jsonl`), **Wilson 95% CIs** + per-slice `n` on every rate, an opt-in **`--gate`** mode (per-category recall floor on the CI *lower* bound + pooled benign FPR ceiling on the CI *upper* bound, **fail-closed** on missing coverage), auto-regeneration of the gitignored datasets, and a richer versioned JSON artifact. Precision/F1 intentionally omitted (TP and FP come from differently-sized pools with no shared prevalence). Wired via `make recall-harness` / `make recall-gate` and a non-blocking CI step. **Baseline @ threshold 0.55**: overall recall **57.1%** (194/340, CI 51.8–62.2), benign FPR **1.2%** (6/500, CI 0.6–2.6 — measured on the 500-sample hard-negative safe holdout), evasion **47.6%** (270/567); **D6 now measured** (66.7%). Gate surfaces the real coverage gaps: **E2 recon ~0%**, C1 24%, O1 30%, P1 35%. _(commit pending)_
 - [x] **Data/generator hygiene** — fixed two pre-existing failures (`test_holdout_malicious`: stale `source="holdout"` expectation → `"generated"`, added `P1` to the valid-category set) and stopped `gen_all_datasets.py` from clobbering the canonical 9-type evasion file (the older 7-type generator silently dropped `hex_encoding`). _(commit pending)_
-- [ ] **Ratchet the gate floors** as the surfaced gaps close (E2/O1/C1/P1), then drop `continue-on-error` in `ci.yml` to make the recall gate blocking. **Priority**: P1.
+- [ ] **Ratchet the gate floors** as the surfaced gaps close (E2/O1/C1/P1), then drop `continue-on-error` in `ci.yml` to make the recall gate blocking. **Priority**: P1. **Progress (2026-06-23):** C1 was re-measured (the 24% was stale; live 64%) and lifted **64% → 68%** with a predict↔cascade parity fix (#465); P1 closed the orphaned **P2.x** misses (training-data / membership / PII-elicitation) (#466). E2/O1 still open, so the gate task stays open.
 
 ### TODO List
 
@@ -1785,7 +1850,7 @@ Today's promotion pipeline runs 2 gates: `canary_eval.py` (TPR ≥ 95 %, TNR ≥
     - **E1 + BEN reconciliation** — added the mid-level `E1` key to `data/taxonomy.yaml` (mirrors the `C`/`C1` precedent) so the 25 live `v0.1/` prompt-exfiltration scenarios filed under bare `attack_category: E1` validate WITHOUT migrating the files. `BEN` confirmed canonical (was wrongly documented as a rejected sentinel). `validate_code("E1") == True` and all 25 E1 scenarios validate (tested via the real `ScenarioLoader`).
     - **Tests (new files, no edits to #437-owned tests)** — `tests/eval/harvest/test_taxonomy_atlas.py` (ATLAS bridge + E1/BEN reconciliation + live-scenario reconciliation assert), `test_atlas_mapping.py` (mapping loads; every target canonical; no entry silently dropped), `test_discovery_tagging.py` (tagging is canonical; never-invent; harvester hook flags-not-drops). 74 harvest tests green. `docs/facts.yaml` regenerated.
   - [ ] **TODO (taxonomy hygiene, P2 — narrowed)** — RESOLVED for `E1` (now canonical, see above) and `BEN` (confirmed canonical). REMAINING: the live `v0.1/` exfiltration packs also use `E1_benign` (a paired-benign sentinel distinct from the canonical `BEN`), which still does NOT validate — migrate those 2 scenarios to `BEN` or formalize the sentinel. `C2`/`M1` are PHANTOM (the canonical top-level codes are `C` / `M`); they are intentionally NOT added and NOT mapped — the harvester refuses non-canonical codes rather than propagate the inconsistency.
-  - [ ] **TODO (doc drift, P2)** — `docs/COVERAGE_MATRIX.md` understates **E2 reconnaissance** (listed ~0%) while live `predict()` + `benchmarks/results/technique_analysis.json` show E2 caught strongly. Re-sync the matrix. The genuine detection gaps are **C1 narrative-frame** scoring below threshold and **D4 chained multi-buff** decoding (e.g. Base64(ROT13)) — NOT E2.
+  - [ ] **TODO (doc drift, P2)** — `docs/COVERAGE_MATRIX.md` understates **E2 reconnaissance** (listed ~0%) while live `predict()` + `benchmarks/results/technique_analysis.json` show E2 caught strongly. Re-sync the matrix. The genuine detection gaps are **C1 narrative-frame** scoring below threshold and **D4 chained multi-buff** decoding (e.g. Base64(ROT13)) — NOT E2. **Update (2026-06-23):** both named gaps moved — **C1** was also stale (live 64%, not 24%) and is now 68% (#465); **chained multi-buff (MB)** lifted **33% → ~52%** via a recurse-into-plausibility gate (#469, residual = 3-buff chains).
   - [x] **I2 HTML/Markup measured (Spec 07 item I2, PART 1 — 2026-06-22, branch `hardening/i2-html-markup`)** — was ZERO I2 scenarios → recall unmeasured. Added 18-scenario set `data/eval/scenarios/v0.1/html_markup_injection.yaml` (12 attack across I2.1 hidden-div / I2.2 HTML-comment / I2.3 invisible-CSS, incl. harder variants: visibility:hidden, boolean `hidden`, off-screen, color-on-bg, clip, text-indent + 6 paired benign siblings; all `source: synthesized`, decontam 18/18 via the admission gate) + recall/FP test `tests/test_scan_i2_html_markup.py`. **MEASURED:** scan `is_malicious` recall **9/9** (I2.1 3/3, I2.2 2/2, I2.3 4/4); the extractor's OWN I2-flag recall is only **4/9** (only `display:none`/`font-size:0`/`opacity:0` + keyword-gate comment suppress+flag; `visibility:hidden`/boolean `hidden`/off-screen/color-on-bg LEAK, caught only because the override payload trips L1 rules/ML). **Benign FP 0/6** (incl. email-preheader `display:none` which flags but stays benign — flag-only/FP-safe). Cascade parity confirmed (shared `input.layer0_sanitize` at predict.py:678 + cascade.py:968/1530). 3 honest xfails (keyword-free hidden payloads below threshold). COVERAGE_MATRIX row INJ-0028 added. PART 1 = measure only, no detector change; PART 2 (extend `_HIDDEN_STYLE_RE` + boolean-`hidden`, flag-only) is the FP-safe hardening follow-up.
   - [x] **I2 HTML/Markup hardened FP-safely (Spec 07 item I2, PART 2 — 2026-06-22, branch `hardening/i2-html-markup`)** — closed the genuine measured extractor-flag gap from PART 1. `src/na0s/input/html_extractor.py`: extended `_HIDDEN_STYLE_RE` to also suppress+flag `visibility:hidden`, off-screen `position:absolute;(left|top):-\d{3,}px` (the >=100px bound, justified by the real off-screen vs. layout-nudge boundary — not arbitrary), and `clip:rect(0`; plus handled the HTML5 boolean `hidden` attribute in `handle_starttag` (reusing `_VOID_ELEMENTS` so `<input type=hidden>` CSRF tokens stay exempt). **Flag-only — no new threshold, no score boost** (`hidden_html_content` maps only to the I2.1 technique tag at predict.py:1889 and never boosts risk). **Extractor-flag recall 4/9 → 8/9** (only color-vs-background still leaks — needs parent/bg context; left as a documented residual). FP-safe re-verified: **35 benign HTML/markup inputs → 0 trips**, 10 of which newly emit `hidden_html_content` yet stay `allowed`. Strengthened the 3 leak-only scan tests into flag+tag regression guards; +11 new extractor unit cases (incl. FP guards: aria-hidden / data-hidden / micro-offset / code-block CSS / static-position). Targeted suites green (tests/input + scan_i2 + predict + cascade: 1473 passed, 3 xfailed). Residuals (documented xfails, NOT hardened): color-on-bg, `text-indent`, offset-before-`position` order, comment-keyword-gate widening.
 
@@ -2282,7 +2347,7 @@ Office parser suite shipped in PR #18 (2026-04-11): DOCX (19 surfaces — commen
 - [ ] **RTF scanner** — parse control words for hidden text (`\v`, `\cf` color tricks).
 - [ ] **Email scanner** — `.eml`/`.msg` MIME parts, HTML body, attachment extraction.
 - [ ] **SVG scanner** — `<text>`, `<script>`, `foreignObject` content.
-- [ ] **Font-based / zero-width-font attacks** (P3), **LSB image steganography** (P2), **OCR integration for tiny/invisible text** (P2 — `layer0/ocr_extractor.py` exists), **QR/barcode decoding via pyzbar** (P3), **typographic attack detection** (P3), **adversarial image perturbation** (P3, arXiv:2307.10490), **Whisper audio adversarial prefix detection** (P3), **visual prompt injection via CLIP** (P3).
+- [ ] **Font-based / zero-width-font attacks** (P3), **LSB image steganography** (P2), **OCR integration for tiny/invisible text** (P2 — `layer0/ocr_extractor.py` exists), **QR/barcode decoding via pyzbar** (P3), **typographic attack detection** (P3), **adversarial image perturbation** (P3, arXiv:2307.10490), **Whisper audio adversarial prefix detection** (P3), **visual prompt injection via CLIP** (P3). **Partial progress (2026-06-23, #472):** the **M (multimodal)** probe category was hardened — a 44% benign-image FP (clean data-URI avatars) was fixed to **0%** via a corroborating M-flag dampener, plus an `M1.3 → M2.1` / `M1.4 → M3.1` taxonomy mismap fix + cascade parity. Still open here: **audio / Whisper, image stego, and `scan_document(bytes)`** wiring.
 
 **Test coverage gaps:**
 - [ ] **OLE extractor has zero tests and zero fixtures** — `tests/parsers/office/test_ole.py` does not exist, `tests/fixtures/office/ole/` is empty, and no `_builders/build_ole.py` generator exists. The extractor ships untested despite being counted as "done".
@@ -3114,7 +3179,7 @@ Attacks split words into single characters: `"i g n o r e"` or `"i.g.n.o.r.e"`. 
 
 Current decoders run independently. Attacks chain encodings (rot13 then leet, leet then pig_latin). Need cross-decoder chained decode.
 
-- [ ] **Cross-decoder chained decode loop** — After flat `_detect_and_decode()`, run second pass: for each decoded result, try other decoders. Max depth 2, budget 50 attempts, 200ms timeout. Use `_composite_entropy_check()` as "looks like English" gate. **Files**: `obfuscation.py`. **Tests**: `test_obfuscation_chaining.py`. **Effort**: 2d.
+- [ ] **Cross-decoder chained decode loop** — After flat `_detect_and_decode()`, run second pass: for each decoded result, try other decoders. Max depth 2, budget 50 attempts, 200ms timeout. Use `_composite_entropy_check()` as "looks like English" gate. **Files**: `obfuscation.py`. **Tests**: `test_obfuscation_chaining.py`. **Effort**: 2d. **Largely addressed (2026-06-23, #469):** a recurse-into-English-plausibility gate now peels cipher-outer chains and the dead `combined_boost` is wired (attack-content-gated), lifting MB **33% → ~52%** with benign FP 0/16. **Residual gap = 3-buff chains.**
 - [ ] **English plausibility scorer** — Extract KL-divergence logic into `_is_plausible_english()`. Add 5000-word dictionary check (frozenset, no deps). Either KL < 0.8 OR dict hit rate > 0.4. **Effort**: 1d.
 - [ ] **Performance budget + timeout** — `NA0S_CHAIN_DECODE_TIMEOUT_MS` (200ms), `NA0S_MAX_CHAIN_DECODES` (50). Perf regression test: <500ms on 500-char input. **Effort**: 0.5d.
 - [ ] **Promote xfail tests** — Remove `@expectedFailure` from `test_d4_rot13_plus_leet` and `test_d4_leet_plus_pig_latin`. Add base64(rot13), url(leet), rot13(pig_latin) tests. **Effort**: 0.5d.
