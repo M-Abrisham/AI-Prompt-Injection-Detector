@@ -86,5 +86,45 @@ def test_env_var_still_wins(tmp_path, monkeypatch):
     assert voting.get_decision_threshold() == pytest.approx(0.42)
 
 
+def _packaged_threshold_path():
+    import importlib.resources as ir
+    return ir.files("na0s.models") / "decision_threshold.json"
+
+
+def test_packaged_threshold_is_read_and_preferred_over_repo_copy(monkeypatch):
+    """The wheel-shipped na0s/models/decision_threshold.json is read at runtime
+    (F-AR3) so the calibrated operating point ships with the model."""
+    monkeypatch.delenv("DECISION_THRESHOLD", raising=False)
+    pkg = _packaged_threshold_path()
+    if pkg.is_file():
+        pytest.skip("a real packaged threshold already ships; skip the synthetic-write test")
+    created = False
+    try:
+        pkg.write_text(json.dumps({"target_fpr_threshold": 0.42}), encoding="utf-8")
+        created = True
+        voting._reset_threshold_cache()
+        assert voting.get_decision_threshold() == 0.42
+    finally:
+        if created:
+            os.remove(str(pkg))
+        voting._reset_threshold_cache()
+
+
+def test_env_var_still_wins_over_packaged_threshold(monkeypatch):
+    pkg = _packaged_threshold_path()
+    created = False
+    try:
+        if not pkg.is_file():
+            pkg.write_text(json.dumps({"target_fpr_threshold": 0.42}), encoding="utf-8")
+            created = True
+        monkeypatch.setenv("DECISION_THRESHOLD", "0.77")
+        voting._reset_threshold_cache()
+        assert voting.get_decision_threshold() == 0.77
+    finally:
+        if created:
+            os.remove(str(pkg))
+        voting._reset_threshold_cache()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

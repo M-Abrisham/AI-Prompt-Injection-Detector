@@ -106,8 +106,12 @@ class TestRulesListIntegrity(unittest.TestCase):
     """B. Tests that the RULES list is well-formed and complete."""
 
     def test_total_rule_count(self):
-        """There should be exactly 120 rules in the RULES list."""
-        self.assertEqual(len(RULES), 120)
+        """There should be exactly 122 rules in the RULES list.
+
+        120 baseline + 2 canonical P2.x privacy rules
+        (training_data_extraction_bounded P2.1, pii_elicitation_third_party P2.3).
+        """
+        self.assertEqual(len(RULES), 122)
 
     def test_all_rule_names_are_unique(self):
         """No two rules should have the same name (except known variants).
@@ -241,6 +245,8 @@ class TestRulesListIntegrity(unittest.TestCase):
             "config_extraction",
             # Extended training data rules
             "training_data_completion",
+            # P2.x canonical privacy-extraction rules
+            "training_data_extraction_bounded", "pii_elicitation_third_party",
             # D1.15-D1.19 Subtle paraphrased override rules
             "polite_override", "temporal_override",
             "clean_slate", "subtle_authority",

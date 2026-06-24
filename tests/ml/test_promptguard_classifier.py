@@ -569,9 +569,86 @@ class TestEnvVarConfiguration:
     """Tests for env var configuration of model name and device."""
 
     def test_model_name_from_env(self):
-        with mock.patch.dict(os.environ, {"NA0S_PROMPTGUARD_MODEL": "custom/model"}):
+        """An ALLOWLISTED env model id is honored verbatim.
+
+        Contract change (item #10): the env value is no longer trusted
+        verbatim -- it must be on the allowlist. An off-allowlist id that the
+        OLD behavior accepted (``"custom/model"``) is now rejected (see
+        ``test_model_name_from_env_off_allowlist_falls_back``); a legitimate
+        operator override goes through ``NA0S_MODEL_ALLOWLIST``. This test is
+        TIGHTENED (not deleted) to prove env override still works for a
+        legitimate, allowlisted id.
+        """
+        env = {
+            "NA0S_PROMPTGUARD_MODEL": "custom/model",
+            "NA0S_MODEL_ALLOWLIST": "custom/model",
+        }
+        with mock.patch.dict(os.environ, env):
             clf = pgc.PromptGuardClassifier()
         assert clf.model_name == "custom/model"
+
+    def test_model_name_from_env_off_allowlist_falls_back(self, caplog):
+        """An off-allowlist env id falls back to the default WITH a warning.
+
+        This is the core item #10 hardening: a tampered ``NA0S_PROMPTGUARD_MODEL``
+        must NOT be fed verbatim into ``from_pretrained``.
+        """
+        env = os.environ.copy()
+        env.pop("NA0S_MODEL_ALLOWLIST", None)
+        env["NA0S_PROMPTGUARD_MODEL"] = "evil/backdoor"
+        with mock.patch.dict(os.environ, env, clear=True):
+            with caplog.at_level("WARNING", logger="na0s.ml.promptguard_classifier"):
+                clf = pgc.PromptGuardClassifier()
+        assert clf.model_name == pgc.DEFAULT_MODEL_NAME
+        # Exactly one warning, naming the rejected id.
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        assert "evil/backdoor" in warnings[0].getMessage()
+
+    @pytest.mark.parametrize(
+        "bad_id",
+        [
+            "../etc/passwd",   # path traversal
+            "/abs/path",       # absolute local path
+            "~/x",             # home-relative local path
+            "file:///x",       # scheme prefix
+            "a b/c",           # whitespace
+            "a/b/c",           # more than one path separator
+        ],
+    )
+    def test_model_name_from_env_rejects_traversal_and_schemes(self, bad_id):
+        """Path-traversal / scheme / control-char env ids fall back to default."""
+        env = os.environ.copy()
+        env.pop("NA0S_MODEL_ALLOWLIST", None)
+        env["NA0S_PROMPTGUARD_MODEL"] = bad_id
+        with mock.patch.dict(os.environ, env, clear=True):
+            clf = pgc.PromptGuardClassifier()
+        assert clf.model_name == pgc.DEFAULT_MODEL_NAME
+
+    def test_resolve_rejects_embedded_nul(self):
+        """An embedded-NUL id is rejected by the grammar gate.
+
+        Tested at the unit level (``_resolve_env_model_id`` directly) because a
+        real ``os.environ`` value can never carry a NUL byte (the OS rejects it),
+        so the env-integration path cannot exercise it. The validator must still
+        reject it (and not raise from the ``os.path.exists`` local-dir probe).
+        """
+        out = pgc._resolve_env_model_id("a/b\x00", default=pgc.DEFAULT_MODEL_NAME)
+        assert out == pgc.DEFAULT_MODEL_NAME
+
+    def test_model_name_from_env_rejects_local_dir(self, tmp_path):
+        """An env id naming an existing local directory is rejected.
+
+        Even if the operator allowlisted the path string, a local directory is a
+        filesystem-escape, not a pinned Hub id, so it must fall back to default.
+        """
+        local_dir = str(tmp_path)
+        env = os.environ.copy()
+        env["NA0S_PROMPTGUARD_MODEL"] = local_dir
+        env["NA0S_MODEL_ALLOWLIST"] = local_dir  # allowlist it -> still rejected
+        with mock.patch.dict(os.environ, env, clear=True):
+            clf = pgc.PromptGuardClassifier()
+        assert clf.model_name == pgc.DEFAULT_MODEL_NAME
 
     def test_model_name_default(self):
         env = os.environ.copy()

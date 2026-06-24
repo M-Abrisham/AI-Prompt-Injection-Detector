@@ -62,6 +62,19 @@ MAX_RETRY_DELAY = 30          # cap for exponential backoff (seconds)
 # ---------------------------------------------------------------------------
 COT_ENABLED = os.getenv("NA0S_JUDGE_COT", "").strip() in ("1", "true", "yes")
 
+# ---------------------------------------------------------------------------
+# Per-class judging (GATED, default OFF) — when NA0S_JUDGE_PER_CLASS is set,
+# a judge constructed with a per_class_category uses a category-specialized
+# system prompt (na0s.judge.per_class.build_per_class_prompt) and a
+# programmatically-selected few-shot block instead of the hardcoded
+# FEW_SHOT_EXAMPLES. The flag is OFF by default so existing tests / production
+# behavior are byte-for-byte unchanged; the 4 hardcoded examples remain the
+# fallback whenever the flag is off OR no per_class_category was provided.
+# ---------------------------------------------------------------------------
+PER_CLASS_ENABLED = (
+    os.getenv("NA0S_JUDGE_PER_CLASS", "").strip().lower() in ("1", "true", "yes")
+)
+
 COT_SYSTEM_ADDENDUM = (
     "\n\nIMPORTANT: Before giving your final JSON verdict, reason step-by-step "
     "about whether this input is a prompt injection. Structure your response as:\n"
@@ -253,6 +266,8 @@ class LLMJudge:
         cache_size=128,
         max_context_tokens=None,
         use_cot=False,
+        per_class_category=None,
+        per_class_few_shot=None,
     ):
         self.backend = backend
         self.model = model or self.DEFAULT_MODELS.get(backend, "gpt-4o-mini")
@@ -260,6 +275,24 @@ class LLMJudge:
         self.temperature = temperature
         self.max_context_tokens = max_context_tokens or MAX_CONTEXT_TOKENS
         self.use_cot = use_cot or COT_ENABLED
+
+        # Per-class judging (GATED). Active ONLY when the env flag is on AND a
+        # category was supplied — otherwise the generalist prompt + hardcoded
+        # FEW_SHOT_EXAMPLES path is used, unchanged. The per-class system prompt
+        # is built lazily here (per_class imports from this module, so importing
+        # it at module load would create a cycle).
+        self.per_class_category = per_class_category
+        self.per_class_few_shot = (
+            list(per_class_few_shot) if per_class_few_shot else None
+        )
+        self._per_class_active = bool(PER_CLASS_ENABLED and per_class_category)
+        self._per_class_system_prompt = None
+        if self._per_class_active:
+            from na0s.judge.per_class import build_per_class_prompt
+
+            self._per_class_system_prompt = build_per_class_prompt(
+                str(per_class_category)
+            )
 
         # Timeout: env var overrides constructor arg
         env_timeout = os.getenv("NA0S_JUDGE_TIMEOUT")
@@ -658,6 +691,26 @@ class LLMJudge:
         # BUG-L7-6: truncate oversized input to prevent context window overflow
         if len(user_input) > JUDGE_INPUT_MAX_CHARS:
             user_input = user_input[:JUDGE_INPUT_MAX_CHARS]
+
+        # GATED per-class path: a category-specialized system prompt + the
+        # programmatically-selected few-shot block. Active only when the env
+        # flag is on AND a category was supplied; otherwise this whole branch
+        # is skipped and the generalist path below runs unchanged.
+        if self._per_class_active:
+            system_content = self._per_class_system_prompt
+            if self.use_cot:
+                system_content += COT_SYSTEM_ADDENDUM
+            if nonce is not None:
+                system_content = "NONCE: " + nonce + "\n\n" + system_content
+            messages = [{"role": "system", "content": system_content}]
+            if self.use_few_shot:
+                # Fall back to the hardcoded examples if no per-class block was
+                # supplied, so a per-class judge is never few-shot-starved.
+                few_shot = self.per_class_few_shot or FEW_SHOT_EXAMPLES
+                messages.extend(_patch_few_shot_nonce(few_shot, nonce))
+            wrapped = "<INPUT>\n" + user_input + "\n</INPUT>"
+            messages.append({"role": "user", "content": wrapped})
+            return messages
 
         system_content = JUDGE_SYSTEM_PROMPT
         # Chain-of-thought: append CoT instructions to system prompt

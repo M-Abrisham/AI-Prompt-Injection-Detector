@@ -1,0 +1,98 @@
+# MITRE ATLAS -> Na0S taxonomy mapping  (CURATED, human-reviewable)
+# ===========================================================================
+# Consumed by: na0s.threat_intel.atlas_sync.AtlasSync._load_mapping()
+#   (path resolved from threat_intel/config.py:ATLAS_MAPPING_FILE =
+#    data/threat_intel_snapshots/atlas_to_na0s_mapping.yaml)
+#
+# Format:  {AML.Txxxx: <canonical Na0S code>}
+#   - one Na0S "home" category per ATLAS id (the category a runtime input/output
+#     defensive SDK would file the technique under).
+#   - every right-hand value is a CANONICAL code that passes
+#     na0s.eval.harvest.taxonomy.TaxonomyValidator.validate_code() against
+#     data/taxonomy.yaml (verified — see tests/eval/harvest/test_atlas_mapping*).
+#   - codes are category-level (e.g. E, T, IG) because the live v0.1 scenario
+#     set and the harvest extractor both file at category granularity. We never
+#     emit a non-canonical code (e.g. E1 / C2 / M1 are intentionally absent —
+#     they are NOT keys in taxonomy.yaml and would be rejected at extraction).
+#
+# ATLAS grounding:
+#   Every AML.Txxxx below is a real MITRE ATLAS technique id. This file was
+#   authored offline/keyless from curator knowledge of the ATLAS matrix plus
+#   keyword-overlap corroboration via atlas_sync.suggest_mapping(). Ids the
+#   curator was not confident exist were OMITTED rather than guessed.
+#
+# Regeneration (when network is available):
+#   The canonical id list can be re-derived from a vendored atlas-data dist
+#   (mitre-atlas/atlas-data dist/v*/ATLAS-*.yaml) parsed with cti-python-stix2
+#   (oasis-open/cti-python-stix2 `parse()`); diff the parsed id set against the
+#   keys below and reconcile new/renamed ids by hand. atlas_sync.apply() refuses
+#   to auto-write taxonomy.yaml, so any taxonomy change stays human/PR-reviewed.
+#   The MANY attacker-side ATLAS techniques (recon, staging, ML-infra, model
+#   theft logistics, etc.) are deliberately UNMAPPED: a runtime prompt-injection
+#   SDK does not observe them at the input/output boundary, so leaving them
+#   unmapped lets atlas_sync flag them for review instead of mis-filing them.
+# ===========================================================================
+
+# ---- Supply chain / model integrity -> S --------------------------------
+"AML.T0010":      S    # AI Supply Chain Compromise (parent)
+"AML.T0010.001":  S    # ... AI Software
+"AML.T0010.003":  S    # ... Model
+"AML.T0010.005":  AD   # ... AI Agent Tool  -> Altered Delivery (tool supply)
+"AML.T0018":      S    # Backdoor / Poison AI Model
+"AML.T0020":      S    # Poison Training Data
+"AML.T0109":      AD   # AI Supply Chain Rug Pull -> Altered Delivery
+
+# ---- Adversarial ML / model evasion -> A / M ----------------------------
+"AML.T0015":      M    # Evade AI Model (incl. multimodal perturbation)
+"AML.T0043":      A    # Craft Adversarial Data (parent)
+"AML.T0043.000":  A    # ... White-Box Optimization
+"AML.T0043.001":  A    # ... Black-Box Optimization
+"AML.T0031":      O    # Erode AI Model Integrity -> Output Manipulation
+
+# ---- Inference-time exfiltration / privacy -> P2 / P / E -----------------
+"AML.T0024":      P2   # Exfiltration via AI Inference API (parent)
+"AML.T0024.000":  P2   # ... Infer Training Data Membership
+"AML.T0024.001":  A    # ... Invert AI Model -> Adversarial ML
+"AML.T0055":      P    # Unsecured Credentials -> Privacy/Data Leakage
+"AML.T0056":      E    # Extract LLM System Prompt -> Exfiltration
+"AML.T0057":      P    # LLM Data Leakage -> Privacy/Data Leakage
+
+# ---- Availability / cost -> R -------------------------------------------
+"AML.T0029":      R    # Denial of AI Service
+"AML.T0034":      R    # Cost Harvesting (parent)
+"AML.T0034.000":  R    # ... Excessive Queries
+"AML.T0034.001":  R    # ... Resource-Intensive Queries
+
+# ---- Prompt injection (the core surface) -> D1 / I1 ----------------------
+"AML.T0051":      CT   # LLM Prompt Injection (parent) -> Combo Techniques
+"AML.T0051.000":  D1   # ... Direct  -> Instruction Override
+"AML.T0051.001":  I1   # ... Indirect -> Data Source Poisoning
+"AML.T0051.002":  D1   # ... Triggered -> Instruction Override (sleeper trigger)
+"AML.T0068":      D4   # LLM Prompt Obfuscation -> Obfuscation/Encoding
+
+# ---- Jailbreak -> D2 -----------------------------------------------------
+"AML.T0054":      D2   # LLM Jailbreak -> Persona/Roleplay Hijack
+
+# ---- Agent / tool abuse + code execution -> T ----------------------------
+"AML.T0050":      T    # Command and Scripting Interpreter
+"AML.T0053":      T    # AI Agent Tool Invocation
+"AML.T0086":      T    # Exfiltration via AI Agent Tool Invocation
+"AML.T0102":      P3   # Generate Malicious Commands -> Malicious Code Generation
+"AML.T0105":      T    # Escape to Host (sandbox/host escape via agent)
+
+# ---- Ingestion / RAG poisoning -> IG / I1 -------------------------------
+"AML.T0066":      IG   # Retrieval Content Crafting
+"AML.T0070":      IG   # RAG Poisoning
+"AML.T0071":      IG   # False RAG Entry Injection
+"AML.T0080":      I1   # AI Agent Context Poisoning -> Data Source Poisoning
+
+# ---- Output manipulation / rendering -> O -------------------------------
+"AML.T0067":      O    # LLM Trusted Output Components Manipulation
+"AML.T0077":      O    # LLM Response Rendering (markdown/link rendering abuse)
+"AML.T0048":      O    # External Harms -> Output Manipulation
+
+# ---- Inter-model / self-replication -> IM -------------------------------
+"AML.T0061":      IM   # LLM Prompt Self-Replication -> Inter-Model Propagation
+
+# ---- Initial access at the app boundary -> AD ----------------------------
+"AML.T0049":      AD   # Exploit Public-Facing Application -> Altered Delivery

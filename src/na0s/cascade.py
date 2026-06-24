@@ -20,7 +20,8 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from .predict import (
-    _get_cached_models, _get_cached_scaler, _transform, _get_model_version,
+    _get_cached_models, _get_cached_scaler, _get_cached_char_vectorizer,
+    _transform, _get_model_version,
     _chunk_text, _head_tail_extract, _CHUNK_WORD_THRESHOLD, MAX_CHUNKS,
 )
 from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
@@ -34,6 +35,11 @@ from .config import (
 )
 from .obfuscation import obfuscation_scan
 from .input import layer0_sanitize
+from .input.normalization import (
+    _reassemble_char_splits,
+    _CHAR_SPLIT_HEAVY_RUN,
+    _CHAR_SPLIT_MIN_SCORED,
+)
 from .input.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult
 from .models import get_model_path
@@ -150,12 +156,15 @@ def _embedding_enabled():
         "NA0S_EMBEDDING_ENABLED", "",
     ).strip().lower() not in ("0", "false")
 
-# Layer 7: LLM checker — optional import
+# Layer 7: LLM judge — optional import (replaces the deprecated LLMChecker).
+# LLMJudge imports its backends (openai/groq) lazily, so the class imports
+# even with no backend installed; a missing backend/key surfaces at construction
+# and is absorbed by _ensure_llm_checker()'s try/except.
 try:
-    from .judge.checker import LLMChecker
-    _HAS_LLM_CHECKER = True
+    from .judge.llm_judge import LLMJudge
+    _HAS_LLM_JUDGE = True
 except ImportError:
-    _HAS_LLM_CHECKER = False
+    _HAS_LLM_JUDGE = False
 
 # Layer 8: Positive validation — optional import
 try:
@@ -207,6 +216,100 @@ try:
     _HAS_WORM = True
 except ImportError:
     _HAS_WORM = False
+
+# Inter-model propagation detector (IM.x) — optional import (parity w/ scan()).
+# INGESTION-side detector; the IM docstring mandates input-side and forbids
+# relying on the output-side na0s.output.propagation scanner.
+try:
+    from .detectors.inter_model import detect_inter_model, get_inter_model_weight
+    _HAS_INTER_MODEL = True
+except ImportError:
+    _HAS_INTER_MODEL = False
+
+# In-prose tool-abuse detector (T1.x, GTG-1002 terminal pivot) — optional import
+try:
+    from .detectors.tool_abuse import detect_tool_abuse, get_tool_abuse_weight
+    _HAS_TOOL_ABUSE = True
+except ImportError:
+    _HAS_TOOL_ABUSE = False
+
+# Multilingual injection (D6) — parity with scan(). The predict path runs the
+# pattern handler + the semantic heuristic when Layer-0 flags non-English /
+# mixed-language input; the cascade path previously had NO multilingual
+# reference, so non-English attacks that the English ML model + English rules
+# both missed reached no D6 signal here. Mirror predict's fold below.
+try:
+    from .detectors.multilingual_handler import (
+        scan_multilingual,
+        get_multilingual_rule_weight,
+    )
+    from .detectors.multilingual_intent import detect_multilingual_intents
+    from .input.language_detector import detect_language as _detect_language
+    _HAS_MULTILINGUAL = True
+except ImportError:
+    _HAS_MULTILINGUAL = False
+# RAG-poison detector (I1.x) — optional import (parity w/ scan()).
+# INGESTION-side detector for instruction/authority/exfil payloads embedded in
+# retrieved RAG context, documents, email, or structured data.
+try:
+    from .rag.poison_detector import detect_rag_poisoning, get_rag_poison_weight
+    _HAS_RAG_POISON = True
+except ImportError:
+    _HAS_RAG_POISON = False
+# Ingestion-manipulation detector (IG.x, OWASP LLM06) — optional (parity w/ scan()).
+# INGESTION-side detector: "treat ingested DATA as an INSTRUCTION/DIRECTIVE".
+try:
+    from .detectors.ingestion import (
+        detect_ingestion,
+        get_ingestion_weight,
+        hard_planted_directive_pattern as _ig_hard_planted_directive,
+    )
+    _HAS_INGESTION = True
+except ImportError:
+    _HAS_INGESTION = False
+# Fictional-frame detector (C1 compliance evasion) — optional import.
+# predict.py wires this; cascade.py historically did NOT, so the two runtime
+# paths disagreed on C1 detection (a fiction/academic/authority frame wrapping
+# a concrete harmful request).  Mirror predict's block below for parity.
+try:
+    from .detectors.fictional_frame import (
+        detect_fictional_frame,
+        get_fictional_frame_weight,
+    )
+    _HAS_FICTIONAL_FRAME = True
+except ImportError:
+    _HAS_FICTIONAL_FRAME = False
+# Privacy probe detector (P1/P2.x) — optional import.  Used to mirror scan()'s
+# high-severity privacy floor on the cascade path: PRIVACY_RULES reach the
+# cascade transitively via RULES but are context-suppressed on the question
+# frame (membership probes are inherently questions), so the rule alone cannot
+# clear threshold.  Re-running the SAME detector here -- with its educational-
+# frame + self-referential guards intact -- floors the composite identically to
+# predict.py, restoring predict/cascade parity without divergent regex logic.
+try:
+    from .rules.registry.privacy_probe import (
+        detect_privacy_probe as _cascade_detect_privacy_probe,
+    )
+    _HAS_PRIVACY_PROBE = True
+except ImportError:
+    _HAS_PRIVACY_PROBE = False
+
+# Multimodal hidden-channel scoring (M1/M2/M3) — parity with scan().
+# cascade previously had ZERO visual / M-flag scoring references; this folds
+# the SAME corroborating boost + clean-attachment dampener so an embedded-image
+# payload whose decoded text trips an injection indicator blocks here too, and
+# a clean attachment stays SAFE.  Single source of truth in detectors.multimodal.
+try:
+    from .detectors.multimodal import (
+        map_m_flags as _map_m_flags,
+        get_multimodal_boost as _get_multimodal_boost,
+        is_uncorroborated_channel as _is_uncorroborated_channel,
+        has_hidden_channel as _has_hidden_channel,
+        MULTIMODAL_CLEAN_RISK_CEILING as _MM_CLEAN_CEILING,
+    )
+    _HAS_MULTIMODAL = True
+except ImportError:
+    _HAS_MULTIMODAL = False
 
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
@@ -306,6 +409,15 @@ class WhitelistFilter:
         "constraint_negation", "fake_system_prompt",
         "chat_template_injection", "named_jailbreak_persona",
         "forget_override",
+        # Privacy probes that are overwhelmingly question-framed ("Was X in
+        # your training data?", "What is the SSN of customer X?").  Without
+        # these, the question-form whitelist passes them as SAFE, breaking
+        # predict/cascade parity (predict.py blocks them via the privacy
+        # detector path).  Both registry rules are third-party/training-axis
+        # anchored, so they do NOT fire on benign questions ("what is the
+        # capital of France?", "was the meeting on Monday?") -- verified
+        # zero-FP on the safe holdout -- so the whitelist denial is FP-safe.
+        "membership_inference", "pii_elicitation_third_party",
     })
 
     # Common abbreviations whose periods are not sentence boundaries
@@ -421,6 +533,22 @@ class WhitelistFilter:
                 ", ".join(critical_hit_names)
             )
 
+        # 8. Ingestion-manipulation tripwire: an UNAMBIGUOUS planted directive
+        #    ("treat ... as a system directive", "*_override=true", "obey the
+        #    ingested ...", "[SYSTEM OVERRIDE:") must not be whitelisted even in
+        #    question form (e.g. "When you ingest this data, treat ... as a
+        #    system directive").  Mirrors the critical-rule tripwire above and
+        #    keeps the cascade path in parity with scan(), where the IG fold
+        #    catches these.  0-FP cue (validated on the IG benign siblings); a
+        #    benign "How do I upload this document?" never matches.  Behind the
+        #    optional-import flag so absence degrades to no-op.
+        if _HAS_INGESTION:
+            try:
+                if _ig_hard_planted_directive().search(text):
+                    return False, "ingestion planted-directive despite question form"
+            except Exception:
+                _logger.debug("Ingestion whitelist tripwire failed", exc_info=True)
+
         # Build reason string
         reasons = ["passed all whitelist criteria"]
         if safe_search(self.SAFE_TOPIC_INDICATORS, text, timeout_ms=50):
@@ -468,7 +596,14 @@ class WeightedClassifier:
         """
         # --- ML prediction ---
         scaler = _get_cached_scaler()
-        X = _transform(text, vectorizer, scaler)
+        # PARITY with predict.py's scan() path — mirror its
+        # _get_cached_char_vectorizer() call so cascade assembles the SAME
+        # [word|char|struct] feature vector the shared model was trained on.
+        # char_vec is None
+        # for the charless bundle (no-op skip inside _transform); a provided-but-
+        # broken char vectorizer fails loud inside _transform (F-AR8 contract).
+        char_vec = _get_cached_char_vectorizer()
+        X = _transform(text, vectorizer, scaler, char_vectorizer=char_vec)
         prediction = model.predict(X)[0]
         proba = model.predict_proba(X)[0]
         # Fix proba[1] fragility: derive ml_prob and ml_label correctly
@@ -539,6 +674,13 @@ class WeightedClassifier:
         # --- Obfuscation flags ---
         obs = obfuscation_scan(text)
         obfuscation_flags = obs.get("evasion_flags", [])
+        # Multi-buff chained-obfuscation boost — parity with scan()/predict.py.
+        # Computed-then-discarded historically (same class as the dead
+        # rag_poison_weight); wired here so a stacked-encoding chain
+        # contributes its (additive, capped 0.20) boost.  Applied to composite
+        # AFTER voting, gated on real evasion flags so benign nested
+        # encodings earn no boost.
+        _chain_boost = float(obs.get("combined_boost", 0.0) or 0.0)
         # BUG-L2-03 FIX: Do NOT extend hit_names with obs_flags before
         # calling _voting.  obs_flags are scored separately as obf_weight;
         # adding them to hits would double-count them as medium-severity rules.
@@ -595,6 +737,14 @@ class WeightedClassifier:
                 hit_weights=hit_weights,
             )
 
+        # --- Multi-buff chained-obfuscation boost (Track D, capped 0.20) ---
+        # Parity with predict.py: only compounds when a real evasion flag
+        # already fired, so benign nested encodings get no boost.
+        if _chain_boost > 0 and obfuscation_flags:
+            composite = min(composite + _chain_boost, 1.0)
+            if composite >= self.threshold and label == "SAFE":
+                label = "MALICIOUS"
+
         # --- N5: PromptGuard transformer classifier signal ---
         # When enabled, blend the mDeBERTa signal with weight 0.35.
         # Auto-disables after _PG_MAX_CONSECUTIVE_FAILURES consecutive errors.
@@ -646,6 +796,258 @@ class WeightedClassifier:
                         label = "MALICIOUS"
             except Exception:
                 _logger.debug("Centroid embedding (Layer 5) failed", exc_info=True)
+
+        # --- Inter-model propagation (IM.x) — parity with scan() ---
+        # Self-anchored cross-model-authority fabrication (judge/consensus/
+        # upstream-agent/middleware/checkpoint/ecosystem override).  Input-side
+        # detector; weight capped at 0.30 inside get_inter_model_weight.
+        if _HAS_INTER_MODEL:
+            try:
+                _im = detect_inter_model(text)
+                if _im.technique_ids:
+                    _im_w = get_inter_model_weight(_im)
+                    if _im_w > 0.0:
+                        composite = min(composite + _im_w, 1.0)
+                    for _tech in _im.technique_ids:
+                        _im_hit = "inter_model:" + _tech
+                        if _im_hit not in hit_names_seen:
+                            hit_names.append(_im_hit)
+                            hit_names_seen.add(_im_hit)
+                    if composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Inter-model detection failed", exc_info=True)
+
+        # --- In-prose tool-abuse (T1.x, GTG-1002 pivot) — parity with scan() ---
+        # Terminal-phase tool-abuse pivot (privileged-target invocation,
+        # scope-defiance, exfil-to-external-host) with an ROE/scope-compliance
+        # dampener so authorized-pentest benign siblings stay below the floor.
+        if _HAS_TOOL_ABUSE:
+            try:
+                _ta = detect_tool_abuse(text)
+                if _ta.technique_ids:
+                    _ta_w = get_tool_abuse_weight(_ta)
+                    if _ta_w > 0.0:
+                        composite = min(composite + _ta_w, 1.0)
+                    for _tech in _ta.technique_ids:
+                        _ta_hit = "tool_abuse:" + _tech
+                        if _ta_hit not in hit_names_seen:
+                            hit_names.append(_ta_hit)
+                            hit_names_seen.add(_ta_hit)
+                    if composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Tool-abuse detection failed", exc_info=True)
+
+        # --- Multilingual injection (D6) — parity with scan() ---
+        # Mirror predict.scan()'s D6 fold so non-English / transliterated /
+        # code-switched attacks reach a signal in the cascade path too. The
+        # semantic heuristic (detect_multilingual_intents) is gated on the SAME
+        # Layer-0 multilingual flags predict uses, so benign foreign-language
+        # Q&A (no override/extraction target) contributes nothing. The pattern
+        # handler (scan_multilingual) weight is capped at the composite 1.0
+        # ceiling — identical to predict.py — no separate floor mechanism.
+        if _HAS_MULTILINGUAL:
+            try:
+                _ml_flags = _detect_language(text).get("anomaly_flags", [])
+                if raw_text is not None and raw_text != text:
+                    _ml_flags = list(_ml_flags) + [
+                        f for f in _detect_language(raw_text).get("anomaly_flags", [])
+                        if f not in _ml_flags
+                    ]
+                # Semantic heuristic hits (override/extraction/roleplay/...,
+                # incl. subtle-extraction + transliteration). Gated internally
+                # on the multilingual flags + contextual-framing suppression.
+                # These RuleHits carry severities, so reuse the SAME severity
+                # weighting the pattern handler uses (get_multilingual_rule_weight
+                # reads .severity, shared by MultilingualHit and RuleHit) — no
+                # new magic number, capped at the composite 1.0 ceiling.
+                _sem_hits = detect_multilingual_intents(text, _ml_flags)
+                for _mrh in _sem_hits:
+                    if _mrh.name not in hit_names_seen:
+                        detailed_hits.append(_mrh)
+                        hit_names_seen.add(_mrh.name)
+                        hit_names.append(_mrh.name)
+                if _sem_hits:
+                    _sem_w = get_multilingual_rule_weight(_sem_hits)
+                    if _sem_w > 0.0:
+                        composite = min(composite + _sem_w, 1.0)
+                # Pattern-handler weight (capped composite contribution).
+                _ml_hits = scan_multilingual(text)
+                if raw_text is not None and raw_text != text:
+                    _ml_hits = _ml_hits + scan_multilingual(raw_text)
+                if _ml_hits:
+                    _ml_w = get_multilingual_rule_weight(_ml_hits)
+                    if _ml_w > 0.0:
+                        composite = min(composite + _ml_w, 1.0)
+                    for _mh in _ml_hits:
+                        _ml_name = "multilingual:" + _mh.pattern_name
+                        if _ml_name not in hit_names_seen:
+                            hit_names.append(_ml_name)
+                            hit_names_seen.add(_ml_name)
+                if composite >= self.threshold and label == "SAFE":
+                    label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Multilingual (D6) detection failed", exc_info=True)
+        # --- RAG-poison (I1.x) — parity with scan() ---
+        # Instruction/authority/exfil payloads embedded in retrieved RAG context,
+        # documents, email, or structured data.  Weight capped at 0.12 inside
+        # get_rag_poison_weight, so a lone hit is a soft signal, never decisive.
+        if _HAS_RAG_POISON:
+            try:
+                _rp = detect_rag_poisoning(text)
+                if _rp.poison_indicators:
+                    _rp_w = get_rag_poison_weight(_rp)
+                    if _rp_w > 0.0:
+                        composite = min(composite + _rp_w, 1.0)
+                    for _ind in _rp.poison_indicators:
+                        _rp_hit = "rag_poison:" + _ind
+                        if _rp_hit not in hit_names_seen:
+                            hit_names.append(_rp_hit)
+                            hit_names_seen.add(_rp_hit)
+                    if composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("RAG-poison detection failed", exc_info=True)
+        # --- Char-split obfuscation (D7.5) — parity with scan() ---
+        # Layer 0 reassembles single-char splits (i.g.n.o.r.e, i_g_n_o_r_e,
+        # comma/interpunct/vertical stacks); when no word boundary survives,
+        # the glued token matches no rule and the composite stays near zero.
+        # The reassembly signal itself is strong (~0.007% benign fire on 30k
+        # texts), so re-detect on the *raw* text (pre-normalization) and
+        # contribute bounded risk, flooring a long single-char run to the
+        # decision threshold.  Mirrors the re-detect pattern above.
+        try:
+            _cs_src = raw_text if raw_text is not None else text
+            _, _cs_reassembled, _cs_run = _reassemble_char_splits(_cs_src)
+            if _cs_reassembled and _cs_run >= _CHAR_SPLIT_MIN_SCORED:
+                _cs_heavy = _cs_run >= _CHAR_SPLIT_HEAVY_RUN
+                _cs_w = 0.45 if _cs_heavy else 0.20
+                composite = min(composite + _cs_w, 1.0)
+                if _cs_heavy and composite < self.threshold:
+                    composite = max(composite, self.threshold)
+                if "char_split_obfuscation" not in hit_names_seen:
+                    hit_names.append("char_split_obfuscation")
+                    hit_names_seen.add("char_split_obfuscation")
+                if composite >= self.threshold and label == "SAFE":
+                    label = "MALICIOUS"
+        except Exception:
+            _logger.debug("Char-split detection failed", exc_info=True)
+        # --- Ingestion-manipulation (IG.x, OWASP LLM06) — parity with scan() ---
+        # Self-anchored "treat ingested DATA as a DIRECTIVE" co-occurrence
+        # (ingestion-source noun + directive-elevation cue).  Input-side
+        # detector; the composite WEIGHT is capped at 0.30 inside
+        # get_ingestion_weight, so a lone IG weight never crosses the threshold.
+        # A DECISIVE detection (a hard planted-directive cue that CO-OCCURRED with
+        # an ingestion source) flips the verdict directly — same FP-safe
+        # co-occurrence licence as the scan() path and the whitelist tripwire.
+        if _HAS_INGESTION:
+            try:
+                _ig = detect_ingestion(text)
+                if _ig.technique_ids:
+                    _ig_w = get_ingestion_weight(_ig)
+                    if _ig_w > 0.0:
+                        composite = min(composite + _ig_w, 1.0)
+                    for _tech in _ig.technique_ids:
+                        _ig_hit = "ingestion:" + _tech
+                        if _ig_hit not in hit_names_seen:
+                            hit_names.append(_ig_hit)
+                            hit_names_seen.add(_ig_hit)
+                    if _ig.decisive and label == "SAFE":
+                        label = "MALICIOUS"
+                        composite = max(composite, self.threshold)
+                    elif composite >= self.threshold and label == "SAFE":
+                        label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Ingestion-manipulation detection failed", exc_info=True)
+        # --- Fictional frame (C1 compliance evasion) — parity with scan() ---
+        # A fiction/academic/authority frame wrapping a CONCRETE harmful request
+        # (frame × inner-attack conjunction).  predict.py blends this; cascade
+        # historically omitted it entirely, so the two paths disagreed on C1.
+        # Mirror predict's logic exactly:
+        #   * blend the capped frame weight (skip "generic_attack" inner, which
+        #     also fires on benign educational/quoting contexts);
+        #   * floor frame+inner to the default operating boundary when below
+        #     threshold (frame-only is NOT floored — that is the FP guard);
+        #   * g5 confident-ML boost: a frame whose otherwise-critical override/
+        #     extraction rules were context-suppressed, confirmed by a confident
+        #     ML malicious verdict (>= 0.85).
+        # The frame×inner conjunction is the false-positive control: a frame
+        # alone contributes weight 0 (except authority/emotional), so broadening
+        # frame vocabulary cannot block benign "I'm writing a novel about X".
+        if _HAS_FICTIONAL_FRAME:
+            try:
+                _ff = detect_fictional_frame(text)
+                if _ff.has_fictional_frame:
+                    _ff_w = get_fictional_frame_weight(_ff)
+                    _ff_inner = _ff.inner_attack_type
+                    _anchor_floor = THRESHOLDS.DEFAULT_THRESHOLD + 0.01
+                    _ff_hit = "fictional_frame:" + _ff.frame_type
+                    if _ff_hit not in hit_names_seen:
+                        hit_names.append(_ff_hit)
+                        hit_names_seen.add(_ff_hit)
+                    if _ff.has_inner_attack:
+                        _ff_inner_hit = "fictional_inner:" + _ff_inner
+                        if _ff_inner_hit not in hit_names_seen:
+                            hit_names.append(_ff_inner_hit)
+                            hit_names_seen.add(_ff_inner_hit)
+                    if _ff_w > 0.0 and _ff_inner != "generic_attack":
+                        composite = min(composite + _ff_w, 1.0)
+                        if _ff.has_inner_attack and composite < self.threshold:
+                            composite = max(composite, _anchor_floor)
+                        if composite >= self.threshold and label == "SAFE":
+                            label = "MALICIOUS"
+                    # g5: frame + confident ML malicious, even when the inner
+                    # rules were context-suppressed.  Only lift toward the
+                    # DEFAULT operating boundary; yield to a raised threshold.
+                    if (composite < self.threshold
+                            and self.threshold <= THRESHOLDS.DEFAULT_THRESHOLD
+                            and ml_prob_malicious >= 0.85):
+                        composite = max(composite, _anchor_floor)
+                        if composite >= self.threshold and label == "SAFE":
+                            label = "MALICIOUS"
+            except Exception:
+                _logger.debug("Fictional-frame detection failed", exc_info=True)
+        # --- Privacy high-severity floor (P1/P2.x) — parity with scan() ---
+        # scan()/predict.py floors the composite to threshold when the privacy
+        # detector returns HIGH severity (is_extraction matched), because the ML
+        # model has no P-family training signal so a true privacy attack can
+        # otherwise land just under threshold.  The cascade reaches the privacy
+        # rules only via context-suppressible RULES, so a question-framed
+        # membership/PII probe ("Was X in your training data?") was scored
+        # without the privacy rule and slipped under threshold -- a predict/
+        # cascade disparity.  Re-run the SAME detector (educational-frame +
+        # self-ref guards intact, bounded ReDoS-safe regexes) and apply the
+        # identical floor.  Floor (not additive weight) so it cannot overshoot;
+        # the detector's guards keep it FP-safe.
+        if _HAS_PRIVACY_PROBE:
+            try:
+                _priv = _cascade_detect_privacy_probe(text)
+                if _priv is not None:
+                    for _tid in _priv.technique_ids:
+                        _priv_hit = "privacy:" + _tid
+                        if _priv_hit not in hit_names_seen:
+                            hit_names.append(_priv_hit)
+                            hit_names_seen.add(_priv_hit)
+                    if _priv.severity == "high":
+                        if composite < self.threshold:
+                            composite = self.threshold
+                            if label == "SAFE":
+                                label = "MALICIOUS"
+                        # Marker hit: signals the downstream positive-validation
+                        # layer that this MALICIOUS verdict rests on a canonical
+                        # P2.x privacy floor (membership / third-party-PII /
+                        # training-data extraction) and must not be downgraded
+                        # (predict.py parity — see Layer 8 exemption).  Scoped
+                        # to P2.x ONLY: broader/legacy P1.x patterns (e.g. the
+                        # "shared memory" P1.4 phrase) stay downgradeable so the
+                        # cascade keeps its lower benign FPR on those.
+                        if any(t.startswith("P2.") for t in _priv.technique_ids):
+                            if "privacy:high_floor" not in hit_names_seen:
+                                hit_names.append("privacy:high_floor")
+                                hit_names_seen.add("privacy:high_floor")
+            except Exception:
+                _logger.debug("Privacy probe detection failed", exc_info=True)
 
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
@@ -860,9 +1262,10 @@ class CascadeClassifier:
         return True
 
     def _ensure_llm_checker(self) -> Optional[object]:
-        """Lazy-initialise the LLM checker if possible.
+        """Lazy-initialise the fallback LLM judge if possible.
 
-        Returns the checker instance or None.
+        Returns the injected judge, a lazily-built LLMJudge fallback, or None
+        (no API key / backend available, or init failed — stays no-throw).
         """
         if self._judge is not None:
             return self._judge
@@ -871,13 +1274,22 @@ class CascadeClassifier:
         if self._llm_checker_init_attempted:
             return None
         self._llm_checker_init_attempted = True
-        if not _HAS_LLM_CHECKER:
+        if not _HAS_LLM_JUDGE:
+            return None
+        # Pick the backend from whichever API key is present — this preserves the
+        # Groq-only deployments the former Groq-based LLMChecker supported, and
+        # degrades to no judge (None) when neither key is set.
+        if os.environ.get("OPENAI_API_KEY"):
+            backend = "openai"
+        elif os.environ.get("GROQ_API_KEY"):
+            backend = "groq"
+        else:
             return None
         try:
-            self._llm_checker = LLMChecker()
+            self._llm_checker = LLMJudge(backend=backend)
             return self._llm_checker
         except Exception:
-            _logger.warning("Failed to init LLMChecker (Layer 7)", exc_info=True)
+            _logger.warning("Failed to init LLMJudge (Layer 7)", exc_info=True)
             return None
 
     def classify(self, text: str) -> Tuple[str, float, List[str], str]:
@@ -990,6 +1402,17 @@ class CascadeClassifier:
             # Build technique_tags from hit names via module-level lookup.
             technique_tags = []
             for h in hits:
+                # Privacy detector hits carry their canonical leaf inline as
+                # "privacy:<P2.x>" (the floor block above), but have no
+                # _RULE_TECHNIQUES entry; surface the leaf directly so the
+                # cascade emits the canonical P2.x tag in parity with scan().
+                # The "privacy:high_floor" marker is reporting-only (not a
+                # technique id) and is skipped.
+                if h.startswith("privacy:") and h != "privacy:high_floor":
+                    _leaf = h.split(":", 1)[1]
+                    if _leaf and _leaf[0] == "P" and _leaf not in technique_tags:
+                        technique_tags.append(_leaf)
+                    continue
                 for tid in _RULE_TECHNIQUES.get(h, ()):
                     if tid not in technique_tags:
                         technique_tags.append(tid)
@@ -999,6 +1422,45 @@ class CascadeClassifier:
             # Using 0.5 confidence signals maximum uncertainty.
             label, confidence, hits = "SAFE", 0.5, []
             technique_tags = []
+
+        # ---------------------------------------------------------------
+        # Multimodal hidden-channel scoring (M1/M2/M3) — parity with scan().
+        # Presence of a modality is NOT malicious.  DAMPENER: a clean
+        # embedded image / data-URI / attachment whose only signals are
+        # blob-shape artefacts is clamped below threshold.  BOOST: a hidden
+        # channel + an *independent* injection indicator adds a bounded
+        # corroborating boost (cap 0.30).  Operates in P(malicious) space,
+        # then converts back to the cascade's P(label-correct) confidence.
+        # ---------------------------------------------------------------
+        if _HAS_MULTIMODAL and l0 and _has_hidden_channel(l0.anomaly_flags):
+            try:
+                _mm_threshold = self._weighted.threshold
+                for _mm_tid in _map_m_flags(l0.anomaly_flags):
+                    if _mm_tid not in technique_tags:
+                        technique_tags.append(_mm_tid)
+                # Convert cascade confidence (P(label correct)) -> P(malicious).
+                _p_mal = confidence if label == "MALICIOUS" else 1.0 - confidence
+                if _is_uncorroborated_channel(l0.anomaly_flags, hits):
+                    if _p_mal > _MM_CLEAN_CEILING:
+                        _p_mal = _MM_CLEAN_CEILING
+                        label = "MALICIOUS" if _p_mal >= _mm_threshold else "SAFE"
+                        if "multimodal:clean_image_dampened" not in hits:
+                            hits.append("multimodal:clean_image_dampened")
+                else:
+                    _mm_boost = _get_multimodal_boost(
+                        l0.anomaly_flags, hits,
+                        corroborated=(label == "MALICIOUS"),
+                    )
+                    if _mm_boost > 0.0:
+                        _p_mal = min(_p_mal + _mm_boost, 1.0)
+                        if _p_mal >= _mm_threshold:
+                            label = "MALICIOUS"
+                # Convert back to P(label correct).
+                confidence = round(
+                    _p_mal if label == "MALICIOUS" else 1.0 - _p_mal, 4
+                )
+            except Exception:
+                _logger.debug("Multimodal scoring (cascade) failed", exc_info=True)
 
         # ---------------------------------------------------------------
         # Layer 6: Groundedness check — verify MALICIOUS verdicts are
@@ -1209,44 +1671,24 @@ class CascadeClassifier:
             if needs_judge:
                 _t0_judge = time.monotonic()
                 try:
-                    # Layer 7: LLM checker uses classify_prompt() and
-                    # returns LLMCheckResult(label, confidence, rationale).
-                    # The original judge interface uses .classify(text) ->
-                    # verdict with .error / .verdict / .confidence attrs.
-                    # Handle both interfaces.
-                    if _HAS_LLM_CHECKER and isinstance(judge, LLMChecker):
-                        result = judge.classify_prompt(clean)
-                        self._record_slo("judge", (time.monotonic() - _t0_judge) * 1000)
-                        with self._stats_lock:
-                            self._judged += 1
-                        if result.label in ("SAFE", "MALICIOUS"):
-                            original_label = label
-                            label, confidence = _blend_verdicts(
-                                label, confidence, result.label, result.confidence,
-                            )
-                            if label != original_label:
-                                with self._stats_lock:
-                                    self._judge_overrides += 1
-                            judge_reasoning = getattr(result, "rationale", "")
-                            return label, confidence, hits, "judge", l0, judge_reasoning, technique_tags
-                    else:
-                        # Original LLMJudge interface
-                        verdict = judge.classify(clean)
-                        self._record_slo("judge", (time.monotonic() - _t0_judge) * 1000)
-                        with self._stats_lock:
-                            self._judged += 1
-                        if (hasattr(verdict, "error") and verdict.error is None
-                                and hasattr(verdict, "verdict")
-                                and verdict.verdict != "UNKNOWN"):
-                            original_label = label
-                            label, confidence = _blend_verdicts(
-                                label, confidence, verdict.verdict, verdict.confidence,
-                            )
-                            if label != original_label:
-                                with self._stats_lock:
-                                    self._judge_overrides += 1
-                            judge_reasoning = getattr(verdict, "reasoning", "")
-                            return label, confidence, hits, "judge", l0, judge_reasoning, technique_tags
+                    # Layer 7: the judge exposes .classify(text) -> JudgeVerdict
+                    # with .error / .verdict / .confidence / .reasoning.
+                    verdict = judge.classify(clean)
+                    self._record_slo("judge", (time.monotonic() - _t0_judge) * 1000)
+                    with self._stats_lock:
+                        self._judged += 1
+                    if (hasattr(verdict, "error") and verdict.error is None
+                            and hasattr(verdict, "verdict")
+                            and verdict.verdict != "UNKNOWN"):
+                        original_label = label
+                        label, confidence = _blend_verdicts(
+                            label, confidence, verdict.verdict, verdict.confidence,
+                        )
+                        if label != original_label:
+                            with self._stats_lock:
+                                self._judge_overrides += 1
+                        judge_reasoning = getattr(verdict, "reasoning", "")
+                        return label, confidence, hits, "judge", l0, judge_reasoning, technique_tags
                 except Exception:
                     _logger.debug("LLM judge (Layer 7) failed", exc_info=True)
                     with self._stats_lock:
@@ -1257,14 +1699,35 @@ class CascadeClassifier:
         # the input IS a legitimate prompt, downgrade to SAFE.  This
         # catches benign prompts that mention injection-related vocabulary.
         #
-        # EXCEPTION: a high-severity worm floor promotion (conf >= 0.75) is
-        # terminal and must NOT be downgraded here.  A standalone self-
-        # replication instruction IS the attack, not a benign prompt that
-        # merely mentions injection vocabulary, so positive validation's
-        # FP-reduction premise does not apply.  This keeps cascade.scan() in
-        # parity with predict.scan(), whose worm floor has no downstream
-        # positive-validation override.
+        # FOUR parity guards keep cascade.scan() aligned with predict.scan()
+        # (which has no positive-validation stage).  A verdict must NOT be
+        # downgraded here when it rests on:
+        # (a) a high-severity WORM floor promotion (conf >= 0.75) — a standalone
+        #     self-replication instruction IS the attack, not a benign prompt
+        #     that merely mentions injection vocabulary;
+        # (b) a DECISIVE ingestion planted-directive (hard cue + ingestion
+        #     source — unambiguous embedded injection; mirrors the whitelist
+        #     tripwire);
+        # (c) a fictional/academic/authority frame wrapping a CONCRETE inner
+        #     attack ("fictional_inner:..." — the compliance-evasion class whose
+        #     whole purpose is to look legitimate); or
+        # (d) a HIGH-severity privacy probe ("privacy:high_floor" — P2.x
+        #     membership / third-party-PII / training-data extraction, a well-
+        #     formed question positive validation would mis-read as legitimate).
+        # Frame-ONLY hits (no inner) are NOT guarded, so benign novels /
+        # documentaries stay downgradeable.
+        _ig_decisive = False
+        if label == "MALICIOUS" and _HAS_INGESTION:
+            try:
+                _ig_decisive = detect_ingestion(clean).decisive
+            except Exception:
+                _ig_decisive = False
+        _ff_inner_present = any(h.startswith("fictional_inner:") for h in hits)
+        _privacy_high_floor = "privacy:high_floor" in hits
         if (label == "MALICIOUS" and not _worm_floor_promoted
+                and not _ig_decisive
+                and not _ff_inner_present
+                and not _privacy_high_floor
                 and self._positive_validator is not None):
             try:
                 # BUG-L8-2 fix: pass L0-sanitized text instead of raw input

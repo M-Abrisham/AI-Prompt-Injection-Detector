@@ -48,11 +48,11 @@ Optional extras live in [pyproject.toml](pyproject.toml). Once a `pyproject_extr
 ## What it detects
 
 - **Encoding tricks** — base64, hex, ROT13, leetspeak, ASCII art, Unicode invisibles, whitespace stego. <!-- src: src/na0s/layer2/__init__.py:25 -->
-- **Pattern attacks** — instruction overrides, role hijacking, structural boundary injection. **120** regex rules. <!-- src: src/na0s/layer1/rules_registry.py:65; total via facts.yaml#rule_count.total_ast -->
+- **Pattern attacks** — instruction overrides, role hijacking, structural boundary injection. **122** regex rules. <!-- src: src/na0s/layer1/rules_registry.py:65; total via facts.yaml#rule_count.total_ast -->
 - **Semantic attacks** — fictional framing, indirect extraction, RAG poisoning, multilingual obfuscation. <!-- src: src/na0s/detectors/, src/na0s/multilingual_handler.py -->
 - **Multi-turn attacks** — fabricated history, escalation, payload splitting, scheming. **8** detectors over session state. <!-- src: src/na0s/layer16/detectors/; count via facts.yaml#L16_detectors -->
 
-Coverage spans **30** attack categories and **279** techniques. <!-- facts.yaml#taxonomy -->
+Coverage spans **31** attack categories and **286** techniques. <!-- facts.yaml#taxonomy -->
 
 ---
 
@@ -77,7 +77,7 @@ ScanResult
 
 <!-- src: src/na0s/layer0/__init__.py:2 (sanitize), src/na0s/layer1/analyzer.py:53 (rules), src/na0s/layer2/__init__.py:25 (obfuscation), src/na0s/structural/__init__.py:22 (structural), src/na0s/predict.py:578 (ML), src/na0s/embedding_classifier.py (embedding), src/na0s/_voting.py (cascade), src/na0s/judge/llm_judge.py (judge) -->
 
-`classify_prompt()` performs **37** named detection calls per input — full ordered list in [`docs/facts.yaml`](docs/facts.yaml). <!-- src: src/na0s/predict.py:640; facts.yaml#detection_signals_in_scan -->
+`classify_prompt()` performs **43** named detection calls per input — full ordered list in [`docs/facts.yaml`](docs/facts.yaml). <!-- src: src/na0s/predict.py:640; facts.yaml#detection_signals_in_scan -->
 
 Default decision threshold is **0.55**, configurable via `DECISION_THRESHOLD` env var or per-call `threshold=` argument. <!-- src: src/na0s/_voting.py:118; facts.yaml#constants.DECISION_THRESHOLD -->
 
@@ -167,7 +167,7 @@ After `pip install -e .` the `na0s` shorthand is on `$PATH`. Exit codes follow t
 
 ## Taxonomy
 
-**30** categories, **279** techniques. <!-- facts.yaml#taxonomy -->
+**31** categories, **286** techniques. <!-- facts.yaml#taxonomy -->
 
 The largest by technique count:
 
@@ -246,7 +246,7 @@ pytest tests/canary/                    # one package
 pytest --collect-only -q tests/         # what scripts/extract_facts.py uses
 ```
 
-`9449` tests across `304` files at last extraction. **0** collection errors. <!-- facts.yaml#test_count, facts.yaml#test_files — volatile counts kept in inline code so the docs-drift gate doesn't hard-pin them (ISS-08) -->
+`9853` tests across `325` files at last extraction. **0** collection errors. <!-- facts.yaml#test_count, facts.yaml#test_files — volatile counts kept in inline code so the docs-drift gate doesn't hard-pin them (ISS-08) -->
 
 ---
 

@@ -100,6 +100,18 @@ class TestImport(unittest.TestCase):
         ):
             self.assertTrue(hasattr(mod, attr), f"Missing attribute: {attr}")
 
+    def test_category_a_gcg_discovery_targets_present(self):
+        """Adversarial-ML / GCG family (category A / INJ-0023) must stay in the
+        harvester discovery queue so the data/CI environment can acquire the
+        category-A corpus for the deferred retrain. Locks in the PAYOFF enablement.
+        """
+        import weekly_harvest as mod
+        hf = " ".join(mod.HF_QUERIES).lower()
+        for term in ("gcg", "advbench", "autodan", "harmbench"):
+            self.assertIn(term, hf, f"HF_QUERIES missing category-A term: {term}")
+        self.assertIn("walledai/AdvBench", mod.SEED_KNOWN_DATASETS)
+        self.assertIn("walledai/HarmBench", mod.SEED_KNOWN_DATASETS)
+
 
 # ===================================================================
 # 1b. Query-list coverage tests

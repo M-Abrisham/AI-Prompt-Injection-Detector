@@ -19,7 +19,7 @@ References:
   - Shen et al. "Do Anything Now" (2024): fictional framing as jailbreak vector
 """
 
-from .rules.result import Rule
+from ..result import Rule
 
 # ---------------------------------------------------------------------------
 # Shared harmful-content keyword group — reused across all C1 rules.

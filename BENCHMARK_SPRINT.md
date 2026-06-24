@@ -76,7 +76,7 @@
 
 ### 2. Dataset Gaps
 
-- [ ] **Create 70/30 stratified split** — tune vs holdout by label + category
+- [x] **Create 70/30 stratified split** — tune vs holdout by label + category — DONE (2026-06-20): `src/na0s/judge/splits.py` `stratified_split()` (70/15/15 train/dev/test, stratified by label×category, disjoint `stable_id` sets) + one-time-test guard (`test_manifest_hash`/`check_test_unused`)
 - [ ] **Download `deepset_pi.jsonl`** — benchmark dataset not yet on disk
 - [ ] **Download `benign_alpaca.jsonl`** — benchmark dataset not yet on disk
 - [ ] **Download `benign_dolly.jsonl`** — benchmark dataset not yet on disk
@@ -228,7 +228,8 @@
 
 - [ ] **IMP-2**: Upgrade benchmark harness
   - `--threshold-sweep`, `--output-roc`, `--per-category`, `--recall-at-fpr`
-  - Confidence interval computation
+  - [x] Confidence interval computation — DONE (2026-06-20): `src/na0s/judge/calibration.py` (`bootstrap_ci`, `rogan_gladen_ci`) wired into `scripts/benchmark.py` (TPR/TNR/precision/recall + 95% bootstrap CIs; accuracy demoted to a prevalence-labeled footnote)
+  - [x] Judge calibration harness — DONE (2026-06-20): `scripts/calibrate_judge.py` scores the F14 eval set (NOT the training corpus) per attack category with a decontam precondition + Rogan-Gladen prevalence correction; per-class binary judges + leakage-safe few-shot in `src/na0s/judge/per_class.py`, flag-gated live via `NA0S_JUDGE_PER_CLASS` (default off)
 
 - [ ] **IMP-3**: Create `scripts/benchmark_report.py`
   - Auto-generate results from benchmark JSON

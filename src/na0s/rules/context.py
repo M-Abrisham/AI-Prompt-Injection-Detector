@@ -324,7 +324,11 @@ _CONTEXT_SUPPRESSIBLE = frozenset({
     "conversation_extraction",
     "training_data_completion",
     "cross_session_leakage",
-    "membership_inference",
+    # membership_inference is NOT here -- it moved to
+    # _STRONG_CONTEXT_ONLY_SUPPRESSIBLE (membership probes are inherently
+    # question-phrased: "Was X in your training data?".  Suppressing on the
+    # bare question frame gutted P2.2 detection and broke predict/cascade
+    # parity; mirrors the E2 recon precedent below).
 })
 
 # Rules that require STRONG contextual framing to suppress -- NOT suppressed
@@ -344,4 +348,12 @@ _STRONG_CONTEXT_ONLY_SUPPRESSIBLE = frozenset({
     "model_fingerprinting",
     "boundary_testing",
     "config_extraction",
+    # P2.2 membership inference: "Was X in your training data?" is inherently a
+    # question, so the bare question frame must NOT gut it (same rationale as
+    # the E2 recon rules above).  The registry rule is anchored on the
+    # "... in your training data/set/corpus" axis, so it does not fire on
+    # benign questions ("was the meeting on Monday?") -- verified zero-FP on
+    # the safe holdout.  STRONG framing (quoting / explicit educational
+    # context) still suppresses it.
+    "membership_inference",
 })

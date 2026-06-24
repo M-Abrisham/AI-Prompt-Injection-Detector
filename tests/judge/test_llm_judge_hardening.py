@@ -351,53 +351,10 @@ class TestCascadePassesCleanText(unittest.TestCase):
         # Assert judge received the sanitized text, not raw
         mock_judge.classify.assert_called_once_with("SANITIZED_OUTPUT")
 
-    @patch("na0s.cascade._get_cached_models")
-    @patch("na0s.cascade.layer0_sanitize")
-    def test_llm_checker_receives_clean_text(self, mock_l0, mock_models):
-        """LLMChecker.classify_prompt receives sanitized text, not raw."""
-        from na0s.cascade import CascadeClassifier
-
-        # Mock layer0_sanitize to return different clean text
-        mock_l0_result = MagicMock()
-        mock_l0_result.rejected = False
-        mock_l0_result.sanitized_text = "CLEANED_TEXT"
-        mock_l0_result.anomaly_flags = []
-        mock_l0.return_value = mock_l0_result
-
-        # Mock models so weighted classifier produces ambiguous result
-        mock_vectorizer = MagicMock()
-        mock_model = MagicMock()
-        mock_vectorizer.transform.return_value = MagicMock()
-        mock_model.predict.return_value = ["MALICIOUS"]
-        mock_model.predict_proba.return_value = [[0.45, 0.55]]
-        mock_model.classes_ = ["SAFE", "MALICIOUS"]
-        mock_models.return_value = (mock_vectorizer, mock_model)
-
-        # Create a real LLMChecker instance (mocked) so isinstance check passes
-        with patch("na0s.llm_checker.Groq"):
-            mock_judge = LLMChecker(api_key="test-key")
-
-        # Mock classify_prompt to capture calls
-        mock_judge_result = MagicMock()
-        mock_judge_result.label = "MALICIOUS"
-        mock_judge_result.confidence = 0.9
-        mock_judge_result.rationale = "injection"
-        mock_judge.classify_prompt = MagicMock(return_value=mock_judge_result)
-
-        detector = CascadeClassifier(
-            vectorizer=mock_vectorizer,
-            model=mock_model,
-            llm_judge=mock_judge,
-        )
-        # Force the judge thresholds to always escalate to judge
-        detector.JUDGE_LOWER_THRESHOLD = 0.0
-        detector.JUDGE_UPPER_THRESHOLD = 1.0
-
-        raw_text = "RAW_MALICIOUS_TEXT"
-        detector.classify(raw_text)
-
-        # Assert classify_prompt received the sanitized text, not raw
-        mock_judge.classify_prompt.assert_called_once_with("CLEANED_TEXT")
+    # (Removed test_llm_checker_receives_clean_text: cascade no longer routes
+    # through the deprecated LLMChecker.classify_prompt path. The sibling test
+    # test_llm_judge_receives_clean_not_raw above covers sanitized-text delivery
+    # via the LLMJudge.classify path.)
 
 
 # ============================================================================

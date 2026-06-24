@@ -92,10 +92,23 @@ _SKIP_TAGS: frozenset[str] = frozenset({"script", "style"})
 # Hidden-content CSS patterns in inline styles
 # opacity: the terminator group uses (?:[;'"]|$) so a style attribute that
 # ends with "opacity: 0" (no trailing semicolon) is still caught.
+#
+# off_screen: text pushed far outside the viewport via a large negative
+#   absolute offset (the classic ``position:absolute;left:-9999px`` /
+#   ``top:-9999px`` clip pattern, also used by legitimate .sr-only labels).
+#   The ``-\d{3,}`` bound (>= -100px) is the realistic off-screen threshold:
+#   it matches the -9999px / -10000px values attackers and sr-only patterns
+#   use while leaving small layout nudges (``left:-2px``) untouched. It is a
+#   justified physical boundary, not an arbitrary magic number.
+# clip: ``clip:rect(0,0,0,0)`` collapses the element to a zero-area box — the
+#   pre-``clip-path`` invisibility idiom.
 _HIDDEN_STYLE_RE = re.compile(
     r"display\s*:\s*none|"
+    r"visibility\s*:\s*hidden|"
     r"opacity\s*:\s*0(?:\.0*)?\s*(?:[;'\"]|$)|"
-    r"font-size\s*:\s*0",
+    r"font-size\s*:\s*0|"
+    r"position\s*:\s*absolute[^;}]*;[^}]*?(?:left|top)\s*:\s*-\d{3,}\s*px|"
+    r"clip\s*:\s*rect\(\s*0",
     re.IGNORECASE,
 )
 
@@ -183,12 +196,22 @@ class _TextExtractor(HTMLParser):
             self._tag_stack.append(tag)
             return
 
-        style = dict(attrs).get("style", "")
+        attr_dict = dict(attrs)
+        style = attr_dict.get("style", "")
+        # HTML5 boolean ``hidden`` attribute (``<div hidden>…``) renders the
+        # element non-visible just like ``display:none``.  An attribute named
+        # exactly "hidden" is present (value is None / "" for the boolean form,
+        # or any string such as "until-found"); ``aria-hidden`` / ``data-hidden``
+        # do NOT key as "hidden" so they are not matched here.  Void elements
+        # are already returned above, so ``<input type="hidden">`` (a void
+        # element whose *type* — not a bare ``hidden`` attribute — is "hidden")
+        # never reaches this branch.
+        hidden_attr = "hidden" in attr_dict
         if self._skip_depth > 0:
             # Already inside a hidden element — track nested depth
             self._skip_depth += 1
             self._tag_stack.append(tag)
-        elif _HIDDEN_STYLE_RE.search(style):
+        elif hidden_attr or _HIDDEN_STYLE_RE.search(style):
             self._flags.append("hidden_html_content")
             self._skip_depth += 1
             self._tag_stack.append(tag)

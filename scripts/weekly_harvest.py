@@ -82,6 +82,15 @@ HF_QUERIES = [
     "Morris II worm",
     "agentic AI worm",
     "prompt propagation",
+    # Adversarial-ML / automated-jailbreak families (category A / INJ-0023, D7.5).
+    # Discovery targets only — the harvester acquires these PUBLIC datasets so a
+    # data/CI environment can retrain the ML classifier on category-A coverage.
+    "GCG adversarial suffix",
+    "AdvBench harmful behaviors",
+    "AutoDAN jailbreak",
+    "HarmBench",
+    "PAIR jailbreak",
+    "TAP tree of attacks",
 ]
 
 ARXIV_QUERIES = [
@@ -92,6 +101,10 @@ ARXIV_QUERIES = [
     "all:self-replicating+prompt",
     "all:Morris+II+worm+LLM",
     "all:prompt+infection+multi-agent",
+    # Category-A source papers (for provenance + linked dataset discovery).
+    "all:GCG+adversarial+suffix+aligned+language+model",
+    "all:AutoDAN+jailbreak",
+    "all:HarmBench+red+teaming",
 ]
 
 GITHUB_QUERIES = [
@@ -101,6 +114,10 @@ GITHUB_QUERIES = [
     # Worm / self-replication (IM1.6 / AML.T0061)
     "self-replicating+prompt+dataset",
     "LLM+worm+dataset",
+    # Canonical category-A attack-corpus repos (dataset acquisition).
+    "llm-attacks+GCG",
+    "AdvBench+harmful+behaviors",
+    "HarmBench+behaviors",
 ]
 
 # Dataset IDs already used in Na0S (pre-populated for known_datasets.txt)
@@ -117,6 +134,10 @@ SEED_KNOWN_DATASETS = [
     "reshabhs/SPML_Chatbot_Prompt_Injection",
     "ethz-spylab/ctf-satml24",
     "OpenAssistant/oasst1",
+    # Category-A (adversarial-ML / GCG) public corpora — known dataset IDs so
+    # the harvester pulls them for the deferred category-A retrain (INJ-0023).
+    "walledai/AdvBench",
+    "walledai/HarmBench",
 ]
 
 DEFAULT_OUTPUT_DIR = "data/harvest"
@@ -579,6 +600,38 @@ def _update_scan_history(output_dir, summary):
 
 
 # ---------------------------------------------------------------------------
+# Taxonomy-aware tagging (additive, offline, keyless)
+# ---------------------------------------------------------------------------
+
+def _tag_discoveries(discoveries):
+    """Attach a canonical Na0S ``attack_category`` to each discovery in place.
+
+    Pure/offline: routes each record's relevance signals through
+    ``na0s.eval.harvest.tag_discovery`` (ATLAS id -> mapped code, else curated
+    keyword -> canonical code). Records with no confident, canonical match are
+    left untagged (never guessed, never dropped). The na0s import is guarded so
+    the standalone harvester still runs if the package is not importable.
+    """
+    try:
+        from na0s.eval.harvest import tag_discovery
+    except Exception as exc:  # pragma: no cover - optional dependency at runtime
+        log.warning("Taxonomy tagging unavailable (%s); leaving records untagged", exc)
+        return
+    tagged = 0
+    for entry in discoveries:
+        try:
+            category = tag_discovery(entry)
+        except Exception as exc:  # pragma: no cover - never let tagging crash a scan
+            log.warning("Tagging failed for %r: %s", entry.get("id"), exc)
+            continue
+        if category:
+            entry["attack_category"] = category
+            tagged += 1
+    log.info("Tagged %d/%d discoveries with a canonical attack_category",
+             tagged, len(discoveries))
+
+
+# ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
 
@@ -658,6 +711,12 @@ def run_harvest(output_dir, since_days=7, sources=None, dry_run=False):
             seen.add(key)
             unique.append(entry)
     all_discoveries = unique
+
+    # Taxonomy-aware tagging (additive, offline). Attach a CANONICAL Na0S
+    # attack_category to each discovery when one can be confidently resolved
+    # from its relevance signals (ATLAS id or curated keyword); records with no
+    # confident match are left untagged for manual mapping, never dropped.
+    _tag_discoveries(all_discoveries)
 
     total = len(all_discoveries)
 

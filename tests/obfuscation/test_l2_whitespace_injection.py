@@ -43,7 +43,7 @@ class TestWhitespaceInjectionSingleLayer:
     def test_zwsp_between_letters(self):
         """ZWSP (U+200B) inserted between letters of 'ignore previous'."""
         payload = _inject_zwsp("ignore previous")
-        flags, decoded_pairs = _scan_single_layer(payload)
+        flags, decoded_pairs, _ = _scan_single_layer(payload)
 
         assert "whitespace_injection" in flags
         # The decoded view should have the zero-width chars stripped
@@ -54,7 +54,7 @@ class TestWhitespaceInjectionSingleLayer:
     def test_zwnj_between_letters(self):
         """ZWNJ (U+200C) inserted between letters."""
         payload = _inject_zwsp("bypass safety", zw_char="\u200c")
-        flags, decoded_pairs = _scan_single_layer(payload)
+        flags, decoded_pairs, _ = _scan_single_layer(payload)
 
         assert "whitespace_injection" in flags
         decoded_texts = [text for text, enc in decoded_pairs if enc == "whitespace_injection"]
@@ -64,7 +64,7 @@ class TestWhitespaceInjectionSingleLayer:
     def test_zwj_between_letters(self):
         """ZWJ (U+200D) inserted between letters."""
         payload = _inject_zwsp("reveal secrets", zw_char="\u200d")
-        flags, decoded_pairs = _scan_single_layer(payload)
+        flags, decoded_pairs, _ = _scan_single_layer(payload)
 
         assert "whitespace_injection" in flags
         decoded_texts = [text for text, enc in decoded_pairs if enc == "whitespace_injection"]
@@ -75,7 +75,7 @@ class TestWhitespaceInjectionSingleLayer:
         """Mix of ZWSP + ZWNJ + ZWJ between letters."""
         # Manually build: i<ZWSP>g<ZWNJ>n<ZWJ>o<ZWSP>r<ZWNJ>e
         payload = "i\u200bg\u200cn\u200do\u200br\u200ce"
-        flags, decoded_pairs = _scan_single_layer(payload)
+        flags, decoded_pairs, _ = _scan_single_layer(payload)
 
         assert "whitespace_injection" in flags
         decoded_texts = [text for text, enc in decoded_pairs if enc == "whitespace_injection"]
@@ -85,7 +85,7 @@ class TestWhitespaceInjectionSingleLayer:
     def test_bom_injection(self):
         """BOM (U+FEFF) used as zero-width injection char."""
         payload = "i\ufeffg\ufeffn\ufeffo\ufeffr\ufeffe"
-        flags, decoded_pairs = _scan_single_layer(payload)
+        flags, decoded_pairs, _ = _scan_single_layer(payload)
 
         assert "whitespace_injection" in flags
         decoded_texts = [text for text, enc in decoded_pairs if enc == "whitespace_injection"]
@@ -95,7 +95,7 @@ class TestWhitespaceInjectionSingleLayer:
     def test_word_joiner_injection(self):
         """Word Joiner (U+2060) used as zero-width injection char."""
         payload = "i\u2060g\u2060n\u2060o\u2060r\u2060e"
-        flags, decoded_pairs = _scan_single_layer(payload)
+        flags, decoded_pairs, _ = _scan_single_layer(payload)
 
         assert "whitespace_injection" in flags
         decoded_texts = [text for text, enc in decoded_pairs if enc == "whitespace_injection"]
@@ -106,7 +106,7 @@ class TestWhitespaceInjectionSingleLayer:
         """All five zero-width chars used in a single payload."""
         # d<ZWSP>i<ZWNJ>s<ZWJ>r<FEFF>e<WJ>gard
         payload = "d\u200bi\u200cs\u200dr\ufeffe\u2060gard"
-        flags, decoded_pairs = _scan_single_layer(payload)
+        flags, decoded_pairs, _ = _scan_single_layer(payload)
 
         assert "whitespace_injection" in flags
         decoded_texts = [text for text, enc in decoded_pairs if enc == "whitespace_injection"]
@@ -124,30 +124,30 @@ class TestWhitespaceInjectionFalsePositives:
     def test_normal_ascii_text(self):
         """Plain ASCII text with regular spaces."""
         text = "Please summarize this article for me in three paragraphs."
-        flags, decoded_pairs = _scan_single_layer(text)
+        flags, decoded_pairs, _ = _scan_single_layer(text)
         assert "whitespace_injection" not in flags
 
     def test_text_with_tabs_and_newlines(self):
         """Text with tabs and newlines -- normal whitespace."""
         text = "Column A\tColumn B\tColumn C\nValue 1\tValue 2\tValue 3"
-        flags, decoded_pairs = _scan_single_layer(text)
+        flags, decoded_pairs, _ = _scan_single_layer(text)
         assert "whitespace_injection" not in flags
 
     def test_text_with_multiple_spaces(self):
         """Text with multiple consecutive spaces."""
         text = "Hello     world     this  has   extra   spaces"
-        flags, decoded_pairs = _scan_single_layer(text)
+        flags, decoded_pairs, _ = _scan_single_layer(text)
         assert "whitespace_injection" not in flags
 
     def test_empty_string(self):
         """Empty string should not trigger."""
-        flags, decoded_pairs = _scan_single_layer("")
+        flags, decoded_pairs, _ = _scan_single_layer("")
         assert "whitespace_injection" not in flags
 
     def test_unicode_text_no_zw(self):
         """Unicode text (CJK, accented chars) without zero-width chars."""
         text = "Bonjour le monde! Hola mundo! Hallo Welt!"
-        flags, decoded_pairs = _scan_single_layer(text)
+        flags, decoded_pairs, _ = _scan_single_layer(text)
         assert "whitespace_injection" not in flags
 
 

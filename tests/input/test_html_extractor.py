@@ -121,10 +121,112 @@ class TestHiddenContent(unittest.TestCase):
         self.assertNotIn("tiny", result.text)
 
     def test_visibility_hidden_in_regex(self):
-        """The _HIDDEN_STYLE_RE covers display:none, opacity:0, font-size:0.
-        visibility:hidden is NOT covered by the current regex — verify that
-        the regex does NOT match it, so we don't assert a wrong expectation."""
-        self.assertIsNone(_HIDDEN_STYLE_RE.search("visibility:hidden"))
+        """visibility:hidden is now covered by _HIDDEN_STYLE_RE (PART-2).
+
+        Previously the regex did not match visibility:hidden; the PART-2
+        hardening added it so the hidden text is suppressed + flagged. This is
+        the intended security behavior, asserted directly on the regex.
+        """
+        self.assertIsNotNone(_HIDDEN_STYLE_RE.search("visibility:hidden"))
+        self.assertIsNotNone(_HIDDEN_STYLE_RE.search("visibility : hidden"))
+
+    def test_visibility_hidden_suppressed_and_flagged(self):
+        """visibility:hidden div: text suppressed, hidden_html_content flagged."""
+        html = '<div style="visibility:hidden">secret</div><p>visible</p>'
+        result = extract_safe_text(html)
+        self.assertIn("hidden_html_content", result.flags)
+        self.assertNotIn("secret", result.text)
+        self.assertIn("visible", result.text)
+
+    def test_boolean_hidden_attribute_suppressed_and_flagged(self):
+        """HTML5 boolean `hidden` attribute: text suppressed + flagged."""
+        html = "<div hidden>secret</div><p>visible</p>"
+        result = extract_safe_text(html)
+        self.assertIn("hidden_html_content", result.flags)
+        self.assertNotIn("secret", result.text)
+        self.assertIn("visible", result.text)
+
+    def test_offscreen_absolute_suppressed_and_flagged(self):
+        """Far off-screen absolute positioning (left:-9999px): suppressed + flagged."""
+        html = (
+            '<span style="position:absolute;left:-9999px">secret</span>'
+            "<p>visible</p>"
+        )
+        result = extract_safe_text(html)
+        self.assertIn("hidden_html_content", result.flags)
+        self.assertNotIn("secret", result.text)
+        self.assertIn("visible", result.text)
+
+    def test_offscreen_top_variant(self):
+        """Off-screen via top:-9999px (not just left) is also covered."""
+        html = '<div style="position:absolute;top:-9999px">secret</div>shown'
+        result = extract_safe_text(html)
+        self.assertIn("hidden_html_content", result.flags)
+        self.assertNotIn("secret", result.text)
+
+    def test_clip_rect_zero_suppressed_and_flagged(self):
+        """clip:rect(0,0,0,0) zero-area clip: suppressed + flagged."""
+        html = (
+            '<span style="clip:rect(0,0,0,0);position:absolute">secret</span>'
+            "<p>visible</p>"
+        )
+        result = extract_safe_text(html)
+        self.assertIn("hidden_html_content", result.flags)
+        self.assertNotIn("secret", result.text)
+        self.assertIn("visible", result.text)
+
+    # --- FP guards for the PART-2 additions ---
+
+    def test_input_hidden_void_element_no_flag(self):
+        """<input type="hidden"> CSRF token: void element, must NOT flag.
+
+        The attribute is type=hidden (not a bare boolean `hidden`), AND input
+        is a void element returned before the hidden-attr check — doubly safe.
+        """
+        html = (
+            '<form><input type="hidden" name="csrf_token" value="abc">'
+            "<label>Email</label></form>"
+        )
+        result = extract_safe_text(html)
+        self.assertNotIn("hidden_html_content", result.flags)
+
+    def test_aria_hidden_no_flag(self):
+        """aria-hidden="true" (ubiquitous a11y idiom) must NOT flag."""
+        html = '<span aria-hidden="true">decorative</span><p>real text</p>'
+        result = extract_safe_text(html)
+        self.assertNotIn("hidden_html_content", result.flags)
+        self.assertIn("real text", result.text)
+        self.assertIn("decorative", result.text)
+
+    def test_data_hidden_attr_no_flag(self):
+        """A custom data-hidden attribute must NOT match the boolean `hidden`."""
+        html = '<div data-hidden="1">visible content</div>'
+        result = extract_safe_text(html)
+        self.assertNotIn("hidden_html_content", result.flags)
+        self.assertIn("visible content", result.text)
+
+    def test_micro_offset_no_flag(self):
+        """Small layout nudges (left:-2px) are NOT off-screen — must NOT flag."""
+        html = '<span style="position:absolute;left:-2px">badge</span>'
+        result = extract_safe_text(html)
+        self.assertNotIn("hidden_html_content", result.flags)
+        self.assertIn("badge", result.text)
+
+    def test_offscreen_regex_micro_offset_boundary(self):
+        """The off-screen regex requires >= 3 digits (>= 100px), not -2px/-50px."""
+        self.assertIsNotNone(
+            _HIDDEN_STYLE_RE.search("position:absolute;left:-9999px"))
+        self.assertIsNone(
+            _HIDDEN_STYLE_RE.search("position:absolute;left:-2px"))
+        self.assertIsNone(
+            _HIDDEN_STYLE_RE.search("position:absolute;left:-50px"))
+
+    def test_code_block_literal_css_no_flag(self):
+        """Literal CSS text inside <code> (not an inline style attr) must NOT flag."""
+        html = "<pre><code>.hidden { display: none; }</code></pre>"
+        result = extract_safe_text(html)
+        self.assertNotIn("hidden_html_content", result.flags)
+        self.assertIn("display: none", result.text)
 
     def test_no_false_positive_on_normal_style(self):
         """Non-hidden inline styles should not trigger the flag."""
@@ -132,6 +234,13 @@ class TestHiddenContent(unittest.TestCase):
         result = extract_safe_text(html)
         self.assertNotIn("hidden_html_content", result.flags)
         self.assertIn("text", result.text)
+
+    def test_static_position_with_negative_offset_no_flag(self):
+        """A large negative left WITHOUT position:absolute is not off-screen hiding."""
+        html = '<div style="margin-left:-9999px">content</div>'
+        result = extract_safe_text(html)
+        self.assertNotIn("hidden_html_content", result.flags)
+        self.assertIn("content", result.text)
 
     def test_hidden_nested_children_suppressed(self):
         """All children inside a hidden parent are suppressed."""

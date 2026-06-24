@@ -1,6 +1,24 @@
 venv/
 data/*
 !data/*.yaml
+# F14 eval scenario drafts are versioned source, not runtime data. `data/*` would
+# ignore them and `!data/*.yaml` only un-ignores YAML directly under data/, so the
+# nested _drafts dir must be re-included explicitly (else a scoped `git add` of the
+# branch silently drops the draft and tests/eval/scenarios/test_mcp_drafts.py fails).
+!data/eval/
+data/eval/*
+!data/eval/scenarios/
+data/eval/scenarios/*
+!data/eval/scenarios/_drafts/
+data/eval/scenarios/_drafts/*
+!data/eval/scenarios/_drafts/*.yaml
+!data/eval/scenarios/_drafts/README.md
+# v0.1 promoted scenarios are versioned source too (same reason as _drafts):
+# data/eval/scenarios/* re-ignores the nested v0.1 dir, so un-ignore it and its
+# YAMLs explicitly or a scoped `git add` silently drops new v0.1 fixtures.
+!data/eval/scenarios/v0.1/
+data/eval/scenarios/v0.1/*
+!data/eval/scenarios/v0.1/*.yaml
 # Agent approval mail-drop: CI publishes pending_deploy.json to the agent-approvals
 # branch (via git add -f) and the local daemon fetches it read-only. Keep the dir in
 # the repo via .gitkeep but ignore all runtime artifacts (requests, reports, state).
@@ -29,6 +47,12 @@ data/scraped/static/
 !data/raw/
 data/raw/*.csv
 !data/raw/harvested_samples.csv
+# Threat-intel snapshots dir: ignore runtime snapshot artifacts but keep the
+# human-reviewed MITRE ATLAS -> Na0S mapping committed (the taxonomy-aware
+# harvester and its tests depend on this default mapping existing in a clone).
+!data/threat_intel_snapshots/
+data/threat_intel_snapshots/*
+!data/threat_intel_snapshots/atlas_to_na0s_mapping.yaml
 __pycache__/
 .DS_Store
 *.egg-info/

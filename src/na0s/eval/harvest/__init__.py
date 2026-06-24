@@ -16,6 +16,8 @@ Public surface
 - :class:`IntelProvenance` — origin/retrieval metadata folded into descriptions.
 - :class:`HarvestReport` / :class:`SkippedInput` — emitted + skipped accounting.
 - :func:`snapshot_to_scenarios` — read a Layer-15 snapshot -> DRAFT scenarios.
+- :func:`tag_discovery` / :class:`DiscoveryTagger` — tag a weekly-harvest
+  discovery record with a canonical (ATLAS-aware) Na0S attack_category.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from na0s.eval.harvest.extractor import (
     SkippedInput,
 )
 from na0s.eval.harvest.sources import snapshot_to_scenarios
+from na0s.eval.harvest.discovery_tagging import DiscoveryTagger, tag_discovery
 
 __all__ = [
     "TaxonomyValidator",
@@ -38,4 +41,6 @@ __all__ = [
     "SkippedInput",
     "DEFAULT_DRAFTS_DIR",
     "snapshot_to_scenarios",
+    "DiscoveryTagger",
+    "tag_discovery",
 ]

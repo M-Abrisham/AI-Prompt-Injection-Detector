@@ -16,8 +16,16 @@ Key features:
   - **Truncation**: auto-truncates to model's max_length (512 tokens).
 
 Configuration (env vars):
-  - ``NA0S_PROMPTGUARD_MODEL``: HuggingFace model name or local path.
-    Default: ``meta-llama/Prompt-Guard-2-22M``.
+  - ``NA0S_PROMPTGUARD_MODEL``: HuggingFace model id to load.  The value is
+    **validated against an allowlist** (the pinned-revision models in
+    ``na0s.integrity.hf_loading.PINNED_REVISIONS`` plus the default) before it is
+    handed to ``from_pretrained``.  A value that is off-allowlist, contains a
+    path separator, or resolves to a local directory is **rejected**: the loader
+    logs one warning and falls back to the pinned default rather than fetching an
+    operator-unvetted artifact.  Default: ``meta-llama/Prompt-Guard-2-22M``.
+  - ``NA0S_MODEL_ALLOWLIST``: comma-separated extra model ids an operator
+    explicitly trusts (air-gap / private-mirror escape hatch), mirroring the
+    ``NA0S_HF_REVISION_*`` override pattern in ``hf_loading``.
   - ``NA0S_DEVICE``: PyTorch device string (``cpu``, ``cuda``, ``mps``).
     Default: auto-detect.
   - ``NA0S_ENABLE_PROMPTGUARD``: Set to ``1`` to enable PromptGuard in the
@@ -39,6 +47,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -55,6 +64,13 @@ try:
     _HAS_TRANSFORMERS = True
 except ImportError:
     _HAS_TRANSFORMERS = False
+
+# Pure-python (no transformers dep): hardened from_pretrained kwargs
+# (use_safetensors / trust_remote_code=False / pinned revision).
+from na0s.integrity.hf_loading import (
+    hf_from_pretrained_kwargs,
+    hf_tokenizer_kwargs,
+)
 
 # ---------------------------------------------------------------------------
 # Label mapping -- Prompt-Guard-2-22M uses integer label ids
@@ -76,6 +92,90 @@ _DEFAULT_CACHE_SIZE = 256
 _ENV_MODEL = "NA0S_PROMPTGUARD_MODEL"
 _ENV_DEVICE = "NA0S_DEVICE"
 _ENV_ENABLE = "NA0S_ENABLE_PROMPTGUARD"
+# Operator escape hatch: comma-separated extra model ids to trust on top of the
+# pinned-revision allowlist (air-gap / private-mirror deploys).
+_ENV_MODEL_ALLOWLIST = "NA0S_MODEL_ALLOWLIST"
+
+# HuggingFace repo-id grammar: ``org/name`` (or a bare ``name``), where each
+# segment is drawn from ``[A-Za-z0-9._-]``.  This is the documented Hub repo-id
+# shape, NOT a tuned threshold — it exists to reject path-traversal / local-FS /
+# scheme strings (``../x``, ``/abs``, ``~/x``, ``file://x``, NUL/whitespace),
+# which is the model-source-injection surface this guard closes.  We allow at
+# most one ``/`` (the org/name separator); a second separator or a leading/
+# trailing one is rejected as a path.
+_HF_REPO_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?$")
+
+
+def _allowed_model_ids() -> "frozenset[str]":
+    """Return the allowlist of model ids the env override may select.
+
+    Single source of truth: the keys of
+    ``na0s.integrity.hf_loading.PINNED_REVISIONS`` (the same table that owns the
+    revision pins, so the two never drift) plus :data:`DEFAULT_MODEL_NAME` and
+    any operator-supplied ids in ``NA0S_MODEL_ALLOWLIST``.
+
+    The ``hf_loading`` import is done lazily and defensively: if it cannot be
+    imported the allowlist degrades to just the default, so validation still
+    runs (fail-safe) rather than raising on the core path.
+    """
+    ids = {DEFAULT_MODEL_NAME}
+    try:
+        from na0s.integrity.hf_loading import PINNED_REVISIONS
+
+        ids.update(PINNED_REVISIONS.keys())
+    except Exception as exc:  # pragma: no cover - defensive import guard
+        logger.debug("Could not source allowlist from hf_loading: %s", exc)
+
+    extra = os.environ.get(_ENV_MODEL_ALLOWLIST, "")
+    for item in extra.split(","):
+        item = item.strip()
+        if item:
+            ids.add(item)
+    return frozenset(ids)
+
+
+def _resolve_env_model_id(requested: str, *, default: str) -> str:
+    """Validate an env-supplied model id; fail safe to *default* on rejection.
+
+    Returns *requested* unchanged when it is allowed; otherwise logs exactly one
+    ``warning`` naming the rejected id and returns *default*.  Never raises.
+
+    Allow rules (in order):
+      1. ``requested == default`` -> always allowed (zero-config path).
+      2. ``requested`` is on the :func:`_allowed_model_ids` allowlist AND passes
+         the :data:`_HF_REPO_ID_RE` grammar gate.
+
+    Reject (-> warn + default) anything that:
+      - is off-allowlist, OR
+      - fails the HF repo-id grammar (path traversal ``..``, leading ``/``/``~``,
+        a ``scheme://`` prefix, NUL / whitespace / control chars, or >1 ``/``), OR
+      - names an existing local directory (``os.path.exists`` as a dir) — a
+        local-FS artifact the operator did not vet as a pinned Hub id.
+    """
+    if requested == default:
+        return default
+
+    allowed = requested in _allowed_model_ids()
+    syntactic_ok = bool(_HF_REPO_ID_RE.match(requested))
+    # Reject any value that points at a local path on disk, even if (somehow)
+    # allowlisted — a directory is a local-FS escape, not a pinned Hub id.
+    is_local_dir = False
+    try:
+        is_local_dir = os.path.exists(requested) and os.path.isdir(requested)
+    except (OSError, ValueError):
+        # e.g. embedded NUL -> treat as rejected by the grammar gate below.
+        is_local_dir = False
+
+    if allowed and syntactic_ok and not is_local_dir:
+        return requested
+
+    logger.warning(
+        "Rejected off-allowlist NA0S_PROMPTGUARD_MODEL=%r; falling back to the "
+        "pinned default %r. Add it to NA0S_MODEL_ALLOWLIST (and "
+        "PINNED_REVISIONS) to trust it.",
+        requested, default,
+    )
+    return default
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +251,14 @@ class PromptGuardClassifier:
         cache_size: int = _DEFAULT_CACHE_SIZE,
     ):
         if model_name is None:
-            model_name = os.environ.get(_ENV_MODEL, DEFAULT_MODEL_NAME)
+            # The env value is UNTRUSTED (tamperable deploy/CI config). Validate
+            # it against the allowlist and fail safe to the pinned default rather
+            # than feeding an operator-unvetted id into from_pretrained.  An
+            # explicit ``model_name=`` ctor arg is in-process trusted code and is
+            # honored verbatim (not validated, not downgraded) — only this
+            # untrusted env path is constrained.
+            requested = os.environ.get(_ENV_MODEL, DEFAULT_MODEL_NAME)
+            model_name = _resolve_env_model_id(requested, default=DEFAULT_MODEL_NAME)
         if device is None:
             device = _detect_device()
 
@@ -382,9 +489,13 @@ class PromptGuardClassifier:
                     "Loading Prompt Guard model '%s' on device '%s'...",
                     self._model_name, self._device,
                 )
-                self._tokenizer = AutoTokenizer.from_pretrained(self._model_name)
+                self._tokenizer = AutoTokenizer.from_pretrained(
+                    self._model_name,
+                    **hf_tokenizer_kwargs(self._model_name),
+                )
                 self._model = AutoModelForSequenceClassification.from_pretrained(
                     self._model_name,
+                    **hf_from_pretrained_kwargs(self._model_name),
                 ).to(self._device)
                 self._model.eval()
                 logger.info("Prompt Guard model loaded successfully.")

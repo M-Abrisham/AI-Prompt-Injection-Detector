@@ -137,6 +137,7 @@ categories:
       D6.4: { name: "Japanese", severity: medium }
       D6.5: { name: "Arabic", severity: medium }
       D6.6: { name: "Mixed-language", severity: high }
+      D6.7: { name: "Transliteration / Romanization / code-switching", severity: medium }
 
   D7:
     name: "Payload Delivery Tricks"
@@ -247,6 +248,32 @@ categories:
       E2.4: { name: "Capability-mapping", severity: low }
       E2.5: { name: "Context-inventory", severity: medium }
 
+  # Intermediate (mid-level) key for the direct prompt/system-prompt
+  # extraction sub-family. Mirrors the C/C1 precedent above: the live v0.1
+  # scenarios reference the bare mid-level code (attack_category: E1) rather
+  # than a leaf technique, so this key makes those scenarios pass their own
+  # taxonomy gate without migrating the 27 scenario files. Its techniques are
+  # the E1.x leaves of category E.
+  E1:
+    name: "System-prompt / Data Exfiltration (E1)"
+    description: "Direct extraction of the system prompt or other sensitive context (direct request, repeat-above, completion/translation/encoding/summarization tricks)."
+    type: extraction
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm07"
+      - "owasp-llm:2025:llm02"
+      - "avid-effect:security:S0500"
+      - "avid-effect:security:S0301"
+      - "risk-cards:lmrc:prompt_extraction"
+    expected_layers: ["layer1_ml", "layer2_rules"]
+    techniques:
+      E1.1: { name: "Direct-prompt-request", severity: high }
+      E1.2: { name: "Repeat-above", severity: high }
+      E1.3: { name: "Completion-trick", severity: medium }
+      E1.4: { name: "Translation-trick", severity: medium }
+      E1.5: { name: "Encoding-trick", severity: medium }
+      E1.6: { name: "Summarization-trick", severity: medium }
+
   # ════════════════════════════════════════════════════════════════
   # Category A — Adversarial ML Attacks
   # ════════════════════════════════════════════════════════════════
@@ -286,6 +313,13 @@ categories:
       - "risk-cards:lmrc:harmful_instructions"
       - "risk-cards:lmrc:weapon_instructions"
       - "risk-cards:lmrc:cyber_weapon_instructions"
+    # O1.x harmful CONTENT is delegated to layer1_ml (content moderation).
+    # O2.x output INJECTION/exfil is detected output-side by output/scanner.py
+    # via na0s.scan_output() (see tests/output/test_o_recall.py): O2.1/O2.2/
+    # O2.6 are caught FP-safely (3/6 techniques). O2.3 (JSON role:system) and
+    # O2.4 (SQL DROP/UNION/OR-1=1) were DROPPED as FP-unsafe -- they tripped the
+    # standard OpenAI chat format and benign SQL-teaching/migration output --
+    # and O2.5 (API-call manipulation) is a residual miss; all honest xfail.
     expected_layers: ["layer1_ml"]
     techniques:
       O1.1: { name: "Violence-instructions", severity: critical }
@@ -293,12 +327,12 @@ categories:
       O1.3: { name: "Social-engineering-scripts", severity: high }
       O1.4: { name: "Disinformation-generation", severity: high }
       O1.5: { name: "CSAM/illegal-content", severity: critical }
-      O2.1: { name: "Markdown-injection", severity: medium }
-      O2.2: { name: "Link-injection", severity: medium }
-      O2.3: { name: "JSON output injection", severity: high }
-      O2.4: { name: "SQL-in-output injection", severity: critical }
-      O2.5: { name: "API call manipulation", severity: high }
-      O2.6: { name: "Code-injection-output", severity: high }
+      O2.1: { name: "Markdown-injection", severity: medium }       # output-side (scan_output) — CAUGHT
+      O2.2: { name: "Link-injection", severity: medium }           # output-side (scan_output) — CAUGHT
+      O2.3: { name: "JSON output injection", severity: high }      # DROPPED (FP-unsafe) — honest xfail
+      O2.4: { name: "SQL-in-output injection", severity: critical } # output-side (scan_output) — CAUGHT (injection-shape only)
+      O2.5: { name: "API call manipulation", severity: high }      # residual MISS — honest xfail
+      O2.6: { name: "Code-injection-output", severity: high }      # output-side (scan_output) — CAUGHT
 
   # ════════════════════════════════════════════════════════════════
   # Category T — Agent/Tool Abuse
@@ -349,9 +383,16 @@ categories:
   # Category P — Privacy / Data Leakage
   # ════════════════════════════════════════════════════════════════
 
+  # Legacy mid-level alias for the privacy family. Mirrors the E/E1 and C/C1
+  # alias precedent above: the live detector and scenarios reference the bare
+  # mid-level code "P" alongside the canonical P2.x leaves. The privacy detector
+  # (rules/registry/privacy_probe.py) emits canonical P2.1 (training-data
+  # extraction), P2.2 (membership inference) and P2.3 (PII elicitation) and ALSO
+  # appends "P" as the family alias, so consumers keying on either form work.
+  # Technique mapping P1.x -> P2.x: P1.3->P2.1, P1.6->P2.2, P1.2->P2.3.
   P:
     name: "Privacy/Data Leakage"
-    description: "Extracts private user data, PII, or confidential business information."
+    description: "Extracts private user data, PII, or confidential business information. Legacy mid-level alias of family P2 (canonical privacy-extraction techniques)."
     type: privacy
     severity: high
     tags:
@@ -581,7 +622,7 @@ categories:
     type: indirect
     severity: high
     tags:
-      - "owasp-llm:2025:llm01"
+      - "owasp-llm:2025:llm06"
     expected_layers: ["L1", "L9"]
     techniques:
       IG1.1: { name: "RAG context poisoning", severity: critical }

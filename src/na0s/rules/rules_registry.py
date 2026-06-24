@@ -620,7 +620,14 @@ RULES = [
          r"(?:your\s+|the\s+)?training\s+(?:data|examples?|text|corpus|set|samples?)"
          r"|(?:extract|show|reveal|dump|list|output)\s+"
          r"(?:(?:your|the)\s+)?training\s+(?:data|examples?|text|corpus|set)"
-         r"|membership\s+inference|training\s+data\s+(?:extraction|leakage|poisoning))",
+         # Bare topic phrases ("training data extraction", "membership
+         # inference") are AMBIGUOUS: a directive ("perform/conduct/run training
+         # data extraction") is an attack, but "explain/what is training data
+         # extraction for my security course" is benign education.  Require an
+         # attack-intent verb within a bounded window so the educational/
+         # definitional framing no longer FPs (ReDoS-safe, bounded .{0,20}?).
+         r"|(?:perform|conduct|run|execute|do|attempt|carry\s+out|launch)\b.{0,20}?"
+         r"\b(?:membership\s+inference|training\s+data\s+(?:extraction|leakage|poisoning)))",
          technique_ids=["P1.3"],
          severity="critical",
          paranoia_level=1,
@@ -1078,7 +1085,11 @@ RULES = [
          description="Request for harmful substance synthesis instructions"),
 
     # ------------------------------------------------------------------
-    # RAG Injection Detection — 4 rules (R1.1–R1.4)
+    # RAG Injection Detection — 4 rules (I1.x — Data Source Poisoning)
+    # NOTE: these emit I1.x (Indirect/Data-Source injection), NOT R1.x.
+    # R1 is the Resource/Availability category (prompt-stuffing, recursive
+    # output, cost-amplification) — a different attack class. The earlier
+    # R1.x tags were a taxonomy mismap.
     # ------------------------------------------------------------------
     # Research basis:
     #   - PoisonedRAG (arXiv 2402.07867): 90% attack success with 5 texts
@@ -1090,7 +1101,7 @@ RULES = [
          r"(?:policy|guideline)s?\s+"
          r".{0,80}"
          r"(?:supersede|override|replace)",
-         technique_ids=["R1.1"],
+         technique_ids=["I1.2"],
          severity="high",
          paranoia_level=2,
          description="RAG semantic injection claiming policy updates that override constraints"),
@@ -1101,7 +1112,7 @@ RULES = [
          r"(?:always\s+(?:ignore|disregard|forget|override|bypass|skip)"
          r"|never\s+(?:follow|obey|respect|enforce|apply|comply)"
          r"|ignore|disregard|forget|override)",
-         technique_ids=["R1.2"],
+         technique_ids=["I1.4"],
          severity="high",
          paranoia_level=2,
          description="RAG injection in retrieved documents directing AI behavior"),
@@ -1111,7 +1122,7 @@ RULES = [
          r"[\s\S]{0,80}"
          r"(?:NEW\s+INSTRUCTIONS|BEGIN\s+INSTRUCTIONS"
          r"|SYSTEM\s+PROMPT|OVERRIDE)",
-         technique_ids=["R1.3"],
+         technique_ids=["I1.2"],
          severity="critical",
          paranoia_level=2,
          description="Fake RAG context separator followed by new instruction markers"),
@@ -1119,7 +1130,7 @@ RULES = [
     Rule("rag_fake_retrieval_markers",
          r"\[/?(?:RETRIEVED|SOURCE|CONTEXT|DOCUMENT|REFERENCE|KNOWLEDGE)"
          r"\s*(?:TEXT|DATA|BASE|CHUNK)?\]",
-         technique_ids=["R1.4"],
+         technique_ids=["I1.2"],
          severity="high",
          paranoia_level=3,
          description="Spoofed RAG retrieval system markers in user input"),
@@ -2114,13 +2125,15 @@ from ..detectors.recon import RECON_RULES as _RECON_RULES  # noqa: E402
 RULES.extend(_RECON_RULES)
 
 # ---------------------------------------------------------------------------
-# Track B: P1 Privacy Leakage rules (from privacy_probe_detector.py)
+# Track B: P1 Privacy Leakage rules (from rules/registry/privacy_probe.py)
 # ---------------------------------------------------------------------------
-from ..detectors.privacy_probe import PRIVACY_RULES as _PRIVACY_RULES  # noqa: E402
+from .registry.privacy_probe import PRIVACY_RULES as _PRIVACY_RULES  # noqa: E402
 RULES.extend(_PRIVACY_RULES)
 
 # ---------------------------------------------------------------------------
-# Track C: C1 Compliance Evasion rules (from compliance_evasion_rules.py)
+# Track C: C1 Compliance Evasion rules (rules/registry/compliance_evasion.py)
+# (v1.0.0 Step 10: moved from the top-level na0s.compliance_evasion_rules
+# module into the per-track rules/registry/ package — no back-compat shim.)
 # ---------------------------------------------------------------------------
-from ..compliance_evasion_rules import RULES as _COMPLIANCE_RULES  # noqa: E402
+from .registry.compliance_evasion import RULES as _COMPLIANCE_RULES  # noqa: E402
 RULES.extend(_COMPLIANCE_RULES)

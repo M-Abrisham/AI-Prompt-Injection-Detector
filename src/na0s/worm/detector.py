@@ -23,6 +23,7 @@ import binascii
 import logging
 import math
 import os
+import pickle
 import re
 import threading
 import unicodedata
@@ -73,15 +74,6 @@ try:
     from sklearn.decomposition import PCA as _SklearnPCA
 
     _HAS_SKLEARN = True
-except ImportError:
-    pass
-
-_HAS_JOBLIB = False
-
-try:
-    import joblib
-
-    _HAS_JOBLIB = True
 except ImportError:
     pass
 
@@ -902,7 +894,7 @@ class _WormCorpusClassifier:
     _instance_lock = threading.Lock()
 
     _DEFAULT_MODEL_PATH = os.path.join(
-        os.path.expanduser("~"), ".na0s", "models", "worm_classifier.joblib",
+        os.path.expanduser("~"), ".na0s", "models", "worm_classifier.pkl",
     )
 
     def __init__(self, model_path: str | None = None) -> None:
@@ -911,71 +903,56 @@ class _WormCorpusClassifier:
         self._op_lock = threading.Lock()
         self._load_model()
 
-    @staticmethod
-    def _hash_file(path: str) -> str:
-        """Return SHA-256 hex digest of a file."""
-        import hashlib
-        h = hashlib.sha256()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                h.update(chunk)
-        return h.hexdigest()
-
     def _load_model(self) -> None:
         """Attempt to load a pre-trained pipeline from disk.
 
-        Security: joblib.load uses pickle internally, so we verify the model
-        file's SHA-256 against a companion ``.sha256`` sidecar before loading.
-        If the sidecar is missing or the hash doesn't match, loading is refused.
+        Security: the model is a plain pickle, so deserialization is routed
+        through the canonical 3-tier integrity loader
+        ``na0s.integrity.safe_pickle.safe_load`` (KNOWN_HASHES → HMAC-SHA256
+        sidecar → plain SHA-256 sidecar), which validates the pickle magic
+        bytes *before* hashing, compares digests in constant time, and refuses
+        to deserialize a file whose digest does not match an available source.
+        A tampered file (digest mismatch) raises ``ValueError`` and an absent
+        digest source raises ``FileNotFoundError``; both are caught here and the
+        classifier degrades to inert (``_pipeline = None`` → ``predict_proba``
+        returns 0.0) so a missing/tampered model never crashes ``scan()``.
         """
-        if not _HAS_JOBLIB:
-            logger.debug("joblib not available; corpus classifier disabled")
-            return
         path = self._model_path
         if not os.path.isfile(path):
             logger.debug("Worm corpus model not found at %s", path)
             return
 
-        # --- Integrity check: require a .sha256 sidecar file ----------------
-        hash_path = path + ".sha256"
-        if not os.path.isfile(hash_path):
-            logger.warning(
-                "Refusing to load %s: no .sha256 sidecar found. "
-                "Re-train with train() to generate one.",
-                path,
-            )
-            return
-        try:
-            with open(hash_path, "r", encoding="utf-8") as f:
-                expected_hash = f.read().strip().split()[0]
-            actual_hash = self._hash_file(path)
-            if actual_hash != expected_hash:
-                logger.warning(
-                    "Refusing to load %s: SHA-256 mismatch "
-                    "(expected %s, got %s). File may be corrupted or tampered.",
-                    path, expected_hash[:16], actual_hash[:16],
-                )
-                return
-        except (OSError, IndexError, ValueError):
-            logger.warning(
-                "Refusing to load %s: failed to verify integrity",
-                path, exc_info=True,
-            )
-            return
+        # Lazy import keeps the in-package canonical loader off the module-import
+        # hot path; safe_pickle is always available in-package (no joblib/sklearn
+        # dependency required to *load*).
+        from na0s.integrity.safe_pickle import safe_load
 
         try:
-            obj = joblib.load(path)
-            # Minimal validation: must expose predict_proba
-            if not callable(getattr(obj, "predict_proba", None)):
-                logger.warning("Loaded object at %s lacks predict_proba; ignoring", path)
-                return
-            self._pipeline = obj
-            logger.debug("Worm corpus classifier loaded from %s", path)
-        except (OSError, EOFError, ValueError, AttributeError, TypeError, KeyError):
+            obj = safe_load(path)
+        except (
+            ValueError,            # digest mismatch (tamper) from safe_load
+            FileNotFoundError,     # no KNOWN_HASHES entry and no sidecar
+            OSError,
+            EOFError,
+            AttributeError,
+            TypeError,
+            KeyError,
+            pickle.UnpicklingError,  # e.g. a stale joblib-framed file at the .pkl path
+        ):
             logger.warning(
-                "Failed to load worm corpus model from %s", path, exc_info=True,
+                "Refusing/failed to load worm corpus model from %s; "
+                "corpus classifier disabled", path, exc_info=True,
             )
             self._pipeline = None
+            return
+
+        # Minimal validation: must expose predict_proba
+        if not callable(getattr(obj, "predict_proba", None)):
+            logger.warning("Loaded object at %s lacks predict_proba; ignoring", path)
+            self._pipeline = None
+            return
+        self._pipeline = obj
+        logger.debug("Worm corpus classifier loaded from %s", path)
 
     @classmethod
     def get_instance(cls, model_path: str | None = None) -> "_WormCorpusClassifier":
@@ -1029,8 +1006,6 @@ class _WormCorpusClassifier:
         """
         if not _HAS_SKLEARN:
             raise RuntimeError("scikit-learn is required for training the worm corpus classifier")
-        if not _HAS_JOBLIB:
-            raise RuntimeError("joblib is required for persisting the worm corpus classifier")
 
         pipeline = Pipeline([
             ("tfidf", TfidfVectorizer(max_features=10000, sublinear_tf=True, ngram_range=(1, 2))),
@@ -1040,14 +1015,15 @@ class _WormCorpusClassifier:
         with self._op_lock:
             self._pipeline = pipeline
 
-        # Persist with integrity sidecar
+        # Persist through the canonical 3-tier integrity writer: writes an HMAC
+        # sidecar when NA0S_PICKLE_KEY is set, else a plain SHA-256 sidecar, both
+        # atomically (temp-file + os.replace) with structured audit logging.
+        from na0s.integrity.safe_pickle import safe_dump
+
         model_dir = os.path.dirname(self._model_path)
         os.makedirs(model_dir, exist_ok=True)
-        joblib.dump(pipeline, self._model_path)
-        file_hash = self._hash_file(self._model_path)
-        with open(self._model_path + ".sha256", "w", encoding="utf-8") as f:
-            f.write(file_hash + "\n")
-        logger.info("Worm corpus classifier saved to %s (sha256: %s)", self._model_path, file_hash[:16])
+        safe_dump(pipeline, self._model_path)
+        logger.info("Worm corpus classifier saved to %s", self._model_path)
 
 
 # ---------------------------------------------------------------------------

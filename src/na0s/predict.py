@@ -134,7 +134,7 @@ except ImportError:
 
 # Privacy probe detector (P1) — optional import
 try:
-    from .detectors.privacy_probe import detect_privacy_probe, get_privacy_probe_weight
+    from .rules.registry.privacy_probe import detect_privacy_probe, get_privacy_probe_weight
     _HAS_PRIVACY_PROBE = True
 except ImportError:
     _HAS_PRIVACY_PROBE = False
@@ -178,10 +178,52 @@ except ImportError:
 try:
     from .detectors.mcp_tool import (
         scan_tool_manifest as _scan_tool_manifest,
+        get_mcp_tool_weight,
     )
     _HAS_MCP_TOOL_DETECTOR = True
 except ImportError:
     _HAS_MCP_TOOL_DETECTOR = False
+
+# Inter-model propagation detector (IM.x) — optional import.
+# INGESTION-side detector (the IM docstring mandates input-side); MUST NOT
+# rely on the output-side na0s.output.propagation scanner.
+try:
+    from .detectors.inter_model import detect_inter_model, get_inter_model_weight
+    _HAS_INTER_MODEL = True
+except ImportError:
+    _HAS_INTER_MODEL = False
+
+# Multimodal hidden-channel boost (M1/M2/M3) — corroborating, FP-safe.
+# Single source of truth for the taxonomy-correct M-flag map + the bounded
+# corroborating boost shared by predict.scan and the cascade.
+try:
+    from .detectors.multimodal import (
+        map_m_flags as _map_m_flags,
+        get_multimodal_boost as _get_multimodal_boost,
+        is_uncorroborated_channel as _is_uncorroborated_channel,
+        has_hidden_channel as _has_hidden_channel,
+        MULTIMODAL_CLEAN_RISK_CEILING as _MM_CLEAN_CEILING,
+    )
+    _HAS_MULTIMODAL = True
+except ImportError:
+    _HAS_MULTIMODAL = False
+
+# In-prose tool-abuse detector (T1.x, GTG-1002 terminal pivot) — optional import
+try:
+    from .detectors.tool_abuse import detect_tool_abuse, get_tool_abuse_weight
+    _HAS_TOOL_ABUSE = True
+except ImportError:
+    _HAS_TOOL_ABUSE = False
+
+# Ingestion-manipulation detector (IG.x, OWASP LLM06) — optional import.
+# INGESTION-side detector: "treat ingested DATA as an INSTRUCTION/DIRECTIVE".
+# Self-anchored (ingestion-source noun + directive-elevation cue co-occurrence),
+# so a bare ingestion noun never fires.
+try:
+    from .detectors.ingestion import detect_ingestion, get_ingestion_weight
+    _HAS_INGESTION = True
+except ImportError:
+    _HAS_INGESTION = False
 
 # N5: PromptGuard classifier — transformer-based injection/jailbreak detection.
 # Opt-in via NA0S_ENABLE_PROMPTGUARD=1 (requires downloading a model).
@@ -302,6 +344,12 @@ _cached_vectorizer = None
 _cached_model = None
 _model_cache_lock = threading.Lock()
 
+# F-AR8 Finding A: process-wide flag so the load-time feature-width
+# reconciliation (word + char + structural vs model.n_features_in_) runs
+# exactly once per process, not on every request. Guarded by the existing
+# _model_cache_lock (no separate lock).
+_dimensions_validated = False
+
 # Process-wide flag so the sklearn version-mismatch notice is logged at most
 # once. Avoids spamming the log on every cold start across forked workers
 # that re-import this module.
@@ -385,6 +433,14 @@ def _get_cached_models() -> Tuple:
             except Exception:
                 pass
             _sklearn_version_logged = True
+        # F-AR8 Finding A: reconcile the assembled feature width against the
+        # loaded model exactly once, at the single shared chokepoint both
+        # predict() and cascade reach (_get_cached_models). Inside the lock so
+        # the once-only flag is set atomically.
+        global _dimensions_validated
+        if not _dimensions_validated:
+            _validate_feature_dimensions(_cached_vectorizer, _cached_model)
+            _dimensions_validated = True
     return _cached_vectorizer, _cached_model
 
 
@@ -435,10 +491,28 @@ def _get_cached_scaler():
             return None
         try:
             _cached_scaler = safe_load(SCALER_PATH)
-        except Exception:
-            logger.warning("Failed to load structural scaler from %s", SCALER_PATH)
+        except FileNotFoundError:
+            # Present .pkl but no integrity source (unsigned / pre-sidecar) ->
+            # legit backward-compat absence, same class as file-not-present.
+            # safe_load raises FileNotFoundError from _resolve_expected_hash when
+            # no expected hash is available. Cache False (skip the feature).
+            logger.warning(
+                "No integrity source for structural scaler at %s; "
+                "treating as absent (backward compat).", SCALER_PATH)
             _cached_scaler = False
             return None
+        except Exception:
+            # Present-but-unloadable (integrity/tamper ValueError, corrupt magic,
+            # partial read during a deploy swap): a real bundle/integrity problem.
+            # Do NOT cache the failure — a transient partial read must be retried
+            # on the next call, not permanently poisoned to word-only features.
+            # Log at error and re-raise (fail-loud, consistent with _transform's
+            # F-AR8 contract and the integrity module). _cached_scaler stays None
+            # so the next call retries.
+            logger.error(
+                "structural scaler present at %s but failed to load "
+                "(integrity/corruption) - failing loud", SCALER_PATH)
+            raise
     return _cached_scaler
 
 
@@ -467,11 +541,101 @@ def _get_cached_char_vectorizer():
             return None
         try:
             _cached_char_vectorizer = safe_load(CHAR_VECTORIZER_PATH)
-        except Exception:
-            logger.warning("Failed to load char TF-IDF vectorizer from %s", CHAR_VECTORIZER_PATH)
+        except FileNotFoundError:
+            # Present .pkl but no integrity source (unsigned / pre-sidecar) ->
+            # legit backward-compat absence, same class as file-not-present.
+            logger.warning(
+                "No integrity source for char TF-IDF vectorizer at %s; "
+                "treating as absent (backward compat).", CHAR_VECTORIZER_PATH)
             _cached_char_vectorizer = False
             return None
+        except Exception:
+            # Present-but-unloadable (integrity/tamper ValueError, corrupt magic,
+            # partial read during a deploy swap): a real bundle/integrity problem.
+            # Do NOT cache the failure — a transient partial read must be retried
+            # on the next call. Log at error and re-raise (fail-loud, consistent
+            # with _transform's F-AR8 contract). _cached_char_vectorizer stays
+            # None so the next call retries.
+            logger.error(
+                "char TF-IDF vectorizer present at %s but failed to load "
+                "(integrity/corruption) - failing loud", CHAR_VECTORIZER_PATH)
+            raise
     return _cached_char_vectorizer
+
+
+def _validate_feature_dimensions(vectorizer, model):
+    """F-AR8 Finding A: reconcile the assembled feature width with the model.
+
+    The bundle's four components (word vectorizer, optional char vectorizer,
+    optional structural scaler, classifier) are loaded by independent cached
+    loaders with no cross-check. A missing/stale/mismatched artifact otherwise
+    only surfaces as a cryptic per-request ``ValueError: X has N features`` deep
+    inside ``model.predict`` — not at load, and not naming the offending
+    component. This computes the expected assembled width and fails loud at load,
+    naming which component is missing/extra.
+
+    The structural count is ``len(FEATURE_NAMES)`` (the canonical structural
+    feature ordering, src/na0s/structural/features.py) — NOT a magic constant.
+
+    Skips cleanly (no raise) when the model has no usable ``n_features_in_``
+    (non-sklearn / mock model) so the backward-compat / injected-model paths and
+    the ~50 cached-path tests are unaffected.
+    """
+    n_features = getattr(model, "n_features_in_", None)
+    if n_features is None:
+        # Non-sklearn / mock model with no width to reconcile — backward compat.
+        return
+
+    expected = len(vectorizer.get_feature_names_out())
+
+    char_vec = _get_cached_char_vectorizer()
+    if char_vec is not None:
+        expected += len(char_vec.get_feature_names_out())
+
+    scaler = _get_cached_scaler()
+    structural_count = 0
+    if scaler is not None and _HAS_STRUCTURAL_FEATURES:
+        # Import lazily so a no-structural build stays importable.
+        from .structural import FEATURE_NAMES
+        structural_count = len(FEATURE_NAMES)
+        expected += structural_count
+
+    if expected == n_features:
+        return
+
+    delta = n_features - expected
+    # Determine the structural count even when the scaler is absent, so the
+    # "missing structural scaler" message is accurate against a structural model.
+    if _HAS_STRUCTURAL_FEATURES:
+        from .structural import FEATURE_NAMES as _FN
+        expected_structural = len(_FN)
+    else:
+        expected_structural = None
+
+    if scaler is None and expected_structural is not None and delta == expected_structural:
+        component = (
+            "structural scaler artifact missing/not loaded "
+            f"(model expects {expected_structural} structural features; "
+            "structural_scaler.pkl absent or unloadable)"
+        )
+    elif char_vec is None and delta > 0:
+        component = (
+            f"char vectorizer artifact missing ({delta} char features "
+            "expected by the model but no char vectorizer loaded)"
+        )
+    else:
+        component = (
+            "word vocabulary width mismatch (assembled feature width does not "
+            "match the model; word vectorizer vocab is likely stale/wrong)"
+        )
+
+    msg = (
+        "F-AR8 feature-contract violation: assembled feature width "
+        f"{expected} != model.n_features_in_ {n_features} (delta {delta}). "
+        f"Cause: {component}."
+    )
+    logger.error(msg)
+    raise ValueError(msg)
 
 
 def _transform(text, vectorizer, scaler=None, char_vectorizer=None):
@@ -489,23 +653,52 @@ def _transform(text, vectorizer, scaler=None, char_vectorizer=None):
     import scipy.sparse
     X = vectorizer.transform([text])
 
-    # Layer 4: char-level TF-IDF (optional)
+    # Layer 4: char-level TF-IDF (optional).  Backward-compat skip is the
+    # `char_vectorizer is None` case (handled by the guard).  A PROVIDED
+    # char-vectorizer that fails to transform is a real model/vectorizer mismatch
+    # — silently skipping it would build a feature vector that doesn't match what
+    # the model was trained on, producing silently-wrong scores (e.g. a candidate
+    # graded in the canary gate against a mismatched bundle).  Fail loud instead.
     if char_vectorizer is not None:
         try:
             X_char = char_vectorizer.transform([text])
             X = scipy.sparse.hstack([X, X_char], format="csr")
-        except Exception:
-            logger.warning("char TF-IDF transform failed — skipping char features")
+        except Exception as exc:
+            logger.error("char TF-IDF transform failed for a provided vectorizer: %s", exc)
+            raise
 
-    # Layer 3: structural features (optional)
+    # Layer 3: structural features (optional) — same fail-loud contract.
+    # Backward-compat skip is the `scaler is None` case (pre-L3 bundle).
+    # F-AR8 Finding B: a PROVIDED scaler (structural_scaler.pkl shipped, so the
+    # model expects the structural columns) combined with a missing structural
+    # module (_HAS_STRUCTURAL_FEATURES False) cannot produce those columns —
+    # silently skipping them would build an under-width vector and
+    # silently-wrong scores. Fail loud instead of degrading.
+    if scaler is not None and not _HAS_STRUCTURAL_FEATURES:
+        # FEATURE_NAMES may itself be unavailable (the same import that set the
+        # flag False); fall back to a generic count phrase so the fail-loud
+        # message is never masked by a secondary ImportError.
+        try:
+            from .structural import FEATURE_NAMES
+            n_struct = str(len(FEATURE_NAMES))
+        except ImportError:
+            n_struct = "expected"
+        msg = (
+            "structural scaler artifact provided but the structural feature "
+            f"module failed to import; this build cannot produce the {n_struct} "
+            "structural columns the model expects (F-AR8 fail-loud)"
+        )
+        logger.error(msg)
+        raise RuntimeError(msg)
     if scaler is not None and _HAS_STRUCTURAL_FEATURES:
         try:
             struct_arr = extract_structural_features_batch([text])
             struct_scaled = scaler.transform(struct_arr)
             X = scipy.sparse.hstack([X, scipy.sparse.csr_matrix(struct_scaled)],
                                     format="csr")
-        except Exception:
-            logger.warning("structural feature transform failed — skipping")
+        except Exception as exc:
+            logger.error("structural feature transform failed for a provided scaler: %s", exc)
+            raise
     return X
 
 
@@ -873,6 +1066,16 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     obs = obfuscation_scan(clean)
     obs_flags = obs["evasion_flags"] if obs["evasion_flags"] else []
 
+    # Multi-buff chained-obfuscation boost (previously computed-then-discarded,
+    # same class as the historic dead rag_poison_weight).  A stack of >=2
+    # encodings (chain depth/diversity) is a strong deliberate-evasion signal.
+    # Additive + capped at 0.20 (in _analyze_encoding_chain); applied AFTER
+    # the weighted decision so it mirrors the existing _l2_extra_boost path.
+    # It is computed ONLY over flag-bearing decoded views, so a benign nested
+    # encoding (base64 of prose) earns no boost.
+    _chain_boost = float(obs.get("combined_boost", 0.0) or 0.0)
+    _chain_reasons = obs.get("combined_reasons", []) or []
+
     # Bridge L0 invisible-char detection into L2 evasion flags.
     # L0 strips invisible chars BEFORE L2 runs, so L2's own invisible_chars
     # detector won't fire on already-cleaned text.  We bridge the L0 flag
@@ -1142,6 +1345,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     # exfiltration, training data extraction, cross-session leakage,
     # serialization injection, membership inference.
     privacy_weight = 0.0
+    privacy_result = None
     if _HAS_PRIVACY_PROBE:
         try:
             privacy_result = detect_privacy_probe(clean)
@@ -1166,6 +1370,31 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                 and privacy_result.severity == "high"
                 and composite < threshold):
             composite = threshold
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
+
+    # --- Char-split obfuscation (D7.5 / char_level_reassembly) ---
+    # Input deliberately split into single chars (i.g.n.o.r.e, i_g_n_o_r_e,
+    # comma/interpunct/vertical stacks) is reassembled in Layer 0, but when
+    # there is no word-boundary signal it glues into one token that matches
+    # no word-boundary rule and the ML vocabulary is destroyed -- so the
+    # reassembled text alone leaves the composite near zero.  The *fact* of
+    # reassembly is itself a strong obfuscation signal: benign text fires it
+    # ~0.007% (and those hits are attacks) on 30k real-world texts.  Contribute
+    # bounded risk, and for a long single-char run (the `_heavy` flag) floor to
+    # the decision threshold since legitimate text essentially never does this.
+    char_split_weight = 0.0
+    char_split_heavy = "char_level_reassembly_heavy" in l0.anomaly_flags
+    if "char_level_reassembly" in l0.anomaly_flags:
+        char_split_weight = 0.45 if char_split_heavy else 0.20
+        hit_name = "char_split_obfuscation"
+        if hit_name not in hit_names_seen:
+            hits.append(hit_name)
+            hit_names_seen.add(hit_name)
+    if char_split_weight > 0.0:
+        composite = min(composite + char_split_weight, 1.0)
+        if char_split_heavy and composite < threshold:
+            composite = max(composite, threshold)
         if composite >= threshold and label in ("SAFE", "safe", "benign"):
             label = "MALICIOUS"
 
@@ -1228,6 +1457,123 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
                         _local_severities[hit_name] = _sev
         except Exception:
             pass  # RAG poisoning detection failure is non-fatal
+
+    # Wire RAG-poison signal into composite scoring (cap 0.12 enforced inside
+    # get_rag_poison_weight, so a lone rag_poison hit is a soft signal, never
+    # decisive on its own).  Mirrors the inter_model / tool_abuse folds below.
+    if rag_poison_weight > 0.0:
+        composite = min(composite + rag_poison_weight, 1.0)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
+
+    # --- Inter-model propagation detection (IM.x) ---
+    # Detect fabricated cross-model authority claims: a prompt asserting that
+    # some OTHER model / judge / consensus / upstream-agent / middleware /
+    # checkpoint / ecosystem-artifact already approved or authorized the
+    # request, so the receiving model "should" comply.  Input-side detector;
+    # every matcher is a self-anchored AUTHORITY-noun + override/poison-VERB
+    # co-occurrence, so the benign IM siblings (which reuse the nouns with
+    # legitimate verbs) never fire.
+    inter_model_weight = 0.0
+    if _HAS_INTER_MODEL:
+        try:
+            im_result = detect_inter_model(clean)
+            if im_result.technique_ids:
+                inter_model_weight = get_inter_model_weight(im_result)
+                for tech in im_result.technique_ids:
+                    hit_name = "inter_model:" + tech
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        # Severity mirrors rag_poison: multiple distinct
+                        # families co-firing = high (a fuller kill-chain),
+                        # a single family = medium.
+                        _sev = "high" if len(im_result.family_ids) >= 2 else "medium"
+                        _local_severities[hit_name] = _sev
+        except Exception:
+            pass  # Inter-model detection failure is non-fatal
+
+    # Wire inter-model signal into composite scoring (cap 0.30 enforced inside
+    # get_inter_model_weight, so a lone IM hit is a soft signal, never decisive).
+    if inter_model_weight > 0.0:
+        composite = min(composite + inter_model_weight, 1.0)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
+
+    # --- In-prose tool-abuse detection (T1.x, GTG-1002 terminal pivot) ---
+    # Detect the terminal-phase request that turns a decomposed, individually-
+    # innocuous recon chain into an actual intrusion (privileged-target
+    # invocation, scope-defiance, or exfil to a non-allowlisted host).  The
+    # detector applies an ROE/scope-compliance dampener so the 6 authorized-
+    # pentest benign siblings (which carry the same persona + recon but lack
+    # the terminal pivot and contain explicit ROE language) stay below the
+    # flag floor.  Recon/fingerprint verbs are intentionally NOT matched.
+    tool_abuse_weight = 0.0
+    if _HAS_TOOL_ABUSE:
+        try:
+            ta_result = detect_tool_abuse(clean)
+            if ta_result.technique_ids:
+                tool_abuse_weight = get_tool_abuse_weight(ta_result)
+                for tech in ta_result.technique_ids:
+                    hit_name = "tool_abuse:" + tech
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        _local_severities[hit_name] = ta_result.severity
+        except Exception:
+            pass  # Tool-abuse detection failure is non-fatal
+
+    # Wire tool-abuse signal into composite scoring (cap 0.30 enforced inside
+    # get_tool_abuse_weight).
+    if tool_abuse_weight > 0.0:
+        composite = min(composite + tool_abuse_weight, 1.0)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
+
+    # --- Ingestion-manipulation detection (IG.x, OWASP LLM06) ---
+    # Detect a directive planted in data the pipeline INGESTS (poisoned RAG
+    # chunk, uploaded doc carrying a hidden NOTE, metadata/config field
+    # assistant_override=true) so it acts as a downstream instruction.  Every
+    # matcher is a self-anchored co-occurrence of an INGESTION-SOURCE noun AND a
+    # DIRECTIVE-ELEVATION cue, so the benign ingestion siblings (which reuse the
+    # nouns with legitimate ops) never fire.
+    ingestion_weight = 0.0
+    ingestion_decisive = False
+    if _HAS_INGESTION:
+        try:
+            ig_result = detect_ingestion(clean)
+            if ig_result.technique_ids:
+                ingestion_weight = get_ingestion_weight(ig_result)
+                ingestion_decisive = ig_result.decisive
+                for tech in ig_result.technique_ids:
+                    hit_name = "ingestion:" + tech
+                    if hit_name not in hit_names_seen:
+                        hits.append(hit_name)
+                        hit_names_seen.add(hit_name)
+                        # Severity mirrors inter_model/rag_poison: multiple
+                        # distinct families co-firing = high, a single = medium.
+                        _sev = "high" if len(ig_result.family_ids) >= 2 else "medium"
+                        _local_severities[hit_name] = _sev
+        except Exception:
+            pass  # Ingestion-manipulation detection failure is non-fatal
+
+    # Wire ingestion signal into composite scoring.  The weight is capped at 0.30
+    # inside get_ingestion_weight (the corroborating cap), so it is ALWAYS a soft
+    # signal: a lone IG weight can never cross the threshold on its own.  A
+    # DECISIVE detection (a hard planted-directive cue that CO-OCCURRED with an
+    # ingestion source — a bare hard cue alone never sets decisive) is an
+    # unambiguous embedded injection and flips the verdict directly, mirroring the
+    # cascade whitelist tripwire; the FP-safety co-occurrence requirement is what
+    # licenses the direct flip.
+    if ingestion_weight > 0.0:
+        composite = min(composite + ingestion_weight, 1.0)
+    if ingestion_decisive and label in ("SAFE", "safe", "benign"):
+        label = "MALICIOUS"
+        composite = max(composite, threshold)
+    elif ingestion_weight > 0.0 and composite >= threshold and label in (
+        "SAFE", "safe", "benign"
+    ):
+        label = "MALICIOUS"
 
     # --- Position-weighted RAG context scan (D8.3/D8.4) ---
     # When the input looks like concatenated retrieved context (multiple
@@ -1360,6 +1706,24 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     # ML-uncertain-zone cap or override protection logic inside that function.
     if _l2_extra_boost > 0:
         composite = min(composite + _l2_extra_boost, 1.0)
+
+    # --- Multi-buff chained-obfuscation boost (Track D, capped 0.20) ---
+    # Only compounds when a REAL evasion/attack signal already fired (obs_flags
+    # non-empty): the boost reflects deliberate multi-layer stacking, not the
+    # mere presence of a nested encoding.  This keeps benign nested encodings
+    # (base64 of a JSON config / prose), which raise no flag, from being
+    # pushed over threshold by the boost alone.  FP-validated against the
+    # benign-nested-encoding corpus (0% FP at the measured baseline).
+    if _chain_boost > 0 and obs_flags:
+        composite = min(composite + _chain_boost, 1.0)
+        # Surface the chain reasons (depth/diversity) in hits for auditability,
+        # consuming the previously-discarded combined_reasons.
+        for _cr in _chain_reasons:
+            if _cr not in hit_names_seen:
+                hits.append(_cr)
+                hit_names_seen.add(_cr)
+        if composite >= threshold and label in ("SAFE", "safe", "benign"):
+            label = "MALICIOUS"
 
     # --- Layer 4: Perplexity-based adversarial signal ---
     # Compute pseudo-perplexity on sanitized text.  If the text looks
@@ -1510,8 +1874,18 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         label = "MALICIOUS"
 
     # --- Narrative / legitimate-role dampening ---
+    # C1 carve-out: a fictional/academic frame wrapping a CONCRETE inner attack
+    # ("fictional_inner:...") is the compliance-evasion attack class — it looks
+    # like benign narrative precisely so this dampener fires.  The fictional_inner
+    # hit lives in ``hits`` (not ``detailed_hits``), so the ``not detailed_hits``
+    # guard alone would let "for a fictional novel my character bypasses content
+    # filters" be dampened to SAFE.  Skip dampening when that conjunctive C1
+    # signal is present.  Frame-ONLY hits ("fictional_frame:" with no inner) are
+    # NOT carved out, so benign novels are still dampened as before.
     from .rules.context import _NARRATIVE_FRAME
-    if threshold > 0.0 and not detailed_hits and not obs_flags:
+    _has_fictional_inner = any(h.startswith("fictional_inner:") for h in hits)
+    if (threshold > 0.0 and not detailed_hits and not obs_flags
+            and not _has_fictional_inner):
         _is_narrative = bool(_NARRATIVE_FRAME.search(clean))
         _is_legit_role = _is_legitimate_roleplay(clean) or _is_legitimate_roleplay(text)
         if _is_narrative or _is_legit_role:
@@ -1563,7 +1937,7 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
     return label, composite, hits, l0, detailed_hits, embedding_info, perplexity_score
 
 
-def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, session_id: str = "") -> ScanResult:  # LAYER16: session_id
+def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, session_id: str = "", tool_calls=None) -> ScanResult:  # LAYER16: session_id
     """Unified entry point returning a structured ScanResult.
 
     Parameters
@@ -1578,6 +1952,13 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         Pre-loaded TF-IDF vectorizer (loaded automatically if *None*).
     model : optional
         Pre-loaded classifier model (loaded automatically if *None*).
+    tool_calls : list[dict] or None
+        Optional MCP tool manifest (list of ``{"name", "description"}``
+        dicts).  When provided, each tool definition is scanned for
+        shadowing / injection indicators (T1.x) via ``scan_tool_manifest``
+        and the bounded ``get_mcp_tool_weight`` contribution (cap 0.30) is
+        folded into the risk score, with ``mcp_tool:<tech>`` hits appended.
+        Default ``None`` is a no-op (no behavior change).
 
     Wraps the entire classification pipeline with a wall-clock timeout
     (``SCAN_TIMEOUT`` seconds, default 60).  If the pipeline exceeds
@@ -1684,6 +2065,25 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
     # of shared "What is..." question structure).  Adding technique tags to
     # safe results creates confusing false-positive metadata.
     if is_mal:
+        # Surface the privacy detector's canonical P2.x leaves.  classify_prompt
+        # contributes a single hit named "privacy:<probe_type>" which has no
+        # _RULE_TECHNIQUE_IDS mapping, so detect_privacy_probe()'s computed
+        # technique_ids (e.g. P2.2 for a membership probe) were otherwise
+        # discarded — the result blocked but surfaced only a misleading generic
+        # tag from the degraded embedding (P1/D1).  Re-derive the leaves on the
+        # SAME sanitized text the classifier saw and merge them here, BEFORE the
+        # embedding matches, so the precise canonical leaf wins.  Bounded ReDoS-
+        # safe regexes; inside the is_mal guard so tags attach only when the
+        # result already blocks — it cannot raise the benign false-positive rate.
+        if _HAS_PRIVACY_PROBE:
+            try:
+                _priv = detect_privacy_probe(l0.sanitized_text)
+                if _priv is not None:
+                    for p_tid in _priv.technique_ids:
+                        if p_tid not in technique_tags:
+                            technique_tags.append(p_tid)
+            except Exception:
+                pass  # tagging is best-effort; never fail the scan
         for emb_tid in embedding_info.get("technique_matches", []):
             if emb_tid not in technique_tags:
                 technique_tags.append(emb_tid)
@@ -1895,31 +2295,34 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         "magic_bytes_html": "I2",
         "html_parse_error": "I2",
         "html_depth_exceeded": "A1",
-        # content_type mismatch (declared vs detected)
-        "content_type_mismatch": "M1.4",
+        # content_type mismatch (declared vs detected) — type-smuggling
+        # obfuscation (D4.1), NOT a document/image code.
+        "content_type_mismatch": "D4.1",
         # content_type.py — category-level flags
-        "embedded_executable": "M1.4",
-        "embedded_document": "M1.4",
+        "embedded_executable": "D4.1",
+        "embedded_document": "M3.1",
         "embedded_image": "M1.1",
-        "embedded_archive": "M1.4",
-        "embedded_audio": "M1.3",
-        "embedded_video": "M1.4",
-        # content_type.py — CRITICAL: executables
-        "embedded_exe": "M1.4",
-        "embedded_elf": "M1.4",
-        "embedded_macho": "M1.4",
-        "embedded_java_class": "M1.4",
-        "embedded_wasm": "M1.4",
-        "embedded_shebang": "M1.4",
-        # content_type.py — HIGH: documents
-        "embedded_pdf": "M1.4",
+        "embedded_archive": "D4.1",
+        # Audio is M2 (was mis-mapped to M1.3, a steganographic-IMAGE code).
+        "embedded_audio": "M2.1",
+        "embedded_video": "D4.1",
+        # content_type.py — CRITICAL: executables (binary-in-text smuggling,
+        # D4.1 — no valid M-code; M1.4 does not exist in the taxonomy).
+        "embedded_exe": "D4.1",
+        "embedded_elf": "D4.1",
+        "embedded_macho": "D4.1",
+        "embedded_java_class": "D4.1",
+        "embedded_wasm": "D4.1",
+        "embedded_shebang": "D4.1",
+        # content_type.py — HIGH: documents (M3 — was mis-mapped to M1.4)
+        "embedded_pdf": "M3.1",
         "embedded_rtf": "D4",
-        "embedded_ole2": "M1.4",
-        "embedded_docx": "M1.4",
-        "embedded_xlsx": "M1.4",
-        "embedded_pptx": "M1.4",
-        "embedded_ooxml": "M1.4",
-        "embedded_odf": "M1.4",
+        "embedded_ole2": "M3.1",
+        "embedded_docx": "M3.1",
+        "embedded_xlsx": "M3.1",
+        "embedded_pptx": "M3.1",
+        "embedded_ooxml": "M3.1",
+        "embedded_odf": "M3.1",
         # content_type.py — HIGH: images
         "embedded_png": "M1.1",
         "embedded_jpeg": "M1.1",
@@ -1931,45 +2334,47 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         "embedded_webp": "M1.1",
         # ocr_extractor.py — EXIF/XMP metadata text in images
         "image_metadata_text": "M1.1",
-        # content_type.py — HIGH: archives
-        "embedded_zip": "M1.4",
-        "embedded_gzip": "M1.4",
-        "embedded_7z": "M1.4",
-        "embedded_rar": "M1.4",
-        "embedded_bzip2": "M1.4",
-        "embedded_xz": "M1.4",
-        "embedded_lzma": "M1.4",
-        "embedded_tar": "M1.4",
-        "embedded_jar": "M1.4",
-        # content_type.py — MEDIUM: audio
-        "embedded_mp3": "M1.3",
-        "embedded_flac": "M1.3",
-        "embedded_ogg": "M1.3",
-        "embedded_aac": "M1.3",
-        "embedded_midi": "M1.3",
-        "embedded_wav": "M1.3",
-        "embedded_aiff": "M1.3",
-        # content_type.py — MEDIUM: video
-        "embedded_webm": "M1.4",
-        "embedded_flv": "M1.4",
-        "embedded_wmv": "M1.4",
-        "embedded_avi": "M1.4",
-        "embedded_mp4": "M1.4",
+        # content_type.py — HIGH: archives (binary-in-text smuggling, D4.1)
+        "embedded_zip": "D4.1",
+        "embedded_gzip": "D4.1",
+        "embedded_7z": "D4.1",
+        "embedded_rar": "D4.1",
+        "embedded_bzip2": "D4.1",
+        "embedded_xz": "D4.1",
+        "embedded_lzma": "D4.1",
+        "embedded_tar": "D4.1",
+        "embedded_jar": "D4.1",
+        # content_type.py — MEDIUM: audio (M2 — was mis-mapped to M1.3)
+        "embedded_mp3": "M2.1",
+        "embedded_flac": "M2.1",
+        "embedded_ogg": "M2.1",
+        "embedded_aac": "M2.1",
+        "embedded_midi": "M2.1",
+        "embedded_wav": "M2.1",
+        "embedded_aiff": "M2.1",
+        # content_type.py — MEDIUM: video (D4.1 — no valid M-code)
+        "embedded_webm": "D4.1",
+        "embedded_flv": "D4.1",
+        "embedded_wmv": "D4.1",
+        "embedded_avi": "D4.1",
+        "embedded_mp4": "D4.1",
         # content_type.py — misc
-        "embedded_riff_unknown": "M1.4",
+        "embedded_riff_unknown": "D4.1",
         # content_type.py — polyglot detection
-        "polyglot_detected": "M1.4",
+        "polyglot_detected": "D4.1",
         # content_type.py / sniff_binary() — base64 / data URI flags
         "base64_blob_detected": "D4.1",
         "data_uri_detected": "D4.1",
         # content_type.py / sniff_binary() — base64 decode + re-scan flags
         "base64_hidden_executable": "D4.1",
-        "base64_hidden_pdf": "M1.4",
-        "base64_hidden_document": "M1.4",
+        # Documents -> M3 (was mis-mapped to the non-existent M1.4).
+        "base64_hidden_pdf": "M3.1",
+        "base64_hidden_document": "M3.1",
         "base64_hidden_image": "M1.1",
-        "base64_hidden_archive": "M1.4",
-        "base64_hidden_audio": "M1.3",
-        "base64_hidden_video": "M1.4",
+        "base64_hidden_archive": "D4.1",
+        # Audio -> M2 (was mis-mapped to M1.3, a stego-IMAGE code).
+        "base64_hidden_audio": "M2.1",
+        "base64_hidden_video": "D4.1",
         "base64_payload_too_large": "D4.1",
         # encoding.py flags
         "encoding_fallback_utf8": "D5",
@@ -2014,8 +2419,9 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         "pii_phone": "E1",
         "pii_ipv4": "E1",
         # doc_extractor.py — PDF JavaScript / action detection flags
-        "pdf_javascript": "M1.4",
-        "pdf_auto_action": "M1.4",
+        # PDF active-content surfaces are document-injection (macro-like) -> M3.4
+        "pdf_javascript": "M3.4",
+        "pdf_auto_action": "M3.4",
         "pdf_external_action": "E1",
         # sanitizer.py — timeout flags (possible ReDoS / resource exhaustion)
         "timeout_normalize": "A1.1",
@@ -2128,8 +2534,6 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
     })
     if _IMAGE_FLAGS & set(l0.anomaly_flags):
         try:
-            from .detectors.visual_injection import scan_image as _visual_scan
-
             # If L0 extracted OCR or metadata text, scan it via the visual
             # detector pattern-based analysis.  We pass the extracted text
             # through _scan_text_for_injection for injection indicators.
@@ -2138,17 +2542,98 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
             _visual_score, _visual_inds, _visual_tids = _scan_text_for_injection(
                 l0.sanitized_text
             )
-            if _visual_inds:
+            # FP-FIX: the "ocr_injection" indicator is a SELF-RESCAN of the
+            # SAME sanitized text (visual_injection re-runs na0s_scan on it
+            # with threshold 0.40).  It echoes the text's own score and is
+            # NOT independent corroboration — risk already reflects it.  Only
+            # genuinely independent indicators (regex instruction patterns,
+            # repeated-text, metadata) may lift risk; the echo is recorded as
+            # a tag/hit for telemetry only.
+            _independent_inds = [
+                ind for ind in _visual_inds
+                if ind.indicator_type != "ocr_injection"
+            ]
+            if _independent_inds:
                 risk = max(risk, _visual_score)
                 for tid in _visual_tids:
                     if tid not in technique_tags:
                         technique_tags.append(tid)
-                for ind in _visual_inds:
-                    hit_name = "visual:" + ind.indicator_type
-                    if hit_name not in hits:
-                        hits.append(hit_name)
+            # Record indicator hits (incl. the echo) for telemetry.  These
+            # carry no risk weight on their own; the dampener below keeps a
+            # clean image below threshold.
+            for ind in _visual_inds:
+                hit_name = "visual:" + ind.indicator_type
+                if hit_name not in hits:
+                    hits.append(hit_name)
         except Exception:
             logger.debug("Visual injection detector not available", exc_info=True)
+
+    # --- Multimodal hidden-channel scoring (M1/M2/M3) — FP-safe ---
+    # Presence of a modality is NOT malicious.  Two mutually-exclusive paths:
+    #   (1) DAMPENER: a hidden-channel flag (embedded image/audio/doc, or a
+    #       base64-hidden binary) is present but the only signals are
+    #       blob-shape artefacts (ML on the raw base64, high_entropy,
+    #       weird_casing, PII-false-match, the OCR self-rescan echo) — i.e.
+    #       a clean attachment that the byte-level signals false-fired on.
+    #       Clamp risk just below threshold so modality presence alone never
+    #       blocks (this is the binding FP-safety guarantee).
+    #   (2) BOOST: a hidden-channel flag is present AND an *independent*
+    #       injection indicator also fired (a real rule/detector hit, or the
+    #       composite was already elevated by genuine injection text).  Add a
+    #       small bounded corroborating boost (cap 0.30, mirrors obfuscation).
+    if _HAS_MULTIMODAL and _has_hidden_channel(l0.anomaly_flags):
+        try:
+            # Independent corroboration = a non-blob-shape hit fired.  Note:
+            # we deliberately do NOT treat "risk already >= threshold" as
+            # corroboration here, because a base64 blob self-elevates via the
+            # ML/entropy signals — that is exactly the FP we must suppress.
+            for _mm_tid in _map_m_flags(l0.anomaly_flags):
+                if _mm_tid not in technique_tags:
+                    technique_tags.append(_mm_tid)
+
+            if _is_uncorroborated_channel(l0.anomaly_flags, hits):
+                # Clean attachment — clamp byte-level over-scoring below
+                # threshold.  Only lowers risk; never raises it.
+                if risk > _MM_CLEAN_CEILING:
+                    risk = _MM_CLEAN_CEILING
+                    if risk < DECISION_THRESHOLD:
+                        is_mal = False
+                    if "multimodal:clean_image_dampened" not in hits:
+                        hits.append("multimodal:clean_image_dampened")
+            else:
+                _mm_boost = _get_multimodal_boost(
+                    l0.anomaly_flags, hits, corroborated=is_mal,
+                )
+                if _mm_boost > 0.0:
+                    risk = min(risk + _mm_boost, 1.0)
+                    if risk >= DECISION_THRESHOLD:
+                        is_mal = True
+        except Exception:
+            logger.debug("Multimodal scoring unavailable", exc_info=True)
+
+    # --- MCP tool-manifest scan (T1.x) — optional, gated on tool_calls ---
+    # When the caller supplies a declared tool manifest, scan each tool
+    # definition for shadowing / injection indicators and fold the bounded
+    # per-tool weight (cap 0.30, mirroring rag_poison/inter_model) into the
+    # risk score.  Default tool_calls=None is a no-op: when no manifest is
+    # passed this block does nothing, so single-text scans are unchanged.
+    if tool_calls and _HAS_MCP_TOOL_DETECTOR:
+        try:
+            _mcp_results = _scan_tool_manifest(tool_calls)
+            for _mcp in _mcp_results:
+                if not _mcp.technique_ids:
+                    continue
+                _mcp_w = get_mcp_tool_weight(_mcp)
+                if _mcp_w > 0.0:
+                    risk = min(risk + _mcp_w, 1.0)
+                for _tid in _mcp.technique_ids:
+                    if _tid not in technique_tags:
+                        technique_tags.append(_tid)
+                    _mcp_hit = "mcp_tool:" + _tid
+                    if _mcp_hit not in hits:
+                        hits.append(_mcp_hit)
+        except Exception:
+            logger.debug("MCP tool-manifest scan failed", exc_info=True)
 
     # Re-evaluate malicious verdict after chunked analysis and structural
     # features may have boosted the risk score above the threshold.
@@ -2201,6 +2686,7 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
             analysis = monitor.process_turn(
                 text=text, session_id=session_id,
                 risk_score=result.risk_score, label=result.label,
+                flags=result.technique_tags,
             )
             result.multi_turn_alerts = [a.__dict__ for a in analysis.alerts] if analysis.alerts else []
             result.multi_turn_risk_trend = analysis.risk_trend

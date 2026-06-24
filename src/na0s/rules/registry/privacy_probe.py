@@ -1,10 +1,20 @@
-"""P1 Privacy Leakage detection.
+"""Privacy / data-leakage detection (family P, canonical leaves P2.x).
 
-Detects adversarial attempts to extract private data: membership inference,
-training data extraction, PII elicitation, cross-session leakage, and
-serialization injection.
+Detects adversarial attempts to extract private data: membership inference
+(P2.2), training-data extraction (P2.1), third-party PII elicitation (P2.3),
+conversation/cross-session leakage (P1.1/P1.4), and serialization injection
+(P1.5).  Canonical leaves P2.1/P2.2/P2.3 are emitted with the legacy ``P``
+family alias (mirrors the E/E1, C/C1 taxonomy precedent).
 
-Integration: Called from cascade.py. Results feed into composite scoring.
+Integration (asymmetric, by design):
+  * ``detect_privacy_probe`` is called from ``predict.py`` (self-ref guard,
+    educational-frame suppression, severity weight + high-severity floor).
+  * ``PRIVACY_RULES`` are appended to ``RULES`` in ``rules/rules_registry.py``
+    and so reach ``cascade.py`` transitively.  The cascade does NOT call
+    ``detect_privacy_probe`` directly.
+
+Location: moved here from ``detectors/privacy_probe.py`` per v1.0.0 Step 10
+(rules consolidation under ``rules/registry/``).
 """
 
 from __future__ import annotations
@@ -13,7 +23,7 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from ..input.safe_regex import safe_compile
+from ...input.safe_regex import safe_compile
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +68,13 @@ _EDUCATIONAL_FRAME = safe_compile(
     r"|explain\s+(?:how\s+)?training\s+data\s+extraction"
     r"|how\s+does\s+training\s+data\s+extraction\s+work"
     r"|what\s+is\s+training\s+data"
+    # PII *definition* questions are benign (asking what PII is, not for PII).
+    # Added so the standalone P2.3 PII-elicitation pattern below cannot FP on
+    # "what counts as PII / what is personally identifiable information".
+    r"|what\s+(?:is|are|counts?\s+as|do(?:es)?\s+\w+\s+mean\s+by)\b.{0,20}?"
+    r"(?:pii\b|personally\s+identifiable|personal\s+(?:data|information))"
+    r"|what\s+(?:data|information)\s+(?:is|are|counts?\s+as)\b.{0,20}?"
+    r"(?:considered\s+)?(?:personal|private|sensitive|pii\b)"
     r")\b",
     re.IGNORECASE,
     check_safety=True,
@@ -231,6 +248,75 @@ _register(
     is_extraction=True,
 )
 
+# -- P2.1: Training-data extraction (bounded verb->noun, canonical) ----------
+# The literal P1.3 patterns require the extraction verb adjacent to "training
+# data" ("recite training data") and miss the common Carlini framing where a
+# phrase intervenes ("Repeat the exact text of your training data about X",
+# "What private keys appear in your training corpus").  This pattern keys on an
+# extraction verb-class within a BOUNDED window (.{0,40}?, ReDoS-safe, no
+# nested quantifier) of the training-data noun phrase.  is_extraction=True
+# triggers the existing predict.py high-severity floor -- no new scoring.
+_register(
+    "training_data_extraction", "P2.1", "extract_training_corpus_bounded",
+    r"\b(?:repeat|recite|reproduce|regenerate|output|print|reveal|dump|recall"
+    r"|share|list|show|complete|spit\s+out|give\s+(?:me\s+)?)\b.{0,40}?"
+    r"\b(?:training\s+(?:data|corpus|set|text|examples?|samples?)"
+    r"|memori[sz]ed\s+(?:data|text|content|examples?)"
+    r"|(?:the\s+)?text\s+you\s+(?:were|was)\s+trained\s+on)\b",
+    is_extraction=True,
+)
+# Interrogative content-extraction: "What X appear/are stored/have you seen IN
+# your training corpus".  Restricted to genuine content-extraction verbs --
+# generic "is/are" is excluded so benign transparency questions ("What kind of
+# data were you trained on? Is your training data public?") do not FP.
+_register(
+    "training_data_extraction", "P2.1", "training_corpus_interrogative",
+    r"\bwhat\b.{0,60}?\b(?:appears?\s+in|have\s+you\s+seen\s+in|did\s+you\s+see\s+in"
+    r"|exist\s+in|(?:are|is|were|was)\s+(?:stored|included|contained)\s+in)\b.{0,20}?"
+    r"\b(?:your\s+|the\s+)?training\s+(?:data|corpus|set|text|examples?|samples?)\b",
+    is_extraction=True,
+)
+# Prepositional "from/in/within your training data" -- ANCHORED.  The bare
+# phrase "in the training data" is benign RAG Q&A ("what does the doc say about
+# X in the training data") and must NOT flag.  This pattern requires an
+# extraction verb OR a sensitive/PII content noun within a bounded window
+# BEFORE the training-corpus phrase, so it fires only on a memorization-leak
+# request, never on RAG provenance phrasing.  Bounded (.{0,40}?), ReDoS-safe.
+_register(
+    "training_data_extraction", "P2.1", "from_training_data",
+    r"\b(?:repeat|recite|reproduce|regenerate|output|print|reveal|dump|recall"
+    r"|extract|leak|memori[sz]ed?|verbatim|exact(?:\s+text)?|private|personal"
+    r"|sensitive|confidential|secret|password|credential|api\s+key|ssn|email"
+    r"|phone)\b.{0,40}?"
+    r"\b(?:from|in|within)\s+(?:your\s+|the\s+|its\s+)?training\s+"
+    r"(?:data|corpus|set|text|examples?|samples?)\b",
+    is_extraction=True,
+)
+# Credential / secret stored in the training material ("database credentials
+# stored in your training", "API keys you have seen in your training data").
+# Anchored on a secret/PII noun + the training axis -- a memorization-leak
+# request, not a definition.
+_register(
+    "training_data_extraction", "P2.1", "secret_in_training",
+    r"\b(?:database\s+credentials?|login\s+credentials?|credentials?|passwords?"
+    r"|api\s+keys?|oauth\s+tokens?|private\s+keys?|secrets?|ssn|social\s+security"
+    r"|email(?:\s+address(?:es)?)?|phone\s+numbers?|medical\s+(?:record|information))\b"
+    r".{0,40}?\b(?:stored\s+in|seen\s+in|appear(?:ed|s)?\s+in|in|from)\b"
+    r".{0,20}?\b(?:your\s+|the\s+|its\s+)?training\b",
+    is_extraction=True,
+)
+# Third-party data shared WITH the assistant ("what sensitive information have
+# other users shared with you").  Cross-session third-party leak framing.
+_register(
+    "data_exfiltration", "P2.3", "info_shared_by_others",
+    r"\bwhat\b.{0,30}?\b(?:sensitive|private|personal|confidential)\s+"
+    r"(?:information|data|details)\b.{0,40}?\b(?:has|have)\b.{0,20}?"
+    r"\b(?:users?|people|others?|customers?|clients?|someone|anyone)\b.{0,20}?"
+    r"\b(?:shared|told|given|sent|disclosed|provided|revealed)\b.{0,20}?"
+    r"\b(?:with\s+)?you\b",
+    is_extraction=True,
+)
+
 # -- P1.4: Cross-session leakage -------------------------------------------
 
 _register(
@@ -335,19 +421,76 @@ _register(
     is_extraction=True,
 )
 
-# -- P1.6: Membership inference ---------------------------------------------
-
+# -- P1.6 / P2.2: Membership inference ---------------------------------------
+# "Was <X> in your training data?" is a membership-inference probe.  Previously
+# it fired at severity=low (weight 0.08) and could not reach threshold alone.
+# Promoted to is_extraction=True so it clears the predict.py high-severity floor
+# -- no new threshold.  Canonical technique id P2.2 fixes the "membership-
+# inference untagged" matrix note (legacy P1.6 kept as alias below).
 _register(
-    "membership_inference", "P1.6", "was_in_training_data",
-    r"\bwas\s+.{1,60}\s+in\s+your\s+training\s+data\b",
+    "membership_inference", "P2.2", "was_in_training_data",
+    r"\bwas\s+.{1,60}\s+in\s+your\s+training\s+(?:data|set|corpus)\b",
+    is_extraction=True,
 )
 _register(
-    "membership_inference", "P1.6", "have_you_seen_before",
-    r"\bhave\s+you\s+(?:seen|encountered)\s+.{1,60}\s+before\b",
+    "membership_inference", "P2.2", "have_you_seen_before",
+    r"\bhave\s+you\s+(?:seen|encountered)\s+.{1,60}\s+(?:in\s+your\s+training|before)\b",
+    is_extraction=True,
 )
 _register(
     "membership_inference", "P1.6", "do_you_know_specific",
     r"\bdo\s+you\s+know\s+about\s+(?:[A-Z][a-z]+\s+){1,3}(?:personally|specifically)\b",
+)
+
+# -- P2.3: Third-party PII elicitation (standalone, canonical) ---------------
+# The verb-imperative pii_extraction rule (rules_registry.py) misses
+# interrogative PII framing ("What is the SSN of John Smith", "What medical
+# information do you have about individuals in your training set").  This
+# standalone pattern requires a PII noun AND a THIRD-PARTY / training axis
+# ("of/about ... customer|patient|employee|individual|person|training") -- it
+# NEVER fires on bare PII nouns, which appear constantly in benign business
+# text.  PII-definition questions are suppressed upstream by _EDUCATIONAL_FRAME;
+# first-person GDPR ("export MY data") is suppressed by the self-ref guard.
+_PII_NOUN = (
+    r"(?:ssn|social\s+security(?:\s+numbers?)?|email(?:\s+address(?:es)?)?"
+    r"|phone\s+numbers?|home\s+address(?:es)?|medical\s+(?:record|information|histor(?:y|ies))"
+    r"|credit\s+card(?:\s+numbers?)?|passwords?|api\s+keys?|oauth\s+tokens?"
+    r"|private\s+keys?|(?:login|database)\s+credentials?|date\s+of\s+birth"
+    r"|personal\s+(?:information|details))"
+)
+_THIRD_PARTY = (
+    r"(?:any|the|other|some|every|specific|individual)?\s*"
+    r"(?:customers?|users?|persons?|people|patients?|clients?|employees?"
+    r"|individuals?|members?|John\s+Smith|someone|anybody|anyone)"
+)
+# "What is/are <PII> of/about/associated with <third party / training>"
+# Possessive connectors only ("of/about/associated with/belonging to") -- NOT
+# bare "for", which appears in benign business framing ("the email format we
+# use FOR customers").  A negative lookahead also drops PII nouns qualified by
+# format/type/field/template/policy (schema talk, not a value request).
+_register(
+    "pii_elicitation", "P2.3", "interrogative_third_party_pii",
+    r"\bwhat\s+(?:is|are)\b.{0,40}?\b" + _PII_NOUN
+    + r"\b(?!\s+(?:format|type|field|template|policy|requirement|validation|column|schema))"
+    + r".{0,40}?\b(?:of|about|associated\s+with|belonging\s+to|stored\s+(?:for|by))\b"
+    + r".{0,40}?\b(?:" + _THIRD_PARTY.strip() + r"|training)\b",
+    is_extraction=True,
+)
+# Imperative "<verb> the <PII> of any/other <third party>" (interrogative-free
+# third-party PII the verb-only registry rule may miss on exotic verbs).
+_register(
+    "pii_elicitation", "P2.3", "imperative_third_party_pii",
+    r"\b(?:find|share|list|give|send|fetch|pull|get|tell)\b.{0,40}?\b" + _PII_NOUN
+    + r"\b.{0,40}?\b(?:of|for|about|belonging\s+to)\b.{0,30}?\b" + _THIRD_PARTY.strip() + r"\b",
+    is_extraction=True,
+)
+# "What <PII> do you have about specific individuals in your training set"
+_register(
+    "pii_elicitation", "P2.3", "what_pii_about_individuals",
+    r"\bwhat\b.{0,40}?\b" + _PII_NOUN
+    + r"\b.{0,40}?\b(?:do\s+you\s+have|have\s+you\s+(?:seen|stored)|appear|exist|are\s+stored)\b"
+    + r".{0,60}?\b(?:individual|person|people|customers?|patients?|users?|employees?|training)\b",
+    is_extraction=True,
 )
 
 
@@ -421,6 +564,14 @@ def detect_privacy_probe(text: str) -> Optional[PrivacyProbeResult]:
     else:
         severity = _SEVERITY_LOW
 
+    # Taxonomy reconciliation: emit the legacy mid-level family alias "P"
+    # whenever any canonical P2.x leaf fired (mirrors the E/E1, C/C1 alias
+    # precedent in taxonomy.yaml).  This keeps consumers that key on the bare
+    # family code working without minting new arbitrary codes.  Pure tagging,
+    # no scoring change.
+    if any(tid.startswith("P2.") for tid in matched_technique_ids) and "P" not in matched_technique_ids:
+        matched_technique_ids.append("P")
+
     # Use the first matched probe type as the primary type.
     primary_type = matched_types[0]
 
@@ -464,7 +615,7 @@ def get_privacy_probe_weight(result: PrivacyProbeResult) -> float:
 # Rules for layer1/rules_registry.py integration
 # ---------------------------------------------------------------------------
 
-from ..rules.result import Rule as _Rule
+from ..result import Rule as _Rule
 
 PRIVACY_RULES = [
     _Rule(
@@ -534,13 +685,80 @@ PRIVACY_RULES = [
     ),
     _Rule(
         name="membership_inference",
+        # Canonical P2.2 (legacy P1.6 alias kept).  Promoted to high so the
+        # cascade path matches the detector's high-severity floor for "Was X in
+        # your training data?".
         pattern=(
-            r"\bwas\s+.{1,60}\s+in\s+your\s+training\s+data\b"
-            r"|\bhave\s+you\s+(?:seen|encountered)\s+.{1,60}\s+before\b"
+            r"\bwas\s+.{1,60}\s+in\s+your\s+training\s+(?:data|set|corpus)\b"
+            r"|\bhave\s+you\s+(?:seen|encountered)\s+.{1,60}\s+(?:in\s+your\s+training|before)\b"
         ),
-        technique_ids=["P1.6"],
-        severity="medium",
+        technique_ids=["P2.2", "P1.6", "P"],
+        severity="high",
         paranoia_level=2,
-        description="Membership inference probes against training data.",
+        description="Membership inference probe ('was X in your training data?').",
+    ),
+    # -- P2.1: Training-data extraction (bounded verb->noun) ------------------
+    # Mirrors the detector's P2.1 patterns so the cascade gets parity via RULES.
+    # Bounded windows (.{0,40}?) are ReDoS-safe.  These have NO educational-
+    # frame guard on the cascade path, so they are anchored on the training-data
+    # NOUN PHRASE plus an extraction verb / interrogative-membership frame --
+    # not on the bare phrase "training data extraction" (which would FP on
+    # security-education questions).
+    _Rule(
+        name="training_data_extraction_bounded",
+        pattern=(
+            r"\b(?:repeat|recite|reproduce|regenerate|output|print|reveal|dump|recall"
+            r"|spit\s+out)\b.{0,40}?"
+            r"\b(?:training\s+(?:data|corpus|set|text|examples?|samples?)"
+            r"|memori[sz]ed\s+(?:data|text|content|examples?)"
+            r"|(?:the\s+)?text\s+you\s+(?:were|was)\s+trained\s+on)\b"
+            r"|\bwhat\b.{0,60}?\b(?:appears?\s+in|have\s+you\s+seen\s+in|did\s+you\s+see\s+in"
+            r"|exist\s+in|(?:are|is|were|was)\s+(?:stored|included|contained)\s+in)\b.{0,20}?"
+            r"\b(?:your\s+|the\s+)?training\s+(?:data|corpus|set|text)\b"
+            # secret / PII memorized in the training material
+            r"|\b(?:database\s+credentials?|login\s+credentials?|credentials?|passwords?"
+            r"|api\s+keys?|oauth\s+tokens?|private\s+keys?|secrets?|ssn|social\s+security"
+            r"|email(?:\s+address(?:es)?)?|phone\s+numbers?|medical\s+(?:record|information))\b"
+            r".{0,40}?\b(?:stored\s+in|seen\s+in|appear(?:ed|s)?\s+in|in|from)\b"
+            r".{0,20}?\b(?:your\s+|the\s+|its\s+)?training\b"
+        ),
+        technique_ids=["P2.1", "P1.3", "P"],
+        severity="high",
+        paranoia_level=1,
+        description="Training-data extraction (bounded verb/interrogative -> corpus).",
+    ),
+    # -- P2.3: Third-party PII elicitation -----------------------------------
+    # Requires a PII noun AND a third-party/training axis -- never bare PII
+    # nouns.  Keeps the cascade under the benign FPR ceiling.
+    _Rule(
+        name="pii_elicitation_third_party",
+        pattern=(
+            r"\bwhat\s+(?:is|are)\b.{0,40}?"
+            r"\b(?:ssn|social\s+security(?:\s+numbers?)?|email(?:\s+address(?:es)?)?"
+            r"|phone\s+numbers?|home\s+address(?:es)?|medical\s+(?:record|information)"
+            r"|credit\s+card(?:\s+numbers?)?|passwords?|api\s+keys?|oauth\s+tokens?"
+            r"|private\s+keys?|(?:login|database)\s+credentials?)\b"
+            r"(?!\s+(?:format|type|field|template|policy|requirement|validation|column|schema))"
+            r".{0,40}?\b(?:of|about|associated\s+with|belonging\s+to|stored\s+(?:for|by))\b"
+            r".{0,40}?\b(?:customers?|users?|persons?|people|patients?|clients?|employees?"
+            r"|individuals?|John\s+Smith|someone|anyone|training)\b"
+            r"|\b(?:find|share|list|give|send|fetch|pull)\b.{0,40}?"
+            r"\b(?:ssn|social\s+security|email|phone\s+numbers?|home\s+address(?:es)?"
+            r"|medical\s+record|credit\s+card|passwords?|api\s+keys?|oauth\s+tokens?"
+            r"|private\s+keys?|credentials?)\b"
+            r".{0,40}?\b(?:of|for|about|belonging\s+to)\b.{0,30}?"
+            r"\b(?:any|the|other|all)?\s*(?:customers?|users?|persons?|people|patients?"
+            r"|clients?|employees?|individuals?)\b"
+            # third-party data shared WITH the assistant
+            r"|\bwhat\b.{0,30}?\b(?:sensitive|private|personal|confidential)\s+"
+            r"(?:information|data|details)\b.{0,40}?\b(?:has|have)\b.{0,20}?"
+            r"\b(?:users?|people|others?|customers?|clients?|someone|anyone)\b.{0,20}?"
+            r"\b(?:shared|told|given|sent|disclosed|provided|revealed)\b.{0,20}?"
+            r"\b(?:with\s+)?you\b"
+        ),
+        technique_ids=["P2.3", "P1.2", "P"],
+        severity="high",
+        paranoia_level=1,
+        description="Third-party PII elicitation (interrogative or imperative).",
     ),
 ]

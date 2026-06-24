@@ -38,28 +38,29 @@ rule_count:
     count: 5
   - alias: _PRIVACY_RULES
     source_attr: PRIVACY_RULES
-    source_file: src/na0s/detectors/privacy_probe.py
-    count: 6
+    source_file: src/na0s/rules/registry/privacy_probe.py
+    count: 8
   - alias: _COMPLIANCE_RULES
     source_attr: RULES
-    source_file: src/na0s/compliance_evasion_rules.py
+    source_file: src/na0s/rules/registry/compliance_evasion.py
     count: 4
-  total_ast: 120
+  total_ast: 122
 taxonomy:
-  category_count: 30
-  technique_count_total: 279
+  category_count: 31
+  technique_count_total: 286
   techniques_by_category:
     D1: 22
     D2: 4
     D3: 4
     D4: 6
     D5: 7
-    D6: 6
+    D6: 7
     D7: 6
     D8: 6
     I1: 8
     I2: 3
     E: 11
+    E1: 6
     A: 5
     O: 11
     T: 7
@@ -80,10 +81,10 @@ taxonomy:
     C1MT: 6
     BEN: 2
 test_count:
-  count: 9676
+  count: 10678
   collection_errors: 0
   pytest_exit_code: 0
-test_files: 317
+test_files: 355
 detection_signals_in_scan:
   filter_doc: Names matching prefixes (detect_, scan_, analyze_, extract_, score_,
     compute_, classify*, predict*, get_, sniff_) plus an exact-match allowlist for
@@ -113,6 +114,9 @@ detection_signals_in_scan:
   - detect_fragmented_payload
   - detect_harmful_intent
   - detect_rag_poisoning
+  - detect_inter_model
+  - detect_tool_abuse
+  - detect_ingestion
   - analyze_intent
   - _get_pg_classifier_score
   - compute_perplexity
@@ -124,6 +128,9 @@ detection_signals_in_scan:
   - get_fragment_weight
   - get_harmful_intent_weight
   - get_rag_poison_weight
+  - get_inter_model_weight
+  - get_tool_abuse_weight
+  - get_ingestion_weight
   - get_intent_guard_weight
   - register_malicious
   - get_worm_detector
@@ -149,9 +156,12 @@ L16_detectors:
 - name: FabricatedHistoryDetector
   file: src/na0s/conversation/detectors/fabricated_history.py
   line: 44
+- name: GoalDecompositionDetector
+  file: src/na0s/conversation/detectors/goal_decomposition.py
+  line: 267
 - name: PayloadSplittingDetector
   file: src/na0s/conversation/detectors/payload_splitting.py
-  line: 224
+  line: 266
 - name: SchemingDetector
   file: src/na0s/conversation/detectors/scheming.py
   line: 298

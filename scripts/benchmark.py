@@ -2,7 +2,16 @@
 """Unified benchmark harness for Na0S prompt-injection detection.
 
 Loads a JSONL dataset (each line: {"text": "...", "label": 0|1}), runs the
-selected detection tool on every sample, and computes standard ML metrics.
+selected detection tool on every sample, and computes trustworthy ML metrics.
+
+Metrics posture (imbalanced security task):
+  * Leads with TPR/TNR/precision/recall, each with a 95% bootstrap CI
+    (``na0s.judge.calibration``), so a small sample's noise is visible.
+  * Accuracy is DEMOTED to a footnote shown next to prevalence — on a
+    benign-heavy slice it is dominated by true negatives and hides a weak
+    detector.
+  * The optional sklearn AUC, when skipped, emits an explicit WARNING rather
+    than being silently swallowed.
 
 Usage
 -----
@@ -27,6 +36,16 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "src"))
+
+# Trustworthy-metrics primitives (bootstrap CIs, no-accuracy-headline posture).
+# Import is best-effort: the harness must still run if numpy/the judge package
+# is unavailable, so we degrade to "no CIs" rather than crash.
+try:
+    from na0s.judge import calibration as _calibration
+    _HAS_CALIBRATION = True
+except ImportError:  # pragma: no cover - exercised only without numpy/judge pkg
+    _calibration = None
+    _HAS_CALIBRATION = False
 
 
 # ---------------------------------------------------------------------------
@@ -143,12 +162,14 @@ def compute_metrics(records, threshold):
     tp = tn = fp = fn = 0
     latencies = []
     ground_truths = []
+    predictions = []
     scores = []
 
     for rec in records:
         gt = rec["ground_truth"]
         pred = rec["prediction"]
         ground_truths.append(gt)
+        predictions.append(pred)
         scores.append(rec["score"])
         latencies.append(rec["latency_ms"])
 
@@ -163,26 +184,81 @@ def compute_metrics(records, threshold):
 
     n = len(records)
 
+    # True-positive / true-negative rates (sensitivity / specificity). These are
+    # the honest headline metrics on an imbalanced security task — see the
+    # accuracy-demotion note below.
+    tpr = tp / (tp + fn) if (tp + fn) > 0 else 0.0   # == recall
+    tnr = tn / (tn + fp) if (tn + fp) > 0 else 0.0   # == specificity
+
     # Precision, Recall, F1 — handle zero-division gracefully
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    recall = tpr
     f1 = (2 * precision * recall / (precision + recall)
            if (precision + recall) > 0 else 0.0)
     fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
     accuracy = (tp + tn) / n if n > 0 else 0.0
+    # prevalence = fraction of samples that are actually positive (malicious).
+    # Reported alongside accuracy so a TN-dominated accuracy on a benign-heavy
+    # slice is not misread as a strong detector.
+    prevalence = (tp + fn) / n if n > 0 else 0.0
 
-    # AUC-ROC and AUC-PR — optional sklearn dependency
+    # Bootstrap 95% CIs for the rate metrics, when the calibration primitives
+    # and raw labels/predictions are available. alpha=0.05 -> a 95% percentile
+    # interval (the conventional reporting level for a security benchmark).
+    # n_boot defaults to calibration.bootstrap_ci's 2000 (the standard floor for
+    # a stable 95% percentile interval); not overridden here.
+    ci_alpha = 0.05
+    tpr_ci = tnr_ci = precision_ci = recall_ci = None
+    if _HAS_CALIBRATION and predictions is not None and n > 0:
+        y_true = ground_truths
+        y_pred = predictions
+
+        def _ci(stat_fn):
+            lo, hi = _calibration.bootstrap_ci(
+                y_true, y_pred, stat_fn, alpha=ci_alpha,
+            )
+            # round for stable JSON/printing; None when the resample never had
+            # the relevant class (NaN) so callers don't print a bogus interval.
+            import math
+            if math.isnan(lo) or math.isnan(hi):
+                return None
+            return [round(lo, 4), round(hi, 4)]
+
+        tpr_ci = _ci(_calibration.tpr_stat)
+        tnr_ci = _ci(_calibration.tnr_stat)
+        precision_ci = _ci(_calibration.precision_stat)
+        recall_ci = _ci(_calibration.recall_stat)
+
+    # AUC-ROC and AUC-PR — optional sklearn dependency. When skipped, emit an
+    # explicit WARNING (do NOT silently swallow): a missing AUC quietly omitted
+    # from a report can be mistaken for a clean run.
     auc_roc = None
     auc_pr = None
+    single_class = len(set(ground_truths)) <= 1
     try:
         from sklearn.metrics import roc_auc_score, average_precision_score
-        if len(set(ground_truths)) > 1:
+        if not single_class:
             auc_roc = round(roc_auc_score(ground_truths, scores), 4)
             auc_pr = round(average_precision_score(ground_truths, scores), 4)
+        else:
+            print(
+                "WARNING: AUC-ROC/AUC-PR skipped — dataset is single-class "
+                "(all samples share one label); AUC is undefined.",
+                file=sys.stderr,
+            )
     except ImportError:
-        pass  # sklearn not installed — skip AUC metrics
-    except ValueError:
-        pass  # single-class dataset — AUC undefined
+        print(
+            "WARNING: AUC-ROC/AUC-PR skipped — sklearn is not installed. "
+            "Install scikit-learn to report threshold-independent ranking "
+            "metrics.",
+            file=sys.stderr,
+        )
+    except ValueError as exc:
+        # Defensive: sklearn raised for some other degenerate input.
+        print(
+            f"WARNING: AUC-ROC/AUC-PR skipped — {exc}",
+            file=sys.stderr,
+        )
 
     # Latency stats
     sorted_lat = sorted(latencies)
@@ -199,11 +275,22 @@ def compute_metrics(records, threshold):
         "tn": tn,
         "fp": fp,
         "fn": fn,
+        # Headline rate metrics (honest on imbalanced data) + their 95% CIs.
+        "tpr": round(tpr, 4),
+        "tnr": round(tnr, 4),
         "precision": round(precision, 4),
         "recall": round(recall, 4),
         "f1": round(f1, 4),
         "fpr": round(fpr, 4),
+        "tpr_ci": tpr_ci,
+        "tnr_ci": tnr_ci,
+        "precision_ci": precision_ci,
+        "recall_ci": recall_ci,
+        "ci_level": round(1.0 - ci_alpha, 4),  # e.g. 0.95 for alpha=0.05
+        # Accuracy DEMOTED to a footnote: paired with prevalence so a
+        # TN-dominated accuracy on a benign-heavy slice is not misread.
         "accuracy": round(accuracy, 4),
+        "prevalence": round(prevalence, 4),
         "auc_roc": auc_roc,
         "auc_pr": auc_pr,
         "avg_latency_ms": round(statistics.mean(latencies), 2) if latencies else 0.0,
@@ -219,35 +306,74 @@ def compute_metrics(records, threshold):
 # Output formatting
 # ---------------------------------------------------------------------------
 
+def _fmt_ci(ci):
+    """Render a [lo, hi] CI as a compact '[lo, hi]' string, or 'N/A'."""
+    if not ci:
+        return "N/A"
+    return f"[{ci[0]:.4f}, {ci[1]:.4f}]"
+
+
 def print_summary_table(metrics, tool, dataset_name):
-    """Print a markdown-formatted summary table to stdout."""
+    """Print a markdown-formatted summary table to stdout.
+
+    Metric ordering is deliberate: the imbalance-honest rate metrics
+    (TPR/TNR/precision/recall, each with a 95% bootstrap CI) lead. Accuracy is
+    DEMOTED to a footnote below the table and shown next to prevalence, because
+    on a benign-heavy slice accuracy is dominated by true negatives and hides a
+    weak detector.
+    """
+    ci_pct = int(round(metrics.get("ci_level", 0.95) * 100))
     print()
     print(f"## Benchmark Results: {tool} on {dataset_name}")
     print()
-    print("| Metric               | Value        |")
-    print("|----------------------|--------------|")
-    print(f"| Samples              | {metrics['n_samples']:>12} |")
-    print(f"| Malicious            | {metrics['n_malicious']:>12} |")
-    print(f"| Safe                 | {metrics['n_safe']:>12} |")
-    print(f"| TP                   | {metrics['tp']:>12} |")
-    print(f"| TN                   | {metrics['tn']:>12} |")
-    print(f"| FP                   | {metrics['fp']:>12} |")
-    print(f"| FN                   | {metrics['fn']:>12} |")
-    print(f"| Precision            | {metrics['precision']:>12.4f} |")
-    print(f"| Recall               | {metrics['recall']:>12.4f} |")
-    print(f"| F1                   | {metrics['f1']:>12.4f} |")
-    print(f"| FPR                  | {metrics['fpr']:>12.4f} |")
-    print(f"| Accuracy             | {metrics['accuracy']:>12.4f} |")
+    print("| Metric               | Value        | "
+          f"{ci_pct}% CI            |")
+    print("|----------------------|--------------|----------------------|")
+    print(f"| Samples              | {metrics['n_samples']:>12} | "
+          f"{'':>20} |")
+    print(f"| Malicious            | {metrics['n_malicious']:>12} | "
+          f"{'':>20} |")
+    print(f"| Safe                 | {metrics['n_safe']:>12} | "
+          f"{'':>20} |")
+    print(f"| TP                   | {metrics['tp']:>12} | {'':>20} |")
+    print(f"| TN                   | {metrics['tn']:>12} | {'':>20} |")
+    print(f"| FP                   | {metrics['fp']:>12} | {'':>20} |")
+    print(f"| FN                   | {metrics['fn']:>12} | {'':>20} |")
+    # --- HEADLINE rate metrics (lead the table), each with its CI ---
+    print(f"| TPR (recall)         | {metrics['tpr']:>12.4f} | "
+          f"{_fmt_ci(metrics.get('tpr_ci')):>20} |")
+    print(f"| TNR (specificity)    | {metrics['tnr']:>12.4f} | "
+          f"{_fmt_ci(metrics.get('tnr_ci')):>20} |")
+    print(f"| Precision            | {metrics['precision']:>12.4f} | "
+          f"{_fmt_ci(metrics.get('precision_ci')):>20} |")
+    print(f"| Recall               | {metrics['recall']:>12.4f} | "
+          f"{_fmt_ci(metrics.get('recall_ci')):>20} |")
+    print(f"| F1                   | {metrics['f1']:>12.4f} | {'':>20} |")
+    print(f"| FPR                  | {metrics['fpr']:>12.4f} | {'':>20} |")
     auc_roc_str = f"{metrics['auc_roc']:.4f}" if metrics['auc_roc'] is not None else "N/A"
     auc_pr_str = f"{metrics['auc_pr']:.4f}" if metrics['auc_pr'] is not None else "N/A"
-    print(f"| AUC-ROC              | {auc_roc_str:>12} |")
-    print(f"| AUC-PR               | {auc_pr_str:>12} |")
-    print(f"| Avg Latency (ms)     | {metrics['avg_latency_ms']:>12.2f} |")
-    print(f"| P50 Latency (ms)     | {metrics['p50_latency_ms']:>12.2f} |")
-    print(f"| P95 Latency (ms)     | {metrics['p95_latency_ms']:>12.2f} |")
-    print(f"| P99 Latency (ms)     | {metrics['p99_latency_ms']:>12.2f} |")
-    print(f"| Throughput (samp/s)  | {metrics['throughput_per_sec']:>12.2f} |")
-    print(f"| Threshold            | {metrics['threshold']:>12.2f} |")
+    print(f"| AUC-ROC              | {auc_roc_str:>12} | {'':>20} |")
+    print(f"| AUC-PR               | {auc_pr_str:>12} | {'':>20} |")
+    print(f"| Avg Latency (ms)     | {metrics['avg_latency_ms']:>12.2f} | "
+          f"{'':>20} |")
+    print(f"| P50 Latency (ms)     | {metrics['p50_latency_ms']:>12.2f} | "
+          f"{'':>20} |")
+    print(f"| P95 Latency (ms)     | {metrics['p95_latency_ms']:>12.2f} | "
+          f"{'':>20} |")
+    print(f"| P99 Latency (ms)     | {metrics['p99_latency_ms']:>12.2f} | "
+          f"{'':>20} |")
+    print(f"| Throughput (samp/s)  | {metrics['throughput_per_sec']:>12.2f} | "
+          f"{'':>20} |")
+    print(f"| Threshold            | {metrics['threshold']:>12.2f} | "
+          f"{'':>20} |")
+    print()
+    # --- Accuracy demoted to a footnote, shown with prevalence ---
+    print(
+        f"_Footnote — accuracy: {metrics['accuracy']:.4f} "
+        f"(prevalence={metrics['prevalence']:.4f}). "
+        "Accuracy is NOT a headline metric: on an imbalanced slice it is "
+        "dominated by true negatives; read TPR/TNR/precision/recall above._"
+    )
     print()
 
 
