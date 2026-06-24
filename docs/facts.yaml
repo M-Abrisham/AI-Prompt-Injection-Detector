@@ -11,6 +11,11 @@ public_exports:
 - scan_image
 - scan_image_file
 - scan_document_visual
+- scan_document
+- DocumentScanResult
+- scan_tool_result
+- scan_retrieved_chunks
+- ChunksScanResult
 - CascadeClassifier
 - ScanResult
 - VisualInjectionResult
@@ -42,7 +47,7 @@ rule_count:
   total_ast: 122
 taxonomy:
   category_count: 31
-  technique_count_total: 285
+  technique_count_total: 286
   techniques_by_category:
     D1: 22
     D2: 4
@@ -67,7 +72,7 @@ taxonomy:
     S: 8
     C: 8
     C1: 8
-    IM: 29
+    IM: 30
     IG: 12
     AD: 19
     CT: 20
@@ -76,10 +81,10 @@ taxonomy:
     C1MT: 6
     BEN: 2
 test_count:
-  count: 10521
+  count: 10678
   collection_errors: 0
   pytest_exit_code: 0
-test_files: 343
+test_files: 355
 detection_signals_in_scan:
   filter_doc: Names matching prefixes (detect_, scan_, analyze_, extract_, score_,
     compute_, classify*, predict*, get_, sniff_) plus an exact-match allowlist for
@@ -128,6 +133,7 @@ detection_signals_in_scan:
   - get_ingestion_weight
   - get_intent_guard_weight
   - register_malicious
+  - get_worm_detector
 constants:
   DECISION_THRESHOLD: 0.55
   MAX_INPUT_LENGTH: 50000

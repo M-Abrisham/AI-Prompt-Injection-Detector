@@ -52,7 +52,7 @@ Optional extras live in [pyproject.toml](pyproject.toml). Once a `pyproject_extr
 - **Semantic attacks** — fictional framing, indirect extraction, RAG poisoning, multilingual obfuscation. <!-- src: src/na0s/detectors/, src/na0s/multilingual_handler.py -->
 - **Multi-turn attacks** — fabricated history, escalation, payload splitting, scheming. **8** detectors over session state. <!-- src: src/na0s/layer16/detectors/; count via facts.yaml#L16_detectors -->
 
-Coverage spans **31** attack categories and **285** techniques. <!-- facts.yaml#taxonomy -->
+Coverage spans **31** attack categories and **286** techniques. <!-- facts.yaml#taxonomy -->
 
 ---
 
@@ -77,7 +77,7 @@ ScanResult
 
 <!-- src: src/na0s/layer0/__init__.py:2 (sanitize), src/na0s/layer1/analyzer.py:53 (rules), src/na0s/layer2/__init__.py:25 (obfuscation), src/na0s/structural/__init__.py:22 (structural), src/na0s/predict.py:578 (ML), src/na0s/embedding_classifier.py (embedding), src/na0s/_voting.py (cascade), src/na0s/judge/llm_judge.py (judge) -->
 
-`classify_prompt()` performs **40** named detection calls per input — full ordered list in [`docs/facts.yaml`](docs/facts.yaml). <!-- src: src/na0s/predict.py:640; facts.yaml#detection_signals_in_scan -->
+`classify_prompt()` performs **43** named detection calls per input — full ordered list in [`docs/facts.yaml`](docs/facts.yaml). <!-- src: src/na0s/predict.py:640; facts.yaml#detection_signals_in_scan -->
 
 Default decision threshold is **0.55**, configurable via `DECISION_THRESHOLD` env var or per-call `threshold=` argument. <!-- src: src/na0s/_voting.py:118; facts.yaml#constants.DECISION_THRESHOLD -->
 
@@ -87,7 +87,7 @@ Full architecture diagram and per-layer notes: [docs/ARCHITECTURE.md](docs/ARCHI
 
 ## Library API
 
-`from na0s import …` — **18** public symbols. <!-- facts.yaml#public_exports --> The three most commonly used:
+`from na0s import …` — **23** public symbols. <!-- facts.yaml#public_exports --> The three most commonly used:
 
 **Direct scan**
 
@@ -167,12 +167,12 @@ After `pip install -e .` the `na0s` shorthand is on `$PATH`. Exit codes follow t
 
 ## Taxonomy
 
-**31** categories, **285** techniques. <!-- facts.yaml#taxonomy -->
+**31** categories, **286** techniques. <!-- facts.yaml#taxonomy -->
 
 The largest by technique count:
 
+- **IM — Inter-Model Propagation**: 30
 - **D1 — Instruction Override**: 22
-- **IM — Inter-Model Propagation**: 29
 - **CT — Combo Techniques**: 20
 - **AD — Altered Delivery**: 19
 

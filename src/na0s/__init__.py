@@ -32,6 +32,24 @@ Image / visual injection scanning::
     result = scan_image(open("suspect.png", "rb").read())
     print(result.is_suspicious)  # True
     print(result.technique_ids)  # ["M1", "M1.1"]
+
+Ingestion-channel scanning (office docs / tool results / RAG chunks)::
+
+    from na0s import scan_document, scan_tool_result, scan_retrieved_chunks
+
+    # Hidden text inside a DOCX/XLSX/PPTX/ODF/OLE document
+    doc = scan_document(open("report.docx", "rb").read())
+
+    # Content returned by a tool / function / MCP resource
+    tr = scan_tool_result(api_response_text, tool_name="fetch_url")
+
+    # Each chunk retrieved from a vector store, scanned individually
+    rc = scan_retrieved_chunks(retrieved_chunks)
+
+EMAIL and WEB ingestion are the integrator's responsibility: Na0S holds no
+email or web content of its own, so inbound message bodies and fetched pages
+must be passed through ``scan()`` (or the channel helpers above) by the host
+application before they reach the model.
 """
 
 from na0s._version import __version__
@@ -57,6 +75,18 @@ try:
 except ImportError:
     pass  # Image/document deps may not be installed
 
+# Ingestion-channel scanning wrappers — route each indirect-injection channel
+# (office documents, tool/function results, RAG-retrieved chunks) through the
+# full scan() pipeline so the rule stack (incl. the worm / IM1.6 signal) runs
+# on content Na0S already parses/handles.  Lazy/guarded so optional parser
+# dependencies never break ``import na0s``.
+try:
+    from na0s.parsers.office.scan import scan_document, DocumentScanResult
+except ImportError:
+    pass  # Office parser deps may not be installed
+from na0s.detectors.mcp_tool import scan_tool_result
+from na0s.rag.scan import scan_retrieved_chunks, ChunksScanResult
+
 __all__ = [
     "__version__",
     "scan",
@@ -67,6 +97,11 @@ __all__ = [
     "scan_image",
     "scan_image_file",
     "scan_document_visual",
+    "scan_document",
+    "DocumentScanResult",
+    "scan_tool_result",
+    "scan_retrieved_chunks",
+    "ChunksScanResult",
     "CascadeClassifier",
     "ScanResult",
     "VisualInjectionResult",

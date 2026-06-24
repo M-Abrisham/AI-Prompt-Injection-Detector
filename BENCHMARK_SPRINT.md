@@ -209,6 +209,17 @@
 - [ ] **BM-18**: Version comparison tracking
   - Show v0.1 vs v0.2 vs v0.3 side by side as we improve
 
+- [ ] **BM-19**: Worm / self-replication (IM1.6) evaluation
+  - Measure TPR/FPR over the new F14 worm scenarios, never yet benchmarked:
+    `data/eval/scenarios/v0.1/worm_self_replication_attacks.yaml` (13 attacks, all `expected_verdict: blocked`)
+    and `data/eval/scenarios/v0.1/worm_self_replication_benign.yaml` (11 paired benign / over-refusal siblings)
+  - Pipeline path: `worm_embedding_signal` wired into `predict.scan()` (fail-safe, lexical-by-default)
+  - HONEST expected result: with no embedding model cached, only template-literal worms fire;
+    the paraphrase scenarios currently FAIL detection (intentional regression coverage).
+    Low paraphrase recall is expected until the embedding model is cached + worm corpus breadth expands.
+  - Report per-pattern recall (direct propagation, roleplay, marker/template, conditional, email,
+    RAG/DB poisoning, memory persistence, quine, cross-agent, metamorphic) and over-refusal FPR on the benign siblings
+
 ### Phase 4 — IMPROVEMENTS TO EXISTING COMPONENTS
 
 - [ ] **IMP-1**: Rewrite BENCHMARK_RESULTS.md with real data

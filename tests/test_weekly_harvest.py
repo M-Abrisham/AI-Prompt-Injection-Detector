@@ -114,6 +114,75 @@ class TestImport(unittest.TestCase):
 
 
 # ===================================================================
+# 1b. Query-list coverage tests
+# ===================================================================
+
+class TestQueryListsWormCoverage(unittest.TestCase):
+    """Worm / self-replication (IM1.6 / AML.T0061) queries must be present.
+
+    Structural-only: asserts the harvester is taxonomy-aware for the worm
+    attack type so it is not structurally excluded from dataset discovery.
+    No network calls.
+    """
+
+    def test_hf_queries_have_worm_coverage(self):
+        import weekly_harvest as mod
+        expected = {
+            "self-replicating prompt",
+            "LLM prompt worm",
+            "Morris II worm",
+            "agentic AI worm",
+            "prompt propagation",
+        }
+        missing = expected - set(mod.HF_QUERIES)
+        self.assertEqual(
+            missing, set(),
+            f"HF_QUERIES missing worm queries: {sorted(missing)}",
+        )
+
+    def test_arxiv_queries_have_worm_coverage(self):
+        import weekly_harvest as mod
+        expected = {
+            "all:self-replicating+prompt",
+            "all:Morris+II+worm+LLM",
+            "all:prompt+infection+multi-agent",
+        }
+        missing = expected - set(mod.ARXIV_QUERIES)
+        self.assertEqual(
+            missing, set(),
+            f"ARXIV_QUERIES missing worm queries: {sorted(missing)}",
+        )
+
+    def test_github_queries_have_worm_coverage(self):
+        import weekly_harvest as mod
+        expected = {
+            "self-replicating+prompt+dataset",
+            "LLM+worm+dataset",
+        }
+        missing = expected - set(mod.GITHUB_QUERIES)
+        self.assertEqual(
+            missing, set(),
+            f"GITHUB_QUERIES missing worm queries: {sorted(missing)}",
+        )
+
+    def test_arxiv_worm_queries_follow_all_prefix_convention(self):
+        """arXiv queries use the existing 'all:...+...' form."""
+        import weekly_harvest as mod
+        for q in mod.ARXIV_QUERIES:
+            self.assertTrue(
+                q.startswith("all:"),
+                f"ARXIV query does not use 'all:' convention: {q!r}",
+            )
+
+    def test_existing_queries_preserved(self):
+        """Adding worm queries must not drop the original entries."""
+        import weekly_harvest as mod
+        self.assertIn("prompt injection", mod.HF_QUERIES)
+        self.assertIn("all:prompt+injection+LLM", mod.ARXIV_QUERIES)
+        self.assertIn("prompt+injection+dataset", mod.GITHUB_QUERIES)
+
+
+# ===================================================================
 # 2. HuggingFace scanner tests
 # ===================================================================
 

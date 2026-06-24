@@ -180,12 +180,42 @@ try:
 except ImportError:
     _HAS_OUTPUT_SCANNER = False
 
+# Layer 9b: Propagation scanner — OUTPUT-side worm-spread guard, optional import.
+# Runs the input classifier + worm detector on LLM *output* to catch the
+# defining indirect-propagation step (output re-emits a self-replicating payload
+# that lands in the next model's input).  Gated behind NA0S_PROPAGATION_SCAN
+# (default OFF) inside scan_output, so default behaviour is unchanged.
+try:
+    from .output.propagation import PropagationScanner
+    _HAS_PROPAGATION_SCANNER = True
+except ImportError:
+    _HAS_PROPAGATION_SCANNER = False
+
 # Layer 10: Canary token detection — optional import
 try:
     from .canary import CanaryManager
     _HAS_CANARY = True
 except ImportError:
     _HAS_CANARY = False
+
+# Worm / self-replication detector — optional import.
+# Mirrors the predict.py INPUT-path wiring so CascadeClassifier().scan()
+# behaves identically to predict.scan() for self-replicating prompts.
+# get_worm_detector() returns a STATELESS WormSignatureDetector
+# (reconstruction_window=1): scan(clean) is single-input, no source_text, so
+# the cross-turn reconstruction buffer is never consulted.  Opt out via
+# NA0S_WORM_INPUT_SCAN=0.  Bounds/threshold constants are reused from
+# predict.py (single source of truth) rather than redefined here.
+try:
+    from .worm import get_worm_detector
+    from .predict import (
+        _WORM_INPUT_CONFIDENCE,
+        _WORM_INPUT_HIGH_SEVERITY,
+        _WORM_INPUT_MAX_WEIGHT,
+    )
+    _HAS_WORM = True
+except ImportError:
+    _HAS_WORM = False
 
 # Inter-model propagation detector (IM.x) — optional import (parity w/ scan()).
 # INGESTION-side detector; the IM docstring mandates input-side and forbids
@@ -1150,6 +1180,12 @@ class CascadeClassifier:
                 _logger.warning("Failed to init OutputScanner (Layer 9)", exc_info=True)
                 self._output_scanner = None
 
+        # Layer 9b: Propagation scanner — OUTPUT-side worm-spread guard.
+        # Constructed lazily on first use (only when NA0S_PROPAGATION_SCAN is on)
+        # to avoid paying the import/init cost when the gate is off.  Cached on
+        # the instance so it is built at most once per cascade.
+        self._propagation_scanner = None
+
         # Layer 10: Canary token manager — optional
         self._canary_manager = None
         if enable_canary and _HAS_CANARY:
@@ -1181,7 +1217,9 @@ class CascadeClassifier:
             "judge": 0,
             "positive_validation": 0,
             "output_scanner": 0,
+            "propagation_scanner": 0,
             "canary": 0,
+            "worm": 0,
         }
         # Layer 6: SLO tracker — enabled by NA0S_SLO_TRACKING=1
         self._slo_enabled = os.environ.get("NA0S_SLO_TRACKING") == "1"
@@ -1534,6 +1572,78 @@ class CascadeClassifier:
                 with self._stats_lock:
                     self._layer_failures["embedding"] += 1
 
+        # ---------------------------------------------------------------
+        # Worm / self-replication input signal — MIRRORS predict.py.
+        # Placed AFTER the ML/embedding stages and BEFORE the judge so the
+        # worm-influenced verdict flows through judge / positive validation /
+        # paranoid mode (defense-in-depth), exactly as predict.py applies its
+        # worm block before its downstream stages.
+        #
+        # _classify_full carries `confidence` in P(label-correct) semantics
+        # (for SAFE: P(safe) = 1 - P(malicious); for MALICIOUS: P(malicious)),
+        # whereas predict.py works in a composite-malicious score.  We bridge
+        # by deriving p_mal, applying the SAME bounded nudge + high-severity
+        # floor as predict.py, then converting back.  Constants are imported
+        # from predict.py (single source of truth).
+        #
+        # FP control is the detector's own is_worm + confidence gate: benign
+        # "forward/send/copy/repeat" phrasings score is_worm=False conf=0.0 so
+        # they never contribute.  The weight cap bounds the nudge; only the
+        # high-severity tier (conf >= _WORM_INPUT_HIGH_SEVERITY = 0.75) promotes
+        # via the floor.  Fail-safe (never raises).  Opt out: NA0S_WORM_INPUT_SCAN=0.
+        _worm_floor_promoted = False
+        if _HAS_WORM and os.environ.get(
+            "NA0S_WORM_INPUT_SCAN", "1"
+        ).strip().lower() not in ("0", "false", "no"):
+            try:
+                _worm = get_worm_detector().scan(clean)
+                _worm_is = bool(_worm.get("is_worm"))
+                _worm_conf = float(_worm.get("confidence", 0.0))
+                if _worm_is and _worm_conf >= _WORM_INPUT_CONFIDENCE:
+                    # Decision threshold for label promotion.  The outer
+                    # CascadeClassifier has no per-instance threshold (only the
+                    # inner WeightedClassifier does), so use the canonical
+                    # THRESHOLDS.DEFAULT_THRESHOLD — the same value the inner
+                    # WeightedClassifier and predict.py compare against.
+                    _worm_threshold = THRESHOLDS.DEFAULT_THRESHOLD
+                    # Derive P(malicious) in cascade's confidence semantics.
+                    p_mal = confidence if label == "MALICIOUS" else 1.0 - confidence
+                    # Bounded additive nudge (same cap as predict.py).
+                    p_mal = min(p_mal + _WORM_INPUT_MAX_WEIGHT * _worm_conf, 1.0)
+                    _wsev = "high" if _worm_conf >= _WORM_INPUT_HIGH_SEVERITY else "medium"
+                    # WD-4: stable hit name mapped to IM1.6 (AML.T0061).
+                    _whit = "worm:self_replication"
+                    if _whit not in hits:
+                        hits.append(_whit)
+                    if _whit not in technique_tags:
+                        technique_tags.append(_whit)
+                    if "IM1.6" not in technique_tags:
+                        technique_tags.append("IM1.6")
+                    # Degraded observability: surface lexical-only fallback.
+                    if not bool(_worm.get("embedding_available", False)):
+                        _dhit = "worm:degraded_no_embedding"
+                        if _dhit not in hits:
+                            hits.append(_dhit)
+                    # High-severity promotion floor — a standalone self-
+                    # replication instruction IS the attack.  Conservative:
+                    # only conf >= 0.75 promotes a SAFE base to MALICIOUS even
+                    # from a low base; the 0.55-0.75 tier keeps the bounded
+                    # nudge.  Mirrors predict.py's worm floor (and the E1 floor).
+                    if _worm_conf >= _WORM_INPUT_HIGH_SEVERITY and label == "SAFE":
+                        p_mal = max(p_mal, _worm_threshold + 0.01)
+                        _worm_floor_promoted = True
+                    # Crossing the decision threshold promotes the label.
+                    if label == "SAFE" and p_mal >= _worm_threshold:
+                        label = "MALICIOUS"
+                    # Convert p_mal back to P(label-correct) semantics.
+                    confidence = round(
+                        p_mal if label == "MALICIOUS" else 1.0 - p_mal, 4
+                    )
+            except Exception:
+                _logger.debug("Worm input signal failed", exc_info=True)
+                with self._stats_lock:
+                    self._layer_failures["worm"] += 1
+
         # Layer 7: LLM judge for ambiguous cases
         # Only run if "judge" is in the active stage list.
         if "judge" not in active_stages:
@@ -1588,17 +1698,23 @@ class CascadeClassifier:
         # If the classifier says MALICIOUS but positive validation says
         # the input IS a legitimate prompt, downgrade to SAFE.  This
         # catches benign prompts that mention injection-related vocabulary.
-        # Three parity guards: a verdict must NOT be downgraded by positive
-        # validation when it rests on (a) a DECISIVE ingestion planted-directive
-        # (hard cue + ingestion source — unambiguous embedded injection; mirrors
-        # the whitelist tripwire), (b) a fictional/academic/authority frame
-        # wrapping a CONCRETE inner attack ("fictional_inner:..." — the
-        # compliance-evasion class whose whole purpose is to look legitimate), or
-        # (c) a HIGH-severity privacy probe ("privacy:high_floor" — P2.x
-        # membership / third-party-PII / training-data extraction, a well-formed
-        # question positive validation would mis-read as legitimate).  All three
-        # keep the cascade in parity with scan(), which has no positive-validation
-        # stage.  Frame-ONLY hits (no inner) are NOT guarded, so benign novels /
+        #
+        # FOUR parity guards keep cascade.scan() aligned with predict.scan()
+        # (which has no positive-validation stage).  A verdict must NOT be
+        # downgraded here when it rests on:
+        # (a) a high-severity WORM floor promotion (conf >= 0.75) — a standalone
+        #     self-replication instruction IS the attack, not a benign prompt
+        #     that merely mentions injection vocabulary;
+        # (b) a DECISIVE ingestion planted-directive (hard cue + ingestion
+        #     source — unambiguous embedded injection; mirrors the whitelist
+        #     tripwire);
+        # (c) a fictional/academic/authority frame wrapping a CONCRETE inner
+        #     attack ("fictional_inner:..." — the compliance-evasion class whose
+        #     whole purpose is to look legitimate); or
+        # (d) a HIGH-severity privacy probe ("privacy:high_floor" — P2.x
+        #     membership / third-party-PII / training-data extraction, a well-
+        #     formed question positive validation would mis-read as legitimate).
+        # Frame-ONLY hits (no inner) are NOT guarded, so benign novels /
         # documentaries stay downgradeable.
         _ig_decisive = False
         if label == "MALICIOUS" and _HAS_INGESTION:
@@ -1608,7 +1724,8 @@ class CascadeClassifier:
                 _ig_decisive = False
         _ff_inner_present = any(h.startswith("fictional_inner:") for h in hits)
         _privacy_high_floor = "privacy:high_floor" in hits
-        if (label == "MALICIOUS" and not _ig_decisive
+        if (label == "MALICIOUS" and not _worm_floor_promoted
+                and not _ig_decisive
                 and not _ff_inner_present
                 and not _privacy_high_floor
                 and self._positive_validator is not None):
@@ -1771,7 +1888,7 @@ class CascadeClassifier:
         if self._output_scanner is None:
             return None
         try:
-            return self._output_scanner.scan(
+            result = self._output_scanner.scan(
                 output_text=output_text,
                 original_prompt=original_prompt,
                 system_prompt=system_prompt,
@@ -1781,6 +1898,63 @@ class CascadeClassifier:
             with self._stats_lock:
                 self._layer_failures["output_scanner"] += 1
             return None
+
+        # Layer 9b: OUTPUT-side worm-spread guard.  Gated behind
+        # NA0S_PROPAGATION_SCAN (default OFF) so default behaviour is unchanged.
+        # Runs the input classifier + worm detector on the OUTPUT text — the
+        # defining indirect-propagation step where the model re-emits a
+        # self-replicating payload destined for the next model's input.  The
+        # original prompt is passed as the replication source so the
+        # input<->output similarity head can fire.  Fail-safe: any error here
+        # is non-fatal and leaves the OutputScanner result untouched.
+        self._merge_propagation_scan(result, output_text, original_prompt)
+        return result
+
+    def _merge_propagation_scan(self, result, output_text, original_prompt):
+        """Run the OUTPUT-side propagation/worm guard and fold it into *result*.
+
+        No-op unless ``NA0S_PROPAGATION_SCAN`` is enabled and the
+        PropagationScanner module is importable.  Mutates *result* in place,
+        following the OutputScanner's own reporting contract:
+
+        * a propagation hit raises ``is_suspicious`` to True,
+        * lifts ``risk_score`` to the higher of the two scores, and
+        * extends ``flags`` / ``technique_ids`` with the propagation technique
+          tags (including ``worm_propagation`` and the IM1.6 worm taxonomy code).
+
+        Fail-safe: any exception is swallowed (logged at debug) so the
+        OutputScanner result is never corrupted by a propagation-scan failure.
+        """
+        if not _HAS_PROPAGATION_SCANNER or not PropagationScanner.is_enabled():
+            return
+        try:
+            if self._propagation_scanner is None:
+                self._propagation_scanner = PropagationScanner()
+            prop = self._propagation_scanner.scan(
+                output_text, source_input_text=original_prompt,
+            )
+            if not prop.get("is_propagation_risk"):
+                return
+
+            # Lift the suspicion flag and risk score (never lower them).
+            result.is_suspicious = True
+            result.risk_score = round(
+                max(result.risk_score, float(prop.get("risk_score", 0.0))), 4,
+            )
+
+            # Fold propagation technique tags into flags + technique_ids,
+            # preserving order and de-duplicating against existing entries.
+            tags = prop.get("technique_tags", []) or []
+            for tag in tags:
+                if tag not in result.technique_ids:
+                    result.technique_ids.append(tag)
+            prop_flag = "propagation: " + ", ".join(tags) if tags else "propagation risk"
+            if prop_flag not in result.flags:
+                result.flags.append(prop_flag)
+        except Exception:
+            _logger.debug("Propagation scanner (Layer 9b) failed", exc_info=True)
+            with self._stats_lock:
+                self._layer_failures["propagation_scanner"] += 1
 
     # ------------------------------------------------------------------
     # Layer 10: Canary token management

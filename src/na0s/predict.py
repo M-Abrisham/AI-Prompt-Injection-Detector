@@ -286,6 +286,42 @@ try:
 except ImportError:
     _HAS_PERPLEXITY = False
 
+# Worm self-replication signal — optional import (WD-1).
+# Full, fail-safe self-replication scan for ("worm") intent on the INPUT path.
+# Previously the worm detector was reachable only on the OUTPUT side
+# (PropagationScanner, env-gated off), so a worm arriving as input was never
+# scored.  The input call uses the process-wide STATELESS detector
+# (reconstruction_window=1 => _history_limit==0) so a prior worm turn can never
+# raise the verdict of a later benign turn through the shared instance.  We call
+# the FULL detector .scan() rather than the light worm_embedding_signal():
+# empirically (default install, no dense model cached) the light signal's lexical
+# fallback only fires on near-template phrasing, whereas the full scan fuses the
+# regex/semantic/code/replication heads and catches paraphrased worms the light
+# signal misses, at 0 benign false-positives on the F14 paired-benign set.
+# Opt out with NA0S_WORM_INPUT_SCAN=0.
+try:
+    from .worm import get_worm_detector
+    _HAS_WORM = True
+except ImportError:
+    _HAS_WORM = False
+
+# Worm-signal contribution bounds.  The PRIMARY false-positive control is the
+# detector's own gate (is_worm + a confidence floor): the regex/semantic/code
+# heads fire only on genuine propagation structure (action + payload/target +
+# imperative) so benign "forward / send / include" phrasings score 0.0 and are
+# untouched.  The weight cap then bounds how far a gated hit can move the
+# composite, so a borderline prompt is nudged rather than slammed over the
+# threshold.
+# _WORM_INPUT_CONFIDENCE: a worm hit contributes only when scan() reports
+# is_worm AND confidence >= 0.55.  0.55 (not a hard 0.60) is deliberate: it
+# admits the single-regex confidence floor of 0.6 with a small margin so a
+# legitimate single-pattern worm match is not lost to a sharp 0.60 cliff, while
+# still sitting well above the 0.0 the benign corpus scores.
+# NOTE: starting operating point — calibrate against a labeled corpus (G3).
+_WORM_INPUT_CONFIDENCE = 0.55      # min scan() confidence before it contributes
+_WORM_INPUT_HIGH_SEVERITY = 0.75   # confidence at/above which the hit is "high"
+_WORM_INPUT_MAX_WEIGHT = 0.30      # max additive contribution to the composite score
+
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 CHAR_VECTORIZER_PATH = get_model_path("char_tfidf_vectorizer.pkl")
@@ -1609,6 +1645,62 @@ def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD) -> Tu
         except Exception:
             pass  # PromptGuard failure is non-fatal
 
+    # --- Worm self-replication signal (input-side, WD-1) ---
+    # Run the sanitized input through the FULL stateless worm detector
+    # (get_worm_detector().scan(clean) — single-input, no source_text, so the
+    # cross-turn reconstruction buffer is never consulted).  Fuses the
+    # regex/semantic/code/replication heads (and the dense embedding head when a
+    # model is cached), degrading honestly when it is not (see
+    # embedding_available below).  Fail-safe (never raises) and bounded (see
+    # _WORM_INPUT_* above — the is_worm + confidence gate is the FP control, the
+    # cap bounds the nudge).  Opt out via NA0S_WORM_INPUT_SCAN=0.
+    if _HAS_WORM and os.environ.get(
+        "NA0S_WORM_INPUT_SCAN", "1"
+    ).strip().lower() not in ("0", "false", "no"):
+        try:
+            _worm = get_worm_detector().scan(clean)
+            _worm_is = bool(_worm.get("is_worm"))
+            _worm_conf = float(_worm.get("confidence", 0.0))
+            if _worm_is and _worm_conf >= _WORM_INPUT_CONFIDENCE:
+                _worm_weight = _WORM_INPUT_MAX_WEIGHT * _worm_conf
+                composite = min(composite + _worm_weight, 1.0)
+                _wsev = "high" if _worm_conf >= _WORM_INPUT_HIGH_SEVERITY else "medium"
+                # WD-4: stable hit name mapped to IM1.6 (AML.T0061) downstream.
+                _whit = "worm:self_replication"
+                if _whit not in hit_names_seen:
+                    hits.append(_whit)
+                    hit_names_seen.add(_whit)
+                    _local_severities[_whit] = _wsev
+                # Degraded observability: surface whether the scan ran with the
+                # dense embedding head live or degraded to the lexical/regex
+                # heads, so a consumer can distinguish "scored benign" from
+                # "dense model unavailable".  scan() reports embedding_available.
+                if not bool(_worm.get("embedding_available", False)):
+                    _dhit = "worm:degraded_no_embedding"
+                    if _dhit not in hit_names_seen:
+                        hits.append(_dhit)
+                        hit_names_seen.add(_dhit)
+                        _local_severities[_dhit] = "info"
+                if composite >= threshold and "SAFE" in label:
+                    label = "MALICIOUS"
+                # --- Worm high-severity promotion floor ---
+                # A standalone self-replication instruction IS the attack: a
+                # high-confidence worm hit on its own should label MALICIOUS even
+                # from a low base composite (the bounded +0.30*conf nudge alone
+                # can stall below threshold from a low base, leaving a clear worm
+                # tagged-but-SAFE).  Mirrors the E1 extraction floor above.
+                # CONSERVATIVE by construction: only the high-severity tier
+                # (conf >= _WORM_INPUT_HIGH_SEVERITY = 0.75) promotes; the
+                # 0.55–0.75 tier keeps the bounded-nudge behavior.  FP-safe: the
+                # detector's is_worm gate scores benign "forward/send/copy/repeat"
+                # phrasings at is_worm=False conf=0.0, so benign text never
+                # reaches this floor (verified against the F14 benign set).
+                if _worm_conf >= _WORM_INPUT_HIGH_SEVERITY and "SAFE" in label:
+                    composite = max(composite, threshold + 0.01)
+                    label = "MALICIOUS"
+        except Exception:
+            pass  # worm signal failure is non-fatal
+
     # --- Layer 2 extra boost (ascii art / whitespace stego) ---
     # Applied after _weighted_decision so it doesn't interfere with the
     # ML-uncertain-zone cap or override protection logic inside that function.
@@ -2367,6 +2459,11 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
         elif hit_name.startswith("intent:"):
             if "N1" not in technique_tags:
                 technique_tags.append("N1")
+        elif hit_name == "worm:self_replication":
+            # WD-4: self-replicating ("worm") prompt -> IM1.6 (MITRE ATLAS
+            # AML.T0061, LLM Prompt Self-Replication).
+            if "IM1.6" not in technique_tags:
+                technique_tags.append("IM1.6")
 
     # Layer 3: Append structural injection signals to rule_hits for visibility
     # and map them to technique_ids for taxonomy attribution.

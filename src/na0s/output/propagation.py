@@ -49,7 +49,11 @@ class PropagationScanner:
         # auto_adapt=False: attacker-controlled output must NOT train the
         # detector — that's a poisoning vector.  Auto-adapt should only run
         # on *confirmed* malicious input after human review.
-        self._worm_detector = WormSignatureDetector(auto_adapt=False)
+        # reconstruction_window=1 (stateless, _history_limit==0): consistent
+        # with the input-path get_worm_detector() singleton (WD-3) so a prior
+        # output-scan turn cannot poison a later benign output-scan via the
+        # cross-turn reconstruction buffer.
+        self._worm_detector = WormSignatureDetector(auto_adapt=False, reconstruction_window=1)
 
     # ---- public API -------------------------------------------------------
 
@@ -105,6 +109,10 @@ class PropagationScanner:
             worm_boost = worm_result["confidence"] * WORM_BOOST_FACTOR
             risk_score = min(1.0, risk_score + worm_boost)
             technique_tags.append("worm_propagation")
+            # Surface the taxonomy code so the worm hit is traceable to IM1.6.
+            for _tid in worm_result.get("technique_ids", []):
+                if _tid not in technique_tags:
+                    technique_tags.append(_tid)
 
         # Single decision criterion: boosted risk_score only.
         # No separate `or worm_result["is_worm"]` — that double-counted

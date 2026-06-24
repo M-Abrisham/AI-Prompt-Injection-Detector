@@ -61,6 +61,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # Cache the all-MiniLM-L6-v2 weights so the warm step below restores them
+      # fast and the worm-embedding "Live" tests execute instead of skipping.
+      # These cache paths match WormSignatureDetector's _EmbeddingSimilarity
+      # ._is_model_cached() lookup.
+      - name: Cache sentence-transformer model weights
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/torch/sentence_transformers
+          key: ${{ runner.os }}-st-model-all-MiniLM-L6-v2-v1
+
       - name: Warm + verify embedding model (fail-fast)
         run: |
           # Fetch the pinned MiniLM revision ONCE into the HF cache and verify
