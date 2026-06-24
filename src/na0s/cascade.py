@@ -35,6 +35,11 @@ from .config import (
 )
 from .obfuscation import obfuscation_scan
 from .input import layer0_sanitize
+from .input.normalization import (
+    _reassemble_char_splits,
+    _CHAR_SPLIT_HEAVY_RUN,
+    _CHAR_SPLIT_MIN_SCORED,
+)
 from .input.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult
 from .models import get_model_path
@@ -777,6 +782,30 @@ class WeightedClassifier:
                         label = "MALICIOUS"
             except Exception:
                 _logger.debug("RAG-poison detection failed", exc_info=True)
+        # --- Char-split obfuscation (D7.5) — parity with scan() ---
+        # Layer 0 reassembles single-char splits (i.g.n.o.r.e, i_g_n_o_r_e,
+        # comma/interpunct/vertical stacks); when no word boundary survives,
+        # the glued token matches no rule and the composite stays near zero.
+        # The reassembly signal itself is strong (~0.007% benign fire on 30k
+        # texts), so re-detect on the *raw* text (pre-normalization) and
+        # contribute bounded risk, flooring a long single-char run to the
+        # decision threshold.  Mirrors the re-detect pattern above.
+        try:
+            _cs_src = raw_text if raw_text is not None else text
+            _, _cs_reassembled, _cs_run = _reassemble_char_splits(_cs_src)
+            if _cs_reassembled and _cs_run >= _CHAR_SPLIT_MIN_SCORED:
+                _cs_heavy = _cs_run >= _CHAR_SPLIT_HEAVY_RUN
+                _cs_w = 0.45 if _cs_heavy else 0.20
+                composite = min(composite + _cs_w, 1.0)
+                if _cs_heavy and composite < self.threshold:
+                    composite = max(composite, self.threshold)
+                if "char_split_obfuscation" not in hit_names_seen:
+                    hit_names.append("char_split_obfuscation")
+                    hit_names_seen.add("char_split_obfuscation")
+                if composite >= self.threshold and label == "SAFE":
+                    label = "MALICIOUS"
+        except Exception:
+            _logger.debug("Char-split detection failed", exc_info=True)
 
         # Add obs flags and boost reasons to returned hits for reporting.
         # These are AFTER the _voting call to avoid double-counting.
