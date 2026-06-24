@@ -182,6 +182,9 @@
 - [ ] **BM-13**: LODO evaluation (Leave-One-Dataset-Out)
   - Train on N-1 datasets, test on held-out one
   - Standard evaluation inflates AUC by 8.4% ("When Benchmarks Lie")
+  - **[R2] Per-fold LODO recall with Wilson CI** (`scripts/technique_analysis.py::wilson_ci`) — one fold per source dataset; fold key = the per-source provenance carried into `combined_data.csv` (`scripts/process_data.py` `source_counts`). Reuse the already-shipped CI functions (IMP-2 above, `bootstrap_ci`/`rogan_gladen_ci` in `src/na0s/judge/calibration.py`); do NOT reimplement.
+  - **[R2] Report the in-distribution vs out-of-distribution GAP** (standard-eval recall − LODO recall) as the headline honesty signal — this is the ~8.4% AUC inflation cited above. No new threshold: reuse `_DEFAULT_THRESHOLD=0.55` and `_MIN_SAMPLES=100` from `scripts/model.py`; a fold below the floor is skipped + stamped, not silently gated.
+  - **[R2] BLOCKED — the true LODO *run* is DVC/DI-3-blocked**: it needs the per-fold retrain loop, which can only execute where the corpus is hydrated (`dvc pull` or `auto-retrain.yml` CI), the same blocker as Item 17 / DI-3 (`specs/hardening/17-di-decontam-retrain.md`). LODO and DI-3 share the retrain loop — execute together, not twice. Only BM-13's *specification* is tightened here; the box stays unchecked until a real LODO run produces numbers.
 
 - [ ] **BM-14**: Large real-world datasets
   - Lakera Gandalf (279K real attacks from DEF CON)
@@ -299,3 +302,28 @@ Three additional modules address payload delivery, harmful content, and structur
 6. **semantic_system_marker** rule (D3.6) — natural-language fake system
    boundary detection: authority+boundary framing, pseudo-official headers,
    supersession language. PL2, context-suppressible.
+
+### Decontamination Integrity
+
+Every COVERAGE_MATRIX / benchmark recall number is only trustworthy if the
+candidate model was not trained on the F14 eval scenarios. The
+`scripts/check_eval_decontamination.py` CI gate is that precondition.
+
+- [x] **R1 — extend the decontamination CI gate (2026-06-23)** — added three
+  OPT-IN legs on top of the always-on exact stable_id hard block:
+  (a) `--bff` 13-gram (word) presence-fraction (catches partial / spliced span
+  copies that exact + MinHash miss; n=13 GPT-3/C4/Allen-AI convention,
+  `--bff-n` overridable; `--bff-threshold` defaults to a CONSERVATIVE 0.90 — the
+  local training corpus is gitignored/empty so the fraction cutoff cannot be
+  calibrated here, precise calibration deferred to a real-corpus CI run);
+  (b) `--embedding` keyless local all-MiniLM-L6-v2 cosine (catches semantic
+  paraphrase; reuses `na0s.ml._st_loader.load_pinned_sentence_transformer` +
+  `admission_gate._cosine` + `DEFAULT_NEAR_DUP_THRESHOLD=0.85`; degrades to a
+  no-op skip when sentence-transformers is absent);
+  (c) a per-source overlap-attribution table so an operator can see WHICH
+  training dataset is the contamination vector.
+  All legs OFF by default, warning-only unless `--strict`; exact overlap stays
+  always-fatal and the empty-corpus exit-2 guard still fires with all legs on.
+  Wired warning-only into `auto-retrain.yml`. Tests with teeth in
+  `tests/eval/scripts/test_check_eval_decontamination.py`.
+  **Caveat:** `--bff-threshold` calibration is deferred to a real-corpus CI run.

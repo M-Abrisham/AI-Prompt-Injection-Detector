@@ -173,13 +173,28 @@ jobs:
 
       # F14 eval decontamination check: ensures no scenario in
       # data/eval/scenarios/ appears in training data (data/processed,
-      # data/staging, data/aggregated). Hard block — any overlap aborts the
-      # deploy because gate metrics on contaminated training data are
-      # artificially inflated.
+      # data/staging, data/aggregated). Hard block — any EXACT overlap aborts
+      # the deploy because gate metrics on contaminated training data are
+      # artificially inflated. Exact-only here keeps the gate fast and
+      # deterministic.
       - name: Run F14 eval decontamination check
         id: decontam
         if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED'
         run: python scripts/check_eval_decontamination.py
+
+      # Heavier near-duplicate legs (MinHash token-Jaccard + 13-gram BFF
+      # presence-fraction), WARNING-ONLY. These surface paraphrase / partial-
+      # span leaks in the run log without flapping the deploy gate on a
+      # similarity heuristic (no --strict, continue-on-error). The embedding
+      # cosine leg is deliberately NOT run here — it needs sentence-transformers
+      # + the pinned model which the default runner does not install; run it
+      # locally / in a dedicated job with the model present. An exact overlap
+      # is already a hard block in the step above.
+      - name: F14 decontamination — near-dup + BFF (warning-only)
+        id: decontam_heavy
+        if: steps.canary.outputs.result == 'PASSED' && steps.shadow.outputs.result == 'PASSED'
+        continue-on-error: true
+        run: python scripts/check_eval_decontamination.py --near-dup --bff
 
       # F14 promotion gate: runs scenarios from data/eval/scenarios/v0.1/
       # through the candidate and compares per-category TPR to the committed

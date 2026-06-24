@@ -8,23 +8,51 @@ walks the training-data roots (``data/processed/``, ``data/staging/``,
 Any intersection is a contamination event — the candidate model was trained on
 eval data and the promotion gate would give artificially-inflated metrics.
 
-The exact-hash leg only catches verbatim copies. The optional ``--near-dup``
-leg (MinHash + LSH, reusing ``na0s.dataset.near_duplicate``) additionally
-catches paraphrase / light-edit leaks; it is warning-only unless ``--strict``.
-It is off by default so the always-on CI gate stays fast on the full corpus.
+The exact-hash leg is the always-on hard block; it only catches verbatim
+copies. Three OPT-IN legs extend it, each catching a leak class the exact
+hash misses. All three are OFF by default so the always-on CI gate stays
+fast and dependency-light, and all three degrade gracefully on an empty
+corpus / missing optional deps:
 
-A run that scans zero training rows fails loud (exit 2) rather than reporting
-a false "clean" — an empty/unbuilt corpus cannot certify decontamination.
+  * ``--near-dup`` — MinHash + LSH token-Jaccard (reuses
+    ``na0s.dataset.near_duplicate``). Catches paraphrase / light-edit leaks.
+  * ``--bff`` — 13-gram (word) presence-fraction. Catches *partial / spliced*
+    copies where a long contiguous span of an eval scenario is embedded inside
+    a larger training row (or vice-versa). The exact hash misses this (the
+    whole-string hash differs) and MinHash-on-the-full-row can dilute a small
+    shared span below the Jaccard cutoff. ``n=13`` is the de-facto dedup
+    convention (GPT-3 / C4 / Allen-AI "BFF" all use contiguous 13-token spans
+    as the partial-copy unit); overridable via ``--bff-n``. The fraction
+    threshold is conservative by default (see ``--bff-threshold``).
+  * ``--embedding`` — local, KEYLESS embedding-cosine. Catches semantic
+    paraphrase that survives both exact-hash and token-Jaccard (synonym swaps,
+    re-ordering). Reuses the same pinned offline model the admission gate's
+    ``embedding_fn`` hook expects (``all-MiniLM-L6-v2`` via
+    ``na0s.ml._st_loader.load_pinned_sentence_transformer``). If
+    ``sentence-transformers`` is absent the leg prints a skip notice and is a
+    no-op — it never fails the gate. Threshold inherits
+    ``admission_gate.DEFAULT_NEAR_DUP_THRESHOLD`` (0.85); not a new constant.
+
+The report also always prints a per-source overlap table so an operator can
+see WHICH training dataset is the contamination vector, not just that
+contamination exists.
+
+The opt-in legs are warning-only unless ``--strict``; exact overlap is always
+fatal. A run that scans zero training rows fails loud (exit 2) rather than
+reporting a false "clean" — an empty/unbuilt corpus cannot certify
+decontamination, regardless of which legs are enabled.
 
 Usage:
     python scripts/check_eval_decontamination.py
     python scripts/check_eval_decontamination.py --training-roots data/processed/ data/staging/
     python scripts/check_eval_decontamination.py --near-dup            # warn on paraphrases
-    python scripts/check_eval_decontamination.py --strict              # near-dup fatal too
+    python scripts/check_eval_decontamination.py --bff                 # warn on partial spans
+    python scripts/check_eval_decontamination.py --embedding           # warn on semantic paraphrase
+    python scripts/check_eval_decontamination.py --strict              # opt-in legs fatal too
 
 Exit codes:
-    0 — no overlap (near-dup matches, if any, were warning-only)
-    1 — contamination: exact overlap, or near-dup overlap under --strict
+    0 — no exact overlap (near-dup/BFF/embedding matches, if any, were warning-only)
+    1 — contamination: exact overlap, or near-dup/BFF/embedding overlap under --strict
     2 — configuration / IO error, or empty corpus (no --allow-empty-corpus)
 """
 
@@ -51,6 +79,35 @@ from na0s.dataset.near_duplicate import (  # noqa: E402
     lsh_buckets,
     minhash_signature,
 )
+# Reuse — do NOT reinvent — the admission gate's cosine helper and its
+# already-shipped 0.85 near-dup cutoff so the embedding leg here and the
+# F14 admission gate stay in lock-step.
+from na0s.eval.scenarios.admission_gate import (  # noqa: E402
+    DEFAULT_NEAR_DUP_THRESHOLD,
+    _cosine,
+)
+
+# The pinned local embedding model (mirrors na0s.ml.predict_embedding.
+# DEFAULT_EMBEDDING_MODEL). Defined here as a plain literal — NOT imported —
+# because predict_embedding raises ImportError at import time when
+# sentence-transformers is absent (the local reality), and the always-on gate
+# must stay importable / dependency-light. The embedding leg loads the model
+# lazily only when --embedding is passed AND sentence-transformers is present.
+DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+
+# 13-gram is the de-facto partial-copy dedup unit (GPT-3 / C4 / Allen-AI BFF).
+# Documented convention, NOT a tuned magic number; overridable via --bff-n.
+_DEFAULT_BFF_N = 13
+# CONSERVATIVE default: the local training corpus (data/processed/*.csv) is
+# gitignored and EMPTY here, so --bff-threshold cannot be calibrated locally.
+# 0.90 flags only near-total span copies (>=90% of an eval scenario's 13-grams
+# present in training) — high-precision / low-FP without a calibration corpus.
+# Precise calibration is deferred to a CI run with a real corpus (sweep the
+# F14 v0.1 scenarios vs a known-clean training sample). See module tests.
+_DEFAULT_BFF_THRESHOLD = 0.90
+# Mask used to bound the training 13-gram set's memory (store hash(gram)&mask
+# as a 64-bit int rather than the gram string). Collision rate is negligible.
+_BFF_HASH_MASK = (1 << 64) - 1
 
 
 _DEFAULT_SCENARIOS = _PROJECT_ROOT / "data" / "eval" / "scenarios" / "v0.1"
@@ -171,24 +228,35 @@ def _collect_scenario_texts(scenarios_dir: Path) -> list[tuple[str, str, Path]]:
 def scan_exact(
     scenarios_dir: Path,
     training_roots: list[Path],
-) -> tuple[list[dict], int, int]:
+) -> tuple[list[dict], int, int, dict[str, dict[str, int]]]:
     """Run the exact stable_id overlap scan.
 
-    Returns ``(overlaps, n_training_rows_scanned, n_scenario_ids)``. The row
-    count lets the CLI distinguish "scanned a real corpus and found it clean"
-    from "scanned nothing" (an empty/unbuilt corpus must not pass silently).
+    Returns ``(overlaps, n_training_rows_scanned, n_scenario_ids, per_source)``.
+    The row count lets the CLI distinguish "scanned a real corpus and found it
+    clean" from "scanned nothing" (an empty/unbuilt corpus must not pass
+    silently).
+
+    ``per_source`` is ``{str(training_file): {"rows": int, "overlaps": int}}``
+    — a per-dataset breakdown of how many rows each training file contributed
+    and how many of those were exact contamination hits, so an operator can see
+    WHICH dataset is the contamination vector, not just that contamination
+    exists. Pure reporting; it never changes exit-code logic.
     """
     scenario_ids = _collect_scenario_ids(scenarios_dir)
     overlaps: list[dict] = []
+    per_source: dict[str, dict[str, int]] = {}
     n_rows = 0
     if not scenario_ids:
-        return overlaps, n_rows, 0
+        return overlaps, n_rows, 0, per_source
     for text, source, row in _iter_training_texts(training_roots):
         n_rows += 1
+        bucket = per_source.setdefault(str(source), {"rows": 0, "overlaps": 0})
+        bucket["rows"] += 1
         sid = compute_stable_id(text)
         hit = scenario_ids.get(sid)
         if hit is not None:
             scn_name, scn_source = hit
+            bucket["overlaps"] += 1
             overlaps.append({
                 "stable_id": sid,
                 "scenario_name": scn_name,
@@ -196,7 +264,7 @@ def scan_exact(
                 "training_file": str(source),
                 "training_row": row,
             })
-    return overlaps, n_rows, len(scenario_ids)
+    return overlaps, n_rows, len(scenario_ids), per_source
 
 
 def find_overlaps(
@@ -207,7 +275,7 @@ def find_overlaps(
 
     Thin back-compat wrapper around :func:`scan_exact`.
     """
-    overlaps, _, _ = scan_exact(scenarios_dir, training_roots)
+    overlaps, _, _, _ = scan_exact(scenarios_dir, training_roots)
     return overlaps
 
 
@@ -269,6 +337,194 @@ def find_near_dup_overlaps(
     return overlaps
 
 
+def _word_ngrams(text: str, n: int) -> list[int]:
+    """Return the list of word ``n``-gram hashes for ``text``.
+
+    Normalization matches :func:`compute_stable_id` (NFKC + whitespace-collapse)
+    so the BFF leg's notion of "same span" is consistent with the exact leg's
+    canonicalization. Each n-gram is reduced to ``hash(gram) & _BFF_HASH_MASK``
+    (a 64-bit int) so a large training corpus's gram set stays bounded in
+    memory; the collision rate at 64 bits is negligible.
+
+    A text with fewer than ``n`` tokens has ZERO n-grams and returns ``[]`` —
+    callers must treat that as "no signal from this leg" (such scenarios stay
+    covered by the exact + MinHash legs), never as 0.0 or 1.0 overlap.
+    """
+    normalized = unicodedata.normalize("NFKC", text)
+    tokens = normalized.split()
+    if len(tokens) < n:
+        return []
+    grams = []
+    for i in range(len(tokens) - n + 1):
+        gram = " ".join(tokens[i:i + n])
+        grams.append(hash(gram) & _BFF_HASH_MASK)
+    return grams
+
+
+def find_bff_overlaps(
+    scenarios_dir: Path,
+    training_roots: list[Path],
+    *,
+    n: int = _DEFAULT_BFF_N,
+    min_presence_fraction: float = _DEFAULT_BFF_THRESHOLD,
+) -> tuple[list[dict], int]:
+    """Return 13-gram presence-fraction overlap records + a skipped-short count.
+
+    For each eval scenario text, presence-fraction =
+    ``|scenario n-grams that also appear in the training n-gram set| /
+    |scenario n-grams|``. A scenario is flagged when that fraction is
+    ``>= min_presence_fraction`` — i.e. a large contiguous span of the scenario
+    is present somewhere in training even if no single training row is a
+    whole-string or high-Jaccard match.
+
+    Exact stable_id collisions are excluded (already reported by
+    :func:`scan_exact`). Scenarios with fewer than ``n`` tokens have no
+    n-grams; they are SKIPPED in this leg and counted in the returned
+    ``skipped_short`` integer (they remain covered by exact + MinHash).
+
+    Returns ``(overlaps, skipped_short)``. ``overlaps`` is empty when the
+    corpus is empty or no scenario clears the threshold.
+    """
+    scenario_rows = _collect_scenario_texts(scenarios_dir)
+    if not scenario_rows:
+        return [], 0
+
+    # Build the training n-gram set in a single streaming pass over the corpus.
+    training_grams: set[int] = set()
+    scenario_exact_ids: set[str] = {
+        compute_stable_id(text) for text, _name, _src in scenario_rows
+    }
+    has_training_rows = False
+    for text, _source, _row in _iter_training_texts(training_roots):
+        has_training_rows = True
+        if compute_stable_id(text) in scenario_exact_ids:
+            continue  # exact dup — reported by scan_exact, not this leg
+        training_grams.update(_word_ngrams(text, n))
+
+    overlaps: list[dict] = []
+    skipped_short = 0
+    if not has_training_rows or not training_grams:
+        # Empty corpus (or only exact dups / sub-n-gram rows): no BFF signal.
+        # Still count short scenarios so the report is honest.
+        for text, _name, _src in scenario_rows:
+            if len(unicodedata.normalize("NFKC", text).split()) < n:
+                skipped_short += 1
+        return overlaps, skipped_short
+
+    for text, name, src in scenario_rows:
+        grams = _word_ngrams(text, n)
+        if not grams:
+            skipped_short += 1
+            continue
+        present = sum(1 for g in grams if g in training_grams)
+        fraction = present / len(grams)
+        if fraction >= min_presence_fraction:
+            overlaps.append({
+                "scenario_name": name,
+                "scenario_source": str(src),
+                "presence_fraction": round(fraction, 4),
+                "n_grams": len(grams),
+                "n": n,
+            })
+    return overlaps, skipped_short
+
+
+def _load_default_embedding_fn():
+    """Return a keyless local ``embedding_fn`` or ``None`` if unavailable.
+
+    Lazily constructs the pinned offline ``all-MiniLM-L6-v2`` model via
+    ``na0s.ml._st_loader.load_pinned_sentence_transformer`` (the SAME model the
+    F14 admission gate's ``embedding_fn`` hook expects). Returns ``None`` —
+    never raises — when ``sentence-transformers`` is absent or the model cannot
+    be constructed, so the embedding leg degrades to a no-op skip rather than
+    failing the gate. No raw API key is ever required.
+    """
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError:
+        return None
+    try:
+        from na0s.ml._st_loader import load_pinned_sentence_transformer
+
+        model = load_pinned_sentence_transformer(
+            SentenceTransformer, DEFAULT_EMBEDDING_MODEL,
+        )
+    except Exception:  # pragma: no cover - model download / construction issues
+        return None
+
+    def _embed(text: str) -> list[float]:
+        vec = model.encode([text])[0]
+        return [float(x) for x in vec]
+
+    return _embed
+
+
+def find_embedding_overlaps(
+    scenarios_dir: Path,
+    training_roots: list[Path],
+    *,
+    embedding_fn=None,
+    threshold: float = DEFAULT_NEAR_DUP_THRESHOLD,
+) -> list[dict]:
+    """Return semantic embedding-cosine overlap records.
+
+    Embeds every eval scenario text and every (non-exact-dup) training row via
+    ``embedding_fn`` and flags a scenario when its max cosine over the corpus is
+    ``>= threshold``. Mirrors ``admission_gate._check_near_dup_decontam``'s
+    cosine leg and reuses its ``_cosine`` helper and 0.85 cutoff.
+
+    ``embedding_fn`` defaults to :func:`_load_default_embedding_fn`. If that is
+    ``None`` (``sentence-transformers`` absent) — or if it raises — this leg
+    returns ``[]`` and never fails the gate (the caller prints a skip notice).
+    Exact stable_id collisions are excluded (already reported by
+    :func:`scan_exact`).
+
+    NOTE: 0.85 was set for the admission gate's near-dup proxy; it has NOT been
+    re-validated for short injection strings, so this leg is warning-only and
+    must not be made fatal without re-calibration.
+    """
+    if embedding_fn is None:
+        embedding_fn = _load_default_embedding_fn()
+    if embedding_fn is None:
+        return []
+
+    scenario_rows = _collect_scenario_texts(scenarios_dir)
+    if not scenario_rows:
+        return []
+
+    try:
+        scenario_vecs = [embedding_fn(text) for text, _n, _s in scenario_rows]
+    except Exception:  # pragma: no cover - depends on user fn
+        return []
+    scenario_exact_ids = {
+        compute_stable_id(text) for text, _n, _s in scenario_rows
+    }
+
+    overlaps: list[dict] = []
+    best: dict[int, dict] = {}
+    for text, source, row in _iter_training_texts(training_roots):
+        if compute_stable_id(text) in scenario_exact_ids:
+            continue  # exact dup — already reported by scan_exact
+        try:
+            row_vec = embedding_fn(text)
+        except Exception:  # pragma: no cover - depends on user fn
+            return []
+        for i, scn_vec in enumerate(scenario_vecs):
+            cos = _cosine(scn_vec, row_vec)
+            if cos >= threshold and cos > best.get(i, {}).get("cosine", -1.0):
+                scn_text, scn_name, scn_source = scenario_rows[i]
+                best[i] = {
+                    "scenario_name": scn_name,
+                    "scenario_source": str(scn_source),
+                    "training_file": str(source),
+                    "training_row": row,
+                    "cosine": round(cos, 4),
+                }
+    for i in sorted(best):
+        overlaps.append(best[i])
+    return overlaps
+
+
 def main() -> int:
     args = _parse_args()
 
@@ -279,11 +535,11 @@ def main() -> int:
 
     training_roots = [Path(p) for p in (args.training_roots or _DEFAULT_TRAINING_ROOTS)]
     near_dup_enabled = args.near_dup or args.strict
+    bff_enabled = args.bff or args.strict
+    embedding_enabled = args.embedding or args.strict
 
-    exact_overlaps, n_rows, n_ids = scan_exact(scenarios_dir, training_roots)
-    near_overlaps = (
-        find_near_dup_overlaps(scenarios_dir, training_roots, args.near_dup_threshold)
-        if near_dup_enabled else []
+    exact_overlaps, n_rows, n_ids, per_source = scan_exact(
+        scenarios_dir, training_roots,
     )
 
     print("=" * 70)
@@ -294,10 +550,13 @@ def main() -> int:
     print(f"  Scenario ids:     {n_ids}")
     print(f"  Training rows:    {n_rows}")
     print(f"  Near-dup leg:     {'on (threshold=%s)' % args.near_dup_threshold if near_dup_enabled else 'off'}")
+    print(f"  BFF leg:          {'on (n=%s, fraction>=%s)' % (args.bff_n, args.bff_threshold) if bff_enabled else 'off'}")
+    print(f"  Embedding leg:    {'on (threshold=%s)' % args.embedding_threshold if embedding_enabled else 'off'}")
     print()
 
     # Empty/unbuilt corpus must fail loud — silently passing here would
-    # certify "no contamination" against zero rows (false green).
+    # certify "no contamination" against zero rows (false green). This guard
+    # holds regardless of which opt-in legs are enabled.
     if n_ids > 0 and n_rows == 0 and not args.allow_empty_corpus:
         print(
             "  ERROR: scanned 0 training rows — corpus is empty or unbuilt; "
@@ -307,6 +566,30 @@ def main() -> int:
         )
         print("=" * 70)
         return 2
+
+    # Opt-in legs run only after the empty-corpus guard so they never mask it.
+    near_overlaps = (
+        find_near_dup_overlaps(scenarios_dir, training_roots, args.near_dup_threshold)
+        if near_dup_enabled else []
+    )
+    bff_overlaps: list[dict] = []
+    bff_skipped_short = 0
+    if bff_enabled:
+        bff_overlaps, bff_skipped_short = find_bff_overlaps(
+            scenarios_dir, training_roots,
+            n=args.bff_n, min_presence_fraction=args.bff_threshold,
+        )
+    embedding_overlaps: list[dict] = []
+    embedding_skipped = False
+    if embedding_enabled:
+        embedding_fn = _load_default_embedding_fn()
+        if embedding_fn is None:
+            embedding_skipped = True
+        else:
+            embedding_overlaps = find_embedding_overlaps(
+                scenarios_dir, training_roots,
+                embedding_fn=embedding_fn, threshold=args.embedding_threshold,
+            )
 
     if exact_overlaps:
         print(f"  CONTAMINATION DETECTED (exact): {len(exact_overlaps)} overlap(s)")
@@ -324,11 +607,64 @@ def main() -> int:
             )
             print(f"      -> {o['training_file']} at row {o['training_row']}")
 
-    fatal = bool(exact_overlaps) or (bool(near_overlaps) and args.strict)
+    if bff_overlaps:
+        label = "CONTAMINATION DETECTED (bff)" if args.strict else "WARNING (bff)"
+        print(
+            f"  {label}: {len(bff_overlaps)} scenario(s) with 13-gram "
+            f"presence-fraction >= {args.bff_threshold}"
+        )
+        for o in bff_overlaps:
+            print(
+                f"    scenario={o['scenario_name']}  (from {o['scenario_source']})"
+                f"  presence_fraction={o['presence_fraction']} ({o['n_grams']} {o['n']}-grams)"
+            )
+    if bff_enabled and bff_skipped_short:
+        print(
+            f"  (bff leg skipped {bff_skipped_short} scenario(s) shorter than "
+            f"{args.bff_n} tokens — covered by exact + near-dup legs)"
+        )
+
+    if embedding_skipped:
+        print(
+            "  (embedding leg: sentence-transformers unavailable; "
+            "semantic cosine leg skipped — not a failure)"
+        )
+    elif embedding_overlaps:
+        label = "CONTAMINATION DETECTED (embedding)" if args.strict else "WARNING (embedding)"
+        print(
+            f"  {label}: {len(embedding_overlaps)} match(es) cosine "
+            f">= {args.embedding_threshold}"
+        )
+        for o in embedding_overlaps:
+            print(
+                f"    scenario={o['scenario_name']}  (from {o['scenario_source']})"
+                f"  cosine={o['cosine']}"
+            )
+            print(f"      -> {o['training_file']} at row {o['training_row']}")
+
+    # Per-source attribution table — always printed (free; no perf cost). Shows
+    # WHICH training dataset each exact overlap came from.
+    if per_source:
+        print()
+        print("  Per-source overlap (exact):")
+        for src in sorted(per_source):
+            stats = per_source[src]
+            flag = "  <== CONTAMINATED" if stats["overlaps"] else ""
+            print(
+                f"    {src}: {stats['rows']} row(s), "
+                f"{stats['overlaps']} overlap(s){flag}"
+            )
+
+    # Only exact overlap is fatal by default; opt-in legs escalate under --strict.
+    opt_in_hits = bool(near_overlaps) or bool(bff_overlaps) or bool(embedding_overlaps)
+    fatal = bool(exact_overlaps) or (opt_in_hits and args.strict)
     if not fatal:
-        if near_overlaps:
-            print("  (near-dup matches are warnings; pass --strict to make them fatal)")
-        else:
+        if opt_in_hits:
+            print(
+                "  (near-dup/bff/embedding matches are warnings; "
+                "pass --strict to make them fatal)"
+            )
+        elif not exact_overlaps:
             print("  OK — no scenario stable_ids found in training data.")
     print("=" * 70)
     return 1 if fatal else 0
@@ -365,8 +701,52 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--bff", action="store_true",
+        help=(
+            "Also run the 13-gram (word) presence-fraction leg (catches partial "
+            "/ spliced span copies that exact + MinHash miss). Warning-only "
+            "unless --strict. Off by default."
+        ),
+    )
+    parser.add_argument(
+        "--bff-n", type=int, default=_DEFAULT_BFF_N,
+        help=(
+            "Word n-gram size for the BFF leg "
+            f"(default {_DEFAULT_BFF_N} — the GPT-3/C4/Allen-AI dedup convention)."
+        ),
+    )
+    parser.add_argument(
+        "--bff-threshold", type=float, default=_DEFAULT_BFF_THRESHOLD,
+        help=(
+            "Min fraction of a scenario's 13-grams present in training to flag "
+            f"(default {_DEFAULT_BFF_THRESHOLD} — CONSERVATIVE; the local corpus "
+            "is empty so this is uncalibrated and only flags near-total span "
+            "copies. Precise calibration is a real-corpus CI follow-up)."
+        ),
+    )
+    parser.add_argument(
+        "--embedding", action="store_true",
+        help=(
+            "Also run the local KEYLESS embedding-cosine leg (catches semantic "
+            "paraphrase). Reuses the pinned all-MiniLM-L6-v2 model; if "
+            "sentence-transformers is absent the leg skips (no failure). "
+            "Warning-only unless --strict. Off by default."
+        ),
+    )
+    parser.add_argument(
+        "--embedding-threshold", type=float, default=DEFAULT_NEAR_DUP_THRESHOLD,
+        help=(
+            "Cosine threshold for the embedding leg (default: inherited from "
+            f"admission_gate.DEFAULT_NEAR_DUP_THRESHOLD={DEFAULT_NEAR_DUP_THRESHOLD}; "
+            "not a new constant). Warning-only — un-revalidated for short strings."
+        ),
+    )
+    parser.add_argument(
         "--strict", action="store_true",
-        help="Enable the near-dup leg AND treat near-dup matches as fatal (exit 1).",
+        help=(
+            "Enable ALL opt-in legs (near-dup + bff + embedding) AND treat their "
+            "matches as fatal (exit 1). Exact overlap is always fatal."
+        ),
     )
     parser.add_argument(
         "--allow-empty-corpus", action="store_true",
