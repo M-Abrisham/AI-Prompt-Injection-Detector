@@ -176,7 +176,7 @@ To maximize the effectiveness of Na0S in your deployment:
 1. **Keep Na0S updated**: Always run the latest patch release within a supported version.
 2. **Enable all layers**: Disabling detection layers reduces coverage and may expose your application to attacks that a single layer would miss.
 3. **Review detection thresholds**: The default cascade voting thresholds (0.25-0.85 ambiguity range) are tuned for balanced precision/recall. Adjusting them without understanding the tradeoffs may create gaps.
-4. **Verify model integrity**: Use the supply chain verification (L11) to confirm that model artifacts have not been tampered with.
+4. **Verify model integrity**: Use the supply chain verification (L11) to confirm that model artifacts have not been tampered with. Na0S evaluated and consciously de-scoped Sigstore-keyless model-signing, SLSA / OCI-in-toto artifact provenance, and a blanket sklearn→skops migration for the bundled model (decision record: ROADMAP_V2 "evaluated & de-scoped (R8)"); the shipped controls are the SHA-256 `KNOWN_HASHES` pin + `safe_load` digest gate plus the CI no-raw-loader grep-test and bandit/ruff-S/CodeQL.
 5. **Monitor for updates**: Watch the repository or subscribe to security advisories to receive notifications about new vulnerabilities and patches.
 
 ---
