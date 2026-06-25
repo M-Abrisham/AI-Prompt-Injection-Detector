@@ -891,6 +891,247 @@ def _verify_buffer_digest(path, data):
         )
 
 
+# ---------------------------------------------------------------------------
+# Restricted unpickler allowlist / gadget deny-set (item #04b / R5)
+# ---------------------------------------------------------------------------
+#
+# The digest verification above proves the executed bytes equal the trusted
+# bytes; it does NOT bound *what those bytes can do* if the trust anchor itself
+# is compromised (a sidecar-rewrite / KNOWN_HASHES-poison adversary, or a future
+# operator who points safe_load at an attacker-controlled artifact). pickle's
+# default ``find_class`` will resolve ANY global the opcode stream names —
+# including ``os.system`` / ``builtins.eval`` reached via ``__reduce__`` — so a
+# valid-sidecar malicious pickle would still execute on load. ``_SafeUnpickler``
+# closes that residual CWE-502 surface by constraining ``find_class`` to a
+# MEASURED allowlist intersected with a fickling-catalogued gadget DENY-set:
+# defense-in-depth BEHIND the digest gate, not a replacement for it.
+#
+# Scope (the #13 dependency): this gate only governs the *residual* pickles that
+# survive the planned skops/safetensors migration. Migrated artifacts never
+# reach ``pickle.load`` at all, so the gate is a transparent no-op for them; when
+# #13 lands, re-run ``scripts/derive_pickle_policy.py`` to shrink the allow-set
+# to whatever pickle types remain.
+
+# Exact (module, name) globals the four bundled artifacts actually name. This is
+# the MEASURED union (numpy 2.4.4 + the shipped sklearn models) — reproduce with
+# ``scripts/derive_pickle_policy.py`` (a pickle.Unpickler that records every
+# find_class arg across model.pkl / tfidf_vectorizer.pkl / structural_scaler.pkl
+# / model_embedding.pkl). Both the numpy ``_core`` (2.x) and legacy ``core``
+# spellings are emitted live by the SAME artifacts, so BOTH are listed. NOT a
+# guessed list (na0s-review-checklist §1/§7).
+_PICKLE_ALLOW_EXACT = frozenset({
+    # numpy core reconstruction primitives (measured)
+    ("numpy", "dtype"),
+    ("numpy", "float64"),
+    ("numpy", "ndarray"),
+    ("numpy._core.multiarray", "scalar"),
+    ("numpy._core.numeric", "_frombuffer"),
+    ("numpy.core.multiarray", "scalar"),
+    ("numpy.core.multiarray", "_reconstruct"),
+    # legacy ``_core`` twins of the two ``core`` names above (resolve on 2.x;
+    # listed so the policy is spelling-symmetric without relying on the prefix
+    # allow alone — measured-present on numpy 2.4.4).
+    ("numpy._core.multiarray", "_reconstruct"),
+    ("numpy._core.numeric", "_frombuffer"),
+    # sklearn estimators the bundled models deserialize into (measured)
+    ("sklearn.calibration", "CalibratedClassifierCV"),
+    ("sklearn.calibration", "_CalibratedClassifier"),
+    ("sklearn.feature_extraction.text", "TfidfTransformer"),
+    ("sklearn.feature_extraction.text", "TfidfVectorizer"),
+    ("sklearn.isotonic", "IsotonicRegression"),
+    ("sklearn.linear_model._logistic", "LogisticRegression"),
+    ("sklearn.preprocessing._data", "StandardScaler"),
+})
+
+# Module prefixes trusted BY PREFIX (any name under them is allowed UNLESS the
+# deny-set below blocks it first). Restricted to the two top-level packages the
+# measured set touches (numpy, sklearn) plus their internal ``_core`` spelling.
+# ``scipy.`` is kept as forward-headroom for sklearn internals that may emit a
+# scipy.sparse global on other model variants: it is allow-by-PREFIX only and is
+# still gated by the deny-set, so it adds no gadget exposure. Each ends in ``.``
+# so a ``numpyEVIL`` look-alike cannot match via ``startswith``; the bare package
+# itself (module == "numpy"/"sklearn"/"scipy") is still allowed via the
+# ``module == p.rstrip(".")`` clause in ``find_class`` below.
+_PICKLE_ALLOW_PREFIXES = (
+    "numpy.",
+    "sklearn.",
+    "scipy.",
+)
+
+# Gadget DENY-set — fickling-catalogued pickle-RCE / abuse primitives that must
+# be blocked EVEN WHEN their parent prefix (e.g. ``numpy.``) is allowed. The
+# whole R5 point: a prefix-allow MUST be intersected with this deny-set so a
+# numpy/sklearn-namespaced gadget cannot ride in on the allow-prefix. Denied by
+# MODULE PREFIX (not exact name) so every callable under a gadget module is
+# blocked regardless of which attr the opcode stream names, and so the deny-set
+# stays robust across numpy versions (a module absent on 2.4.4 but present on
+# 1.26 is still pre-emptively denied). Provenance is tagged per entry:
+#   fickling-catalogued = on fickling's maintained unsafe-import list (the
+#                         CVE-tracked pickle gadget catalog).
+#   measured-absent     = not importable on numpy 2.4.4 here, denied anyway for
+#                         cross-version safety (denying an absent module is inert
+#                         for legit loads — nothing legitimate names it).
+# Regenerate against the installed fickling via scripts/derive_pickle_policy.py.
+_DENY_PREFIXES = (
+    # --- numpy gadget submodules (allowed-prefix intersected to DENY) ---
+    "numpy.testing",        # fickling-catalogued: _private.utils.runstring exec()s a string
+    "numpy.f2py",           # fickling-catalogued: reaches native/codegen
+    "numpy.ctypeslib",      # fickling-catalogued: ctypes FFI -> native code
+    "numpy.distutils",      # fickling-catalogued (measured-absent on 2.4.4): build/exec shims
+    "numpy.lib.utils",      # fickling-catalogued (measured-absent on 2.4.4): historical safe_eval
+    "numpy.core._exceptions",   # measured-absent on 2.4.4; legacy spelling, denied for symmetry
+    "numpy._core._exceptions",  # measured-present; not in the allow-set, denied explicitly
+    # --- universal RCE / process / import primitives (never legitimate in a
+    #     numpy/sklearn model graph; #04-named) ---
+    "os",                   # fickling-catalogued: os.system/os.popen/os.exec*
+    "posix",                # fickling-catalogued: os backend (system/exec)
+    "nt",                   # fickling-catalogued: os backend on Windows
+    "subprocess",           # fickling-catalogued: Popen/call/run
+    "sys",                  # fickling-catalogued: sys.modules / settrace pivots
+    "importlib",            # fickling-catalogued: import_module -> arbitrary module
+    "socket",               # fickling-catalogued: network egress primitive
+    "pty",                  # fickling-catalogued: spawns a shell
+    "code",                 # fickling-catalogued: InteractiveInterpreter exec
+    "commands",             # fickling-catalogued (py2 legacy): getoutput shells out
+    "functools",            # fickling-catalogued: partial/reduce as call gadgets
+    "operator",             # fickling-catalogued: attrgetter/methodcaller pivots
+    "ctypes",               # fickling-catalogued: FFI -> native code
+    "shutil",               # fickling-catalogued: filesystem destruction
+    "webbrowser",           # fickling-catalogued: open() process-spawn
+)
+
+# Exact gadget globals under modules we DON'T blanket-deny (e.g. ``builtins`` is
+# not prefix-denied because legitimate ``builtins.int``-style globals could in
+# principle appear, but its execution primitives must be hard-blocked). Both the
+# py3 ``builtins`` and py2 ``__builtin__`` spellings are covered.
+_GADGET_DENY = frozenset({
+    ("builtins", "eval"),          # fickling-catalogued
+    ("builtins", "exec"),          # fickling-catalogued
+    ("builtins", "__import__"),    # fickling-catalogued
+    ("builtins", "getattr"),       # fickling-catalogued: attribute pivot
+    ("builtins", "setattr"),       # fickling-catalogued
+    ("builtins", "compile"),       # fickling-catalogued
+    ("builtins", "open"),          # fickling-catalogued: filesystem write/exec staging
+    ("builtins", "input"),         # fickling-catalogued
+    ("builtins", "breakpoint"),    # fickling-catalogued: pdb -> exec
+    ("__builtin__", "eval"),       # fickling-catalogued (py2 spelling)
+    ("__builtin__", "exec"),       # fickling-catalogued (py2 spelling)
+    ("__builtin__", "execfile"),   # fickling-catalogued (py2 spelling)
+    ("__builtin__", "__import__"), # fickling-catalogued (py2 spelling)
+    ("__builtin__", "getattr"),    # fickling-catalogued (py2 spelling)
+    ("__builtin__", "open"),       # fickling-catalogued (py2 spelling)
+})
+
+
+def _numpy_core_remap(module):
+    """Return *module* with numpy's legacy ``core``<->``_core`` spelling
+    normalised to a single canonical form for DENY matching.
+
+    numpy 2.x renamed the C-extension package ``numpy.core`` to ``numpy._core``
+    and keeps ``numpy.core`` as a live compatibility shim (both spellings are
+    emitted by the SAME bundled artifacts — verified in §1). The allow path
+    accepts both spellings directly (both are in ``_PICKLE_ALLOW_EXACT`` /
+    matched by the ``numpy.`` prefix), but a gadget MUST NOT be able to evade a
+    ``numpy.core._exceptions`` deny by using the ``numpy._core._exceptions``
+    spelling (or vice-versa). Normalising ``numpy.core.`` -> ``numpy._core.``
+    before the deny check makes the deny-set spelling-agnostic. The remap is
+    applied ONLY to derive the deny-match key; the ORIGINAL module name is what
+    is passed to ``super().find_class`` so numpy itself resolves it natively
+    (preserving the cross-version behavior the #04 plan called for).
+    """
+    if module == "numpy.core":
+        return "numpy._core"
+    if module.startswith("numpy.core."):
+        return "numpy._core." + module[len("numpy.core."):]
+    return module
+
+
+class _BlockedGlobalError(pickle.UnpicklingError, ValueError):
+    """Raised when ``_SafeUnpickler.find_class`` blocks a global.
+
+    Subclasses BOTH ``pickle.UnpicklingError`` (the semantically correct type for
+    a refused unpickle) AND ``ValueError`` so the optional model loaders' existing
+    ``except (ValueError, ...)`` guards still catch it and degrade gracefully,
+    while mandatory loads (no guard) propagate it and fail closed. ``pickle``'s own
+    ``UnpicklingError`` is NOT a ``ValueError`` subclass, so this dual inheritance
+    is deliberate.
+    """
+
+
+class _SafeUnpickler(pickle.Unpickler):
+    """A ``pickle.Unpickler`` whose ``find_class`` enforces an allowlist
+    intersected with a fickling-catalogued gadget deny-set (item #04b / R5).
+
+    Policy, evaluated per global the opcode stream names (fail-closed):
+
+      1. Normalise the numpy ``core``/``_core`` spelling for deny matching.
+      2. DENY if ``(module, name)`` is an exact gadget (``_GADGET_DENY``) or
+         ``module`` (normalised) is under any ``_DENY_PREFIXES`` module — this
+         runs FIRST so a gadget cannot ride in on an allowed prefix.
+      3. ALLOW if ``(module, name)`` is in the measured ``_PICKLE_ALLOW_EXACT``
+         OR ``module`` is under any ``_PICKLE_ALLOW_PREFIXES`` package.
+      4. Otherwise DENY (default-deny).
+
+    A denied global emits a ``find_class_blocked`` audit event and raises
+    :class:`_BlockedGlobalError`, which subclasses BOTH ``pickle.UnpicklingError``
+    (correct semantic type) AND ``ValueError`` — so the ``except (ValueError, ...)``
+    guards in the OPTIONAL model loaders still degrade that leg gracefully, while
+    MANDATORY loads (no try/except) propagate it and fail closed. (Note:
+    ``pickle.UnpicklingError`` is NOT itself a ``ValueError`` subclass — the dual
+    inheritance is what makes the guards catch it.) The raise happens DURING opcode
+    interpretation, BEFORE the gadget's ``__reduce__`` callable is ever invoked —
+    so the payload never executes.
+    """
+
+    def find_class(self, module, name):
+        deny_module = _numpy_core_remap(module)
+
+        # (2) DENY first — gadget deny-set wins over any allow-prefix.
+        denied = (
+            (module, name) in _GADGET_DENY
+            or any(
+                deny_module == p or deny_module.startswith(p + ".")
+                for p in _DENY_PREFIXES
+            )
+        )
+        if denied:
+            _audit.error(
+                json.dumps({
+                    "event": "find_class_blocked",
+                    "module": module,
+                    "name": name,
+                    "reason": "gadget_denyset",
+                })
+            )
+            raise _BlockedGlobalError(
+                "blocked global {}.{} (gadget deny-set)".format(module, name)
+            )
+
+        # (3) ALLOW — measured exact pair, or an allowed top-level package.
+        allowed = (
+            (module, name) in _PICKLE_ALLOW_EXACT
+            or any(
+                module == p.rstrip(".") or module.startswith(p)
+                for p in _PICKLE_ALLOW_PREFIXES
+            )
+        )
+        if allowed:
+            return super().find_class(module, name)
+
+        # (4) default-deny everything else.
+        _audit.error(
+            json.dumps({
+                "event": "find_class_blocked",
+                "module": module,
+                "name": name,
+                "reason": "not_allowlisted",
+            })
+        )
+        raise _BlockedGlobalError(
+            "blocked global {}.{} (not in allowlist)".format(module, name)
+        )
+
+
 def safe_load(path):
     """Load a pickle after verifying its integrity digest.
 
@@ -954,6 +1195,12 @@ def safe_load(path):
     # Unpickle from the verified in-memory buffer (io.BytesIO), NEVER by
     # re-opening `path` — closing the TOCTOU window. The bytes loaded here are
     # byte-for-byte the bytes magic-checked and digest-verified above.
+    #
+    # CWE-502 defense-in-depth: use _SafeUnpickler (item #04b / R5), NOT the
+    # bare pickle.load, so find_class is constrained to the measured
+    # numpy/sklearn allowlist intersected with the fickling gadget deny-set. A
+    # valid-sidecar-but-malicious pickle (sidecar-rewrite adversary) is rejected
+    # with UnpicklingError BEFORE its __reduce__ callable executes.
     with warnings.catch_warnings():
         try:
             from sklearn.exceptions import InconsistentVersionWarning
@@ -961,4 +1208,4 @@ def safe_load(path):
         except ImportError:
             # sklearn not installed — nothing to suppress.
             pass
-        return pickle.load(io.BytesIO(data))
+        return _SafeUnpickler(io.BytesIO(data)).load()
