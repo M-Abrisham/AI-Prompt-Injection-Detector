@@ -23,6 +23,7 @@ from .predict import (
     _get_cached_models, _get_cached_scaler, _get_cached_char_vectorizer,
     _transform, _get_model_version,
     _chunk_text, _head_tail_extract, _CHUNK_WORD_THRESHOLD, MAX_CHUNKS,
+    _integrity_gate,  # S3: shared fail-closed prompt-integrity seam (parity)
 )
 from .rules import rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .config import (
@@ -1690,6 +1691,16 @@ class CascadeClassifier:
         -------
         ScanResult
         """
+        # S3: prompt-integrity gate (fail-closed, inert by default) — PARITY with
+        # na0s.predict.scan(). A tampered signed envelope (with NA0S_PROMPT_SIGNING=1)
+        # short-circuits to a definitive blocked result before any classification.
+        # A plain string or unset flag is a pure no-op (`text` unchanged).
+        _t0 = time.perf_counter()
+        text, _integrity_block = _integrity_gate(text)
+        if _integrity_block is not None:
+            _integrity_block.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
+            return _integrity_block
+
         label, confidence, hits, stage, l0, judge_reasoning, technique_tags = self._classify_full(text)
 
         is_blocked = label == "BLOCKED"

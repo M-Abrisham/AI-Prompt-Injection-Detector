@@ -262,3 +262,77 @@ def test_harvester_hook_handles_empty_list():
     discoveries: list = []
     wh._tag_discoveries(discoveries)  # noqa: SLF001
     assert discoveries == []
+
+
+# ── supply-chain / inter-model / canary-leak keyword entries ────────────────
+#
+# These exercise the load-time supply-chain (S1.x), inter-model (IM4/IM5), and
+# system-prompt/canary exfiltration (E1.1) entries. Every RHS is a code the
+# taxonomy ALREADY defines (no invented codes — see
+# test_all_keyword_targets_are_canonical above, which covers the whole table).
+
+
+def test_supply_chain_keywords_map_to_canonical_codes():
+    """Unambiguous load-time supply-chain phrases tag to their technique code."""
+    v = TaxonomyValidator()
+    cases = {
+        "pickle deserialization": "S1.2",   # Pickle-RCE
+        "pickle rce": "S1.2",
+        "deserialization attack": "S1.2",
+        "model file tampering": "S1.1",     # Model-file-tampering
+        "model weight tampering": "S1.1",
+    }
+    for phrase, code in cases.items():
+        assert tag_discovery({"relevance_keywords": [phrase]}) == code, phrase
+        assert v.validate_code(code) is True, code
+
+
+def test_bare_supply_chain_stays_at_category():
+    """Ambiguous 'supply chain attack' / 'model backdoor' stay at category S.
+
+    A human narrows them at promotion; only the unambiguous load-time primitives
+    (pickle / model-file tampering) get a technique code.
+    """
+    assert tag_discovery({"tags": ["supply chain attack"]}) == "S"
+    assert tag_discovery({"tags": ["model backdoor"]}) == "S"
+
+
+def test_inter_model_rug_pull_and_prompt_tampering():
+    """MCP rug-pull / post-approval swap -> IM5.4; prompt tampering -> IM4.2."""
+    v = TaxonomyValidator()
+    cases = {
+        "mcp rug pull": "IM5.4",            # Rug-pull (model swap after trust)
+        "rug pull attack": "IM5.4",
+        "post-approval swap": "IM5.4",
+        "model swap after trust": "IM5.4",
+        "prompt tampering": "IM4.2",        # API response tampering
+    }
+    for phrase, code in cases.items():
+        assert tag_discovery({"relevance_keywords": [phrase]}) == code, phrase
+        assert v.validate_code(code) is True, code
+
+
+def test_system_prompt_leak_and_canary_map_to_e1_1():
+    """System-prompt leak / canary intel narrows to the E1.1 direct-ask probe."""
+    v = TaxonomyValidator()
+    cases = {
+        "system prompt leak": "E1.1",
+        "system prompt extraction": "E1.1",
+        "system prompt leakage": "E1.1",
+        "prompt leaking": "E1.1",
+        "canary": "E1.1",
+        "canary token leak": "E1.1",
+        "canary leak": "E1.1",
+    }
+    for phrase, code in cases.items():
+        assert tag_discovery({"tags": [phrase]}) == code, phrase
+        assert v.validate_code(code) is True, code
+    # Generic 'data exfiltration' is broader than the direct system-prompt ask,
+    # so it stays at the category E (regression guard against over-narrowing).
+    assert tag_discovery({"tags": ["data exfiltration"]}) == "E"
+
+
+def test_canary_word_boundary_no_false_positive():
+    """'canary' is a whole-phrase key; it must not match inside a larger word."""
+    # 'canaries' / 'canary-yellow' (unrelated) must not tag via the 'canary' key.
+    assert tag_discovery({"relevance_keywords": ["bright canaryyellow paint"]}) is None

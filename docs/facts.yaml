@@ -43,6 +43,12 @@ rule_count:
 taxonomy:
   category_count: 31
   technique_count_total: 285
+  taxonomy_categories: 28
+  taxonomy_leaves: 265
+  alias_keys:
+  - E1
+  - C1
+  - P
   techniques_by_category:
     D1: 22
     D2: 4
@@ -76,10 +82,10 @@ taxonomy:
     C1MT: 6
     BEN: 2
 test_count:
-  count: 10521
+  count: 10622
   collection_errors: 0
   pytest_exit_code: 0
-test_files: 343
+test_files: 346
 detection_signals_in_scan:
   filter_doc: Names matching prefixes (detect_, scan_, analyze_, extract_, score_,
     compute_, classify*, predict*, get_, sniff_) plus an exact-match allowlist for

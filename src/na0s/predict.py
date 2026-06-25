@@ -244,6 +244,172 @@ try:
 except ImportError:
     _HAS_EMBEDDING_CLASSIFIER = False
 
+# S3: Prompt integrity verification (fail-closed tamper gate) — optional import.
+# Verifies an HMAC-signed prompt envelope BEFORE any scoring runs. Inert by
+# default: engages only when NA0S_PROMPT_SIGNING=1 AND the caller passes a
+# recognized signed-prompt envelope dict. Local/keyless (no API/cloud).
+try:
+    from .integrity.prompt_signer import PromptSigner as _PromptSigner
+    _HAS_PROMPT_SIGNER = True
+except ImportError:
+    _HAS_PROMPT_SIGNER = False
+
+# The four fields that constitute a recognized signed-prompt envelope (the
+# exact shape returned by PromptSigner.sign()). A mapping missing any of these
+# is NOT a signed envelope and the gate leaves it untouched.
+_SIGNED_ENVELOPE_FIELDS = ("prompt", "signature", "nonce", "timestamp")
+
+
+def _is_signed_envelope(obj) -> bool:
+    """True only for a mapping carrying the full signed-prompt envelope shape.
+
+    Plain-string input (today's contract) and any dict missing a required
+    field return False, so the integrity gate is a pure no-op for them.
+    """
+    if not isinstance(obj, dict):
+        return False
+    return all(k in obj for k in _SIGNED_ENVELOPE_FIELDS)
+
+
+# --- Cross-scan replay defense -------------------------------------------
+#
+# The replay/nonce store lives INSIDE a PromptSigner instance. If every
+# _integrity_gate() call built a fresh PromptSigner, each scan would get a
+# brand-new (empty) nonce store, so a captured valid envelope could be
+# replayed indefinitely across separate scan() calls — defeating the S2
+# replay defense. We therefore reuse a process-wide singleton whose in-memory
+# nonce store persists for the life of the process.
+#
+# The singleton is keyed by the RESOLVED signing key so that rotating
+# NA0S_PROMPT_SIGN_KEY between calls rebuilds it (a new key == a new trust
+# domain; carrying the old nonce store forward would be wrong). Construction
+# is guarded by a lock because scans may run concurrently.
+#
+# INERTNESS: this singleton is touched ONLY when a signed envelope is actually
+# being verified (flag on + envelope present). A plain-string scan returns
+# (text, None) above without ever calling _get_prompt_signer(), so nothing is
+# constructed and the env is not read on the hot path.
+_SIGNER_LOCK = threading.Lock()
+_SIGNER_SINGLETON = None  # type: Optional[object]
+_SIGNER_KEY = None  # the resolved key the current singleton is bound to
+
+# Sentinel for "no NA0S_PROMPT_SIGN_KEY configured". A distinct object (not
+# None / not a str) so it can never collide with a real env key value.
+_NO_ENV_KEY = object()
+
+
+def _get_prompt_signer():
+    """Return the process-wide PromptSigner, (re)building it on key change.
+
+    Lazily constructed on first use so the gate stays inert by default — this
+    is reached ONLY from the verify path (flag on + recognized envelope). The
+    persistent in-memory nonce store inside the returned signer is what gives
+    replay protection that spans separate scan() calls.
+
+    The signer is rebuilt whenever the resolved ``NA0S_PROMPT_SIGN_KEY``
+    changes (including being set/unset), so a key rotation does not leak the
+    previous trust domain's nonce store. Thread-safe via ``_SIGNER_LOCK``.
+    """
+    global _SIGNER_SINGLETON, _SIGNER_KEY
+
+    # Resolve the key the same way PromptSigner does when secret_key is None.
+    env_key = os.environ.get("NA0S_PROMPT_SIGN_KEY")
+    resolved = env_key if env_key else _NO_ENV_KEY
+
+    # Fast path: matching key already built (read under the lock to avoid a
+    # torn read of the (singleton, key) pair against a concurrent rebuild).
+    with _SIGNER_LOCK:
+        if _SIGNER_SINGLETON is not None and _SIGNER_KEY == resolved:
+            return _SIGNER_SINGLETON
+
+        # Build (or rebuild on key change). When a persistent env key is set we
+        # pass it explicitly so the singleton is deterministically bound to it;
+        # when unset we let PromptSigner mint its ephemeral key (unchanged
+        # behavior) and bind the singleton to the _NO_ENV_KEY sentinel.
+        if env_key:
+            signer = _PromptSigner(secret_key=env_key)
+        else:
+            signer = _PromptSigner()
+        _SIGNER_SINGLETON = signer
+        _SIGNER_KEY = resolved
+        return signer
+
+
+def _reset_prompt_signer():
+    """Drop the cached PromptSigner singleton (test helper).
+
+    Lets a test start from a clean replay store without relying on process
+    isolation. Not used on any scan path.
+    """
+    global _SIGNER_SINGLETON, _SIGNER_KEY
+    with _SIGNER_LOCK:
+        _SIGNER_SINGLETON = None
+        _SIGNER_KEY = None
+
+
+def _integrity_gate(text):
+    """S3 fail-closed prompt-integrity seam (shared by predict + cascade).
+
+    Returns a ``(payload, blocked_result)`` tuple:
+
+    * ``(text, None)`` — the gate is INERT. Returned verbatim when *text* is
+      not a signed envelope (e.g. a plain string, today's default contract),
+      or when ``NA0S_PROMPT_SIGNING`` is unset. The caller proceeds exactly as
+      before — behavior is byte-for-byte unchanged.
+    * ``(inner_prompt, None)`` — a recognized envelope whose signature VERIFIES
+      (only reachable when signing is enabled). The inner ``prompt`` string is
+      unwrapped so the normal pipeline scans the authentic prompt body.
+    * ``(text, ScanResult)`` — signing is enabled, a recognized envelope was
+      supplied, and ``verify()`` FAILED. The caller MUST short-circuit and
+      return the blocked ``ScanResult`` without ever reaching the scorer.
+
+    Keyless and local: the signing key is read from ``NA0S_PROMPT_SIGN_KEY`` by
+    ``PromptSigner`` itself; no argument is threaded through the public API.
+    """
+    # Fast no-op: plain string / unrecognized payload. This branch runs for
+    # every ordinary call and must not touch PromptSigner at all.
+    if not _HAS_PROMPT_SIGNER or not _is_signed_envelope(text):
+        return text, None
+
+    # A signed envelope WAS supplied. Honor the master switch: when signing is
+    # disabled the gate stays inert — unwrap the inner prompt and continue with
+    # no possibility of a block (FP-safe: flag off == unchanged verdict).
+    if not _PromptSigner.is_enabled():
+        return text["prompt"], None
+
+    # Flag on + envelope present -> verify fail-closed. Reuse the process-wide
+    # signer so its replay/nonce store persists ACROSS scan() calls; a fresh
+    # signer per call would reset the store and let captured envelopes replay.
+    try:
+        verdict = _get_prompt_signer().verify(text)
+    except Exception:
+        # Defense-in-depth: PromptSigner.verify() is itself fail-closed, but if
+        # construction/verification raises unexpectedly we still fail closed.
+        verdict = {"valid": False, "reason": "verification error"}
+
+    if verdict.get("valid"):
+        # Authentic prompt — scan the verified body, never the envelope dict.
+        return text["prompt"], None
+
+    # Tampered / invalid signature -> definitive, highest-confidence block.
+    reason = verdict.get("reason") or "unknown"
+    blocked = ScanResult(
+        sanitized_text="",
+        is_malicious=True,
+        risk_score=1.0,
+        label="blocked",
+        ml_confidence=1.0,
+        ml_label="blocked",
+        rejected=True,
+        rejection_reason=(
+            "prompt integrity verification failed — tampered ({})".format(reason)
+        ),
+        rule_hits=["prompt_integrity_verification_failed"],
+        anomaly_flags=["prompt_integrity_verification_failed"],
+        technique_tags=["prompt_integrity_verification_failed"],
+    )
+    return text, blocked
+
 
 def _embedding_enabled():
     """Whether the Layer 5 embedding classifier should contribute to a scan.
@@ -1877,6 +2043,16 @@ def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None, sessio
     ``NA0S_DISABLE_FINGERPRINT=1`` (or ``true``) to skip this registration.
     """
     _t0 = time.perf_counter()
+
+    # S3: prompt-integrity gate (fail-closed, inert by default). When the caller
+    # supplies a signed-prompt envelope AND NA0S_PROMPT_SIGNING=1, a tampered or
+    # invalid signature short-circuits to a definitive blocked result BEFORE any
+    # scoring. A plain string (the default contract) or an unset flag is a pure
+    # no-op: `text` is returned unchanged and scanning proceeds identically.
+    text, _integrity_block = _integrity_gate(text)
+    if _integrity_block is not None:
+        _integrity_block.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
+        return _integrity_block
 
     # Defense-in-depth: reject oversized input before any expensive processing
     if isinstance(text, str) and len(text) > MAX_INPUT_LENGTH:

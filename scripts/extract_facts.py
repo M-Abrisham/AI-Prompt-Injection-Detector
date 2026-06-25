@@ -204,16 +204,39 @@ def get_rule_count():
     }
 
 
+# Mid-level keys that intentionally MIRROR a canonical category so live scenarios
+# filed under the bare mid-level code validate without migrating their files.
+# Excluding these from the canonical count avoids double-counting their leaves:
+#   E1 -> alias of E   (E1.1-E1.6 are a subset of category E's techniques)
+#   C1 -> alias of C   (identical 8 techniques)
+#   P  -> legacy alias of P2 (P1.x leaves map 1:1 to P2.x)
+# See the inline comments at each alias key in data/taxonomy.yaml.
+TAXONOMY_ALIAS_KEYS = ("E1", "C1", "P")
+
+
 def get_taxonomy():
-    """Parse data/taxonomy.yaml for category and technique counts."""
+    """Parse data/taxonomy.yaml for category and technique counts.
+
+    Emits BOTH the raw key/leaf totals (every key in the file, alias leaves
+    double-counted) and the CANONICAL totals (alias keys excluded), so docs can
+    quote one stable, derived number. ``taxonomy_categories`` / ``taxonomy_leaves``
+    are the canonical figures the docs-drift gate enforces.
+    """
     p = REPO_ROOT / "data" / "taxonomy.yaml"
     with p.open() as f:
         data = yaml.safe_load(f)
     cats = data.get("categories", {})
     counts = {cid: len(c.get("techniques", {})) for cid, c in cats.items()}
+    canonical = {cid: n for cid, n in counts.items() if cid not in TAXONOMY_ALIAS_KEYS}
     return {
+        # Raw: every key in the file (3 mid-level aliases included), alias leaves
+        # counted under both the canonical key and its alias.
         "category_count": len(cats),
         "technique_count_total": sum(counts.values()),
+        # Canonical: alias keys (E1/C1/P) excluded; each technique counted once.
+        "taxonomy_categories": len(canonical),
+        "taxonomy_leaves": sum(canonical.values()),
+        "alias_keys": list(TAXONOMY_ALIAS_KEYS),
         "techniques_by_category": counts,
     }
 

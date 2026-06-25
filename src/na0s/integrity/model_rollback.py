@@ -20,6 +20,9 @@ _SIDECAR_SUFFIXES = (".sha256", ".hmac", ".meta.json")
 
 def auto_backup_enabled() -> bool:
     """Return *True* when automatic backup-on-deploy is turned on."""
+    # PENDING wire-or-delete (S1.7): this gate has zero callers on main — no
+    # backup-on-deploy path consults it yet. Leave as-is until the deploy hook
+    # is wired or the env-var contract is dropped; do NOT remove silently.
     return os.environ.get("NA0S_MODEL_ROLLBACK", "0") == "1"
 
 
@@ -112,7 +115,30 @@ class ModelRollback:
     # ------------------------------------------------------------------
 
     def restore(self, backup_path: str | Path, target_path: str | Path) -> Path:
-        """Copy *backup_path* (and sidecars) to *target_path*."""
+        """Copy *backup_path* (and sidecars) to *target_path*, re-verifying integrity.
+
+        SECURITY (S1.7): a backup directory (``~/.na0s/model_backups/``) is not a
+        trust boundary — an attacker who can write there can plant a forged pickle
+        plus a forged sidecar (both-files-replace). After copying the backup into
+        place, the restored target is re-verified through
+        :func:`na0s.integrity.safe_pickle.verify_file_digest`, which recomputes the
+        file's digest and constant-time-compares it against its sidecar/KNOWN_HASHES
+        using the same key-aware trust hierarchy as ``safe_load`` (HMAC when
+        ``NA0S_PICKLE_KEY`` is set, else SHA-256). ``verify_file_digest`` only reads
+        the bytes + sidecar metadata — it never unpickles — so verification itself
+        cannot execute attacker code.
+
+        On any verification failure (tampered payload, missing sidecar, malformed
+        or smuggled-algorithm sidecar, refused SHA-256 downgrade) this FAILS CLOSED:
+        the just-written target and its copied sidecars are unlinked and a
+        ``ValueError`` is raised, so an unverified model is never left installed at
+        *target_path*.
+        """
+        # Imported lazily so the module stays importable even if safe_pickle's
+        # optional deps shift; the verify step is mandatory for the security
+        # contract, so an ImportError here is a hard failure, not a silent skip.
+        from na0s.integrity.safe_pickle import verify_file_digest
+
         src = Path(backup_path)
         dst = Path(target_path)
         if not src.exists():
@@ -122,11 +148,33 @@ class ModelRollback:
         shutil.copy2(src, dst)
 
         # Restore sidecars
+        copied_sidecars: list[Path] = []
         for suffix in _SIDECAR_SUFFIXES:
             sidecar_src = src.parent / (src.name + suffix)
             if sidecar_src.exists():
                 sidecar_dst = dst.parent / (dst.name + suffix)
                 shutil.copy2(sidecar_src, sidecar_dst)
+                copied_sidecars.append(sidecar_dst)
+
+        # Re-verify the restored target BEFORE returning. Fail closed on any
+        # integrity error: remove the unverified target + its sidecars so a
+        # tampered backup can never be silently installed as the live model.
+        try:
+            verify_file_digest(str(dst))
+        except Exception as exc:
+            dst.unlink(missing_ok=True)
+            for sidecar in copied_sidecars:
+                sidecar.unlink(missing_ok=True)
+            raise ValueError(
+                "Refusing to restore backup {src}: integrity verification of the "
+                "restored target {dst} failed ({err}: {msg}). The backup may be "
+                "tampered or unsigned; no model was installed.".format(
+                    src=src,
+                    dst=dst,
+                    err=type(exc).__name__,
+                    msg=exc,
+                )
+            ) from exc
 
         return dst
 

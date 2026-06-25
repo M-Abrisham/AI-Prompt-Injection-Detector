@@ -13,6 +13,8 @@ import secrets
 import string
 from typing import List, Tuple
 
+from na0s.canary.leak_detection import is_canary_present
+
 
 def _random_hex(n: int) -> str:
     """Return *n* random hex characters."""
@@ -111,6 +113,13 @@ class HoneypotManager:
     ) -> List[str]:
         """Return honeypot tokens that appear in *output_text*.
 
+        Each honeypot is matched in any supported form (exact OR encoded
+        -- base64, hex, reversed, ROT13, unicode-escape, URL, partial)
+        via the shared
+        :func:`na0s.canary.leak_detection.is_canary_present` helper, so an
+        attacker who exfiltrates a decoy in an encoded form is still
+        caught -- full parity with ``CanaryManager._is_present``.
+
         Parameters
         ----------
         output_text:
@@ -123,4 +132,6 @@ class HoneypotManager:
         list[str]
             Subset of *honeypots* found in the output.
         """
-        return [hp for hp in honeypots if hp in output_text]
+        if not output_text:
+            return []
+        return [hp for hp in honeypots if is_canary_present(hp, output_text)]

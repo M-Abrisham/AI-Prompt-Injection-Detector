@@ -12,6 +12,7 @@ import os
 import time
 from typing import Dict, List, Optional, Tuple
 
+from na0s.canary.leak_detection import is_canary_present
 from na0s.canary.manager import CanaryManager, CanaryToken
 
 
@@ -83,7 +84,11 @@ class RotatingCanaryManager:
         """Check output against active AND retired canaries.
 
         Returns all canaries (active or retired) whose token is found in
-        *output_text*.
+        *output_text*, in any supported form (exact OR encoded -- base64,
+        hex, reversed, ROT13, unicode-escape, URL, partial).  Uses the
+        shared :func:`na0s.canary.leak_detection.is_canary_present` helper
+        for full parity with ``CanaryManager._is_present`` so encoded
+        leaks are not silently missed.
         """
         triggered: List[CanaryToken] = []
         if not output_text:
@@ -94,8 +99,7 @@ class RotatingCanaryManager:
             all_canaries.append(self._active)
 
         for canary in all_canaries:
-            # Substring search — timing-safe comparison not applicable (see manager._is_present)
-            if canary.token in output_text:
+            if is_canary_present(canary, output_text):
                 canary.record_trigger()
                 triggered.append(canary)
 

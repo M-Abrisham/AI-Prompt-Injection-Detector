@@ -328,7 +328,7 @@ Attacks delivered through non-text modalities that get processed by the LLM. **R
 
 ## Category IM — Inter-Model Propagation
 
-Attacks that propagate between AI models in multi-agent systems, pipelines, or cascading architectures. **Type:** indirect · **Severity:** critical · **Tags:** OWASP LLM01/LLM15 · **Expected layers:** L1, L9. (Examples/dataset counts tracked in L12.)
+Attacks that propagate between AI models in multi-agent systems, pipelines, or cascading architectures. **Type:** indirect · **Severity:** critical · **Tags:** OWASP LLM01/LLM06 · **Expected layers:** L1, L9. (Examples/dataset counts tracked in L12.)
 
 | ID | Technique | Severity |
 |----|-----------|----------|
@@ -468,9 +468,11 @@ Attacks that attempt to use the LLM in ways that violate organizational policies
 | S — Supply Chain/Integrity | 5 | 0 | 0% | N/A (infrastructure) |
 | C — Compliance/Policy Evasion | 5 | 0 | 0% | **No coverage** |
 
-**Total: 20 categories, 108 named techniques.**
+**Total: 28 canonical categories (27 attack + 1 benign `BEN` sentinel), 265 technique leaves.**
 
-**Key finding**: 57% of malicious samples are DAN/roleplay attacks (D2). Fifteen out of eighteen categories have zero training samples. The model has learned to detect one attack style, not prompt injection in general.
+> Counts are computed from the source of truth `data/taxonomy.yaml` by `scripts/extract_facts.py` and pinned in `docs/facts.yaml` (`taxonomy_categories: 28`, `taxonomy_leaves: 265`). The raw file holds **31 keys / 285 leaf entries** because **3 mid-level keys are intentional aliases** that mirror a canonical category so live `v0.1/` scenarios filed under the bare mid-level code validate without migration: **`E1`→`E`** (E1.1–E1.6 ⊂ E), **`C1`→`C`** (identical 8), **`P`→`P2`** (P1.x ↔ P2.x). The canonical count excludes those aliases (each leaf counted once). The legacy dataset-coverage table above is a stale snapshot of the original 20-category training set, retained only for the historical "one attack style" finding below.
+
+**Key finding (historical, original training set)**: 57% of malicious samples were DAN/roleplay attacks (D2); the model had learned to detect one attack style, not prompt injection in general. (D4/D5/D6 now have generated samples and measured recall — see the measured-coverage note above; this finding describes the pre-harvest baseline.)
 
 ---
 
