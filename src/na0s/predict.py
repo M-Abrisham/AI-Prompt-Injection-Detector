@@ -271,6 +271,82 @@ def _is_signed_envelope(obj) -> bool:
     return all(k in obj for k in _SIGNED_ENVELOPE_FIELDS)
 
 
+# --- Cross-scan replay defense -------------------------------------------
+#
+# The replay/nonce store lives INSIDE a PromptSigner instance. If every
+# _integrity_gate() call built a fresh PromptSigner, each scan would get a
+# brand-new (empty) nonce store, so a captured valid envelope could be
+# replayed indefinitely across separate scan() calls — defeating the S2
+# replay defense. We therefore reuse a process-wide singleton whose in-memory
+# nonce store persists for the life of the process.
+#
+# The singleton is keyed by the RESOLVED signing key so that rotating
+# NA0S_PROMPT_SIGN_KEY between calls rebuilds it (a new key == a new trust
+# domain; carrying the old nonce store forward would be wrong). Construction
+# is guarded by a lock because scans may run concurrently.
+#
+# INERTNESS: this singleton is touched ONLY when a signed envelope is actually
+# being verified (flag on + envelope present). A plain-string scan returns
+# (text, None) above without ever calling _get_prompt_signer(), so nothing is
+# constructed and the env is not read on the hot path.
+_SIGNER_LOCK = threading.Lock()
+_SIGNER_SINGLETON = None  # type: Optional[object]
+_SIGNER_KEY = None  # the resolved key the current singleton is bound to
+
+# Sentinel for "no NA0S_PROMPT_SIGN_KEY configured". A distinct object (not
+# None / not a str) so it can never collide with a real env key value.
+_NO_ENV_KEY = object()
+
+
+def _get_prompt_signer():
+    """Return the process-wide PromptSigner, (re)building it on key change.
+
+    Lazily constructed on first use so the gate stays inert by default — this
+    is reached ONLY from the verify path (flag on + recognized envelope). The
+    persistent in-memory nonce store inside the returned signer is what gives
+    replay protection that spans separate scan() calls.
+
+    The signer is rebuilt whenever the resolved ``NA0S_PROMPT_SIGN_KEY``
+    changes (including being set/unset), so a key rotation does not leak the
+    previous trust domain's nonce store. Thread-safe via ``_SIGNER_LOCK``.
+    """
+    global _SIGNER_SINGLETON, _SIGNER_KEY
+
+    # Resolve the key the same way PromptSigner does when secret_key is None.
+    env_key = os.environ.get("NA0S_PROMPT_SIGN_KEY")
+    resolved = env_key if env_key else _NO_ENV_KEY
+
+    # Fast path: matching key already built (read under the lock to avoid a
+    # torn read of the (singleton, key) pair against a concurrent rebuild).
+    with _SIGNER_LOCK:
+        if _SIGNER_SINGLETON is not None and _SIGNER_KEY == resolved:
+            return _SIGNER_SINGLETON
+
+        # Build (or rebuild on key change). When a persistent env key is set we
+        # pass it explicitly so the singleton is deterministically bound to it;
+        # when unset we let PromptSigner mint its ephemeral key (unchanged
+        # behavior) and bind the singleton to the _NO_ENV_KEY sentinel.
+        if env_key:
+            signer = _PromptSigner(secret_key=env_key)
+        else:
+            signer = _PromptSigner()
+        _SIGNER_SINGLETON = signer
+        _SIGNER_KEY = resolved
+        return signer
+
+
+def _reset_prompt_signer():
+    """Drop the cached PromptSigner singleton (test helper).
+
+    Lets a test start from a clean replay store without relying on process
+    isolation. Not used on any scan path.
+    """
+    global _SIGNER_SINGLETON, _SIGNER_KEY
+    with _SIGNER_LOCK:
+        _SIGNER_SINGLETON = None
+        _SIGNER_KEY = None
+
+
 def _integrity_gate(text):
     """S3 fail-closed prompt-integrity seam (shared by predict + cascade).
 
@@ -301,9 +377,11 @@ def _integrity_gate(text):
     if not _PromptSigner.is_enabled():
         return text["prompt"], None
 
-    # Flag on + envelope present -> verify fail-closed.
+    # Flag on + envelope present -> verify fail-closed. Reuse the process-wide
+    # signer so its replay/nonce store persists ACROSS scan() calls; a fresh
+    # signer per call would reset the store and let captured envelopes replay.
     try:
-        verdict = _PromptSigner().verify(text)
+        verdict = _get_prompt_signer().verify(text)
     except Exception:
         # Defense-in-depth: PromptSigner.verify() is itself fail-closed, but if
         # construction/verification raises unexpectedly we still fail closed.

@@ -285,5 +285,200 @@ class TestPredictCascadeParity(unittest.TestCase, PromptSigningEnabled):
         self.assertFalse(c.is_malicious)
 
 
+class TestCrossScanReplayDefense(unittest.TestCase, PromptSigningEnabled):
+    """(e) The nonce/replay store persists ACROSS separate scan() calls.
+
+    Wave-2 gap: ``_integrity_gate`` used to build a FRESH ``PromptSigner`` on
+    every call, so its in-memory nonce store never spanned scans and a captured
+    nonce could be reused indefinitely. The fix reuses a process-wide signer
+    singleton; these tests pin that the store now persists between scans.
+    """
+
+    def setUp(self):
+        self.enable_signing()
+        # Start from a clean store so a prior test's nonces don't interfere.
+        predict._reset_prompt_signer()
+        self.addCleanup(predict._reset_prompt_signer)
+
+    def test_replay_rejected_across_scans(self):
+        """A captured nonce reused in a LATER scan is caught as a replay.
+
+        First scan: a valid signed envelope passes (its nonce is recorded in
+        the persistent store). Second scan, a SEPARATE scan() call: an attacker
+        re-presents the SAME nonce with a forged signature. Because the store
+        now spans scans, the gate recognizes the nonce as already-used and
+        blocks it as a replay — proving the store is not reset per call.
+        """
+        env = _fresh_signer().sign(_BENIGN_PROMPT)
+
+        # Scan #1 — valid envelope passes and records the nonce.
+        first = predict.scan(copy.deepcopy(env))
+        self.assertFalse(first.is_malicious)
+        self.assertNotIn(
+            "prompt_integrity_verification_failed", first.anomaly_flags
+        )
+
+        # Scan #2 — a DIFFERENT scan() call. Reuse the captured nonce with a
+        # forged signature. With a per-call signer this empty-store scan would
+        # be a fresh first-use; with the persistent singleton it is a replay.
+        replay = copy.deepcopy(env)
+        replay["signature"] = "0" * len(env["signature"])
+        second = predict.scan(replay)
+
+        self.assertTrue(second.is_malicious)
+        self.assertEqual(second.label, "blocked")
+        self.assertTrue(second.rejected)
+        self.assertIn(
+            "prompt_integrity_verification_failed", second.anomaly_flags
+        )
+        # Attributed specifically to nonce reuse (the cross-scan replay path),
+        # not to a plain signature mismatch (the empty-store first-use path).
+        self.assertIn("nonce already used", second.rejection_reason)
+        self.assertIn("replay", second.rejection_reason)
+
+    def test_replay_spans_predict_and_cascade(self):
+        """The persistent store is shared by predict.scan and cascade.scan.
+
+        Both entrypoints funnel through the one ``_integrity_gate`` helper, so
+        a nonce recorded by a predict scan is seen as used by a later cascade
+        scan (and vice versa) — replay defense holds across both seams.
+        """
+        env = _fresh_signer().sign(_BENIGN_PROMPT)
+
+        # Record the nonce via predict.
+        first = predict.scan(copy.deepcopy(env))
+        self.assertFalse(first.is_malicious)
+
+        # Replay the captured nonce (forged sig) through cascade.
+        replay = copy.deepcopy(env)
+        replay["signature"] = "0" * len(env["signature"])
+        second = CascadeClassifier().scan(replay)
+
+        self.assertTrue(second.is_malicious)
+        self.assertEqual(second.label, "blocked")
+        self.assertIn("nonce already used", second.rejection_reason)
+
+    def test_idempotent_reverify_still_valid_across_scans(self):
+        """Re-presenting the SAME valid envelope is an idempotent re-verify.
+
+        Persisting the store must not turn a legitimate exact-resend into a
+        false replay block: same nonce + same (genuine) signature stays valid
+        across scans. FP-safety guard on the cross-scan change.
+        """
+        env = _fresh_signer().sign(_BENIGN_PROMPT)
+        first = predict.scan(copy.deepcopy(env))
+        second = predict.scan(copy.deepcopy(env))
+        self.assertFalse(first.is_malicious)
+        self.assertFalse(second.is_malicious)
+        self.assertNotIn(
+            "prompt_integrity_verification_failed", second.anomaly_flags
+        )
+
+
+class TestSignerSingletonInertness(unittest.TestCase):
+    """(f) The signer singleton is built ONLY on the verify path.
+
+    A plain-string scan — even with the flag ON — must not construct a signer
+    or otherwise touch the replay store. Proven by mocking the PromptSigner
+    constructor and asserting it is never called.
+    """
+
+    def setUp(self):
+        predict._reset_prompt_signer()
+        self.addCleanup(predict._reset_prompt_signer)
+
+    def test_singleton_not_constructed_when_flag_off(self):
+        """Flag OFF + envelope present: no signer is ever constructed.
+
+        The fast no-op path returns before _get_prompt_signer() is reached, so
+        the gate stays fully inert (nothing built, no env-key read for signing).
+        """
+        patcher = mock.patch.dict(os.environ, {}, clear=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("NA0S_PROMPT_SIGNING", None)
+
+        env = _fresh_signer().sign(_BENIGN_PROMPT)
+        with mock.patch.object(
+            predict, "_PromptSigner", wraps=PromptSigner
+        ) as built:
+            result = predict.scan(env)
+        built.assert_not_called()
+        self.assertNotIn(
+            "prompt_integrity_verification_failed", result.anomaly_flags
+        )
+
+    def test_singleton_not_constructed_for_plain_string(self):
+        """Plain-string scan (flag ON) constructs no signer — pure no-op.
+
+        A string is not a recognized envelope, so the gate returns (text, None)
+        before reaching the singleton builder regardless of the flag.
+        """
+        patcher = mock.patch.dict(
+            os.environ,
+            {
+                "NA0S_PROMPT_SIGNING": "1",
+                "NA0S_PROMPT_SIGN_KEY": _TEST_KEY,
+            },
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        with mock.patch.object(
+            predict, "_PromptSigner", wraps=PromptSigner
+        ) as built:
+            result = predict.scan(_BENIGN_PROMPT)
+        built.assert_not_called()
+        self.assertFalse(result.is_malicious)
+
+    def test_singleton_reused_across_scans_same_key(self):
+        """With the flag on, the signer is built once and reused (not per call).
+
+        Two verify-path scans under the same key construct the PromptSigner
+        exactly once — the singleton that gives the nonce store its cross-scan
+        lifetime.
+        """
+        patcher = mock.patch.dict(
+            os.environ,
+            {
+                "NA0S_PROMPT_SIGNING": "1",
+                "NA0S_PROMPT_SIGN_KEY": _TEST_KEY,
+            },
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        with mock.patch.object(
+            predict, "_PromptSigner", wraps=PromptSigner
+        ) as built:
+            predict.scan(_fresh_signer().sign(_BENIGN_PROMPT))
+            predict.scan(_fresh_signer().sign("Another benign question?"))
+        self.assertEqual(built.call_count, 1)
+
+    def test_singleton_rebuilt_on_key_change(self):
+        """Rotating NA0S_PROMPT_SIGN_KEY rebuilds the signer (new trust domain).
+
+        A changed key must not carry the previous key's nonce store forward, so
+        the singleton is reconstructed when the resolved key changes.
+        """
+        alt_key = "s3-integrity-gate-ALT-key-0123456789abcdefABCDEF"
+        with mock.patch.object(
+            predict, "_PromptSigner", wraps=PromptSigner
+        ) as built:
+            with mock.patch.dict(
+                os.environ,
+                {"NA0S_PROMPT_SIGNING": "1", "NA0S_PROMPT_SIGN_KEY": _TEST_KEY},
+            ):
+                predict.scan(_fresh_signer().sign(_BENIGN_PROMPT))
+            with mock.patch.dict(
+                os.environ,
+                {"NA0S_PROMPT_SIGNING": "1", "NA0S_PROMPT_SIGN_KEY": alt_key},
+            ):
+                # Sign with the rotated key so this verifies under the new key.
+                rotated = PromptSigner(secret_key=alt_key).sign(_BENIGN_PROMPT)
+                predict.scan(rotated)
+        self.assertEqual(built.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
