@@ -330,7 +330,7 @@ categories:
       O2.1: { name: "Markdown-injection", severity: medium }       # output-side (scan_output) — CAUGHT
       O2.2: { name: "Link-injection", severity: medium }           # output-side (scan_output) — CAUGHT
       O2.3: { name: "JSON output injection", severity: high }      # DROPPED (FP-unsafe) — honest xfail
-      O2.4: { name: "SQL-in-output injection", severity: critical } # output-side (scan_output) — CAUGHT (injection-shape only)
+      O2.4: { name: "SQL-in-output injection", severity: critical } # DROPPED (FP-unsafe) — honest xfail (_STRUCTURED_INJECTION_PATTERNS is empty)
       O2.5: { name: "API call manipulation", severity: high }      # residual MISS — honest xfail
       O2.6: { name: "Code-injection-output", severity: high }      # output-side (scan_output) — CAUGHT
 

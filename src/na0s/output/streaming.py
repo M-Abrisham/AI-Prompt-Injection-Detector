@@ -112,12 +112,12 @@ class StreamingOutputScanner:
     @staticmethod
     def _lightweight_check(text: str) -> Optional[dict]:
         """Fast per-chunk check for secrets and role-break indicators."""
-        for pat in _SECRET_PATTERNS:
+        for label, pat in _SECRET_PATTERNS:
             match = pat.search(text)
             if match:
                 return {
                     "alert": "secret_pattern",
-                    "pattern": pat.pattern[:50],
+                    "pattern": label,
                     "match": match.group()[:30],
                 }
 
