@@ -18,17 +18,16 @@ canary leaks (base64, hex, reversed) are caught.
 from __future__ import annotations
 
 import base64
-import codecs
 import json
 import logging
-import re
 import secrets
 import string
 import time
-import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
+
+from na0s.canary.leak_detection import _has_word_boundary, is_canary_present
 
 logger = logging.getLogger(__name__)
 
@@ -209,97 +208,30 @@ class CanaryManager:
 
     @staticmethod
     def _has_word_boundary(text: str, substring: str) -> bool:
-        """Check that *substring* occurs in *text* surrounded by non-alnum or at boundaries."""
-        pattern = r"(?<![A-Za-z0-9])" + re.escape(substring) + r"(?![A-Za-z0-9])"
-        return bool(re.search(pattern, text))
+        """Check that *substring* occurs in *text* surrounded by non-alnum or at boundaries.
+
+        Thin delegate to the shared :func:`na0s.canary.leak_detection._has_word_boundary`
+        so the boundary rule has a single source of truth.
+        """
+        return _has_word_boundary(text, substring)
 
     def _is_present(self, canary: CanaryToken, text: str) -> bool:
         """Return True if *canary* is present in *text* in any form.
 
-        Note: these checks use ``in`` (substring search) rather than
+        Delegates to the shared :func:`na0s.canary.leak_detection.is_canary_present`
+        helper, which is the single source of truth for the 9-variant
+        (exact / case-insensitive / partial / base64 / hex / reversed /
+        ROT13 / unicode-escape / URL) FP-safe detection.  ``rotation``,
+        ``session`` and ``honeypot`` wrappers call the same helper, so
+        encoded leaks are detected identically everywhere (parity).
+
+        Note: detection uses ``in`` (substring search) rather than
         ``hmac.compare_digest`` because we are scanning untrusted LLM
         output for any occurrence of the token.  Timing-safe comparison
         only applies to fixed-length equality checks, not substring
         search, so ``in`` is the correct primitive here.
         """
-        # 1. Exact match (substring — see docstring)
-        if canary.token in text:
-            return True
-
-        # 2. Case-insensitive match
-        if canary.token.lower() in text.lower():
-            return True
-
-        # 3. Partial match (first half) — min 10 chars + word boundary
-        half = canary.token_half
-        if len(half) >= 10 and half in text and self._has_word_boundary(text, half):
-            return True
-
-        # 4. Base64 encoded
-        b64 = canary.token_base64
-        if b64 in text:
-            return True
-        # Also check if any base64-looking block in the text decodes to
-        # contain the canary
-        _b64_charset_re = re.compile(r"^[A-Za-z0-9+/]*={0,2}$")
-        for b64_block in re.findall(
-            r"[A-Za-z0-9+/]{16,}={0,2}", text
-        ):
-            if not _b64_charset_re.match(b64_block):
-                continue
-            try:
-                decoded = base64.b64decode(b64_block).decode("utf-8")
-                if canary.token in decoded or (len(half) >= 10 and half in decoded):
-                    return True
-            except Exception as exc:
-                logger.debug("base64 decode error for block %r: %s", b64_block[:30], exc)
-
-        # 5. Hex encoded
-        hex_token = canary.token_hex
-        if hex_token in text.lower():
-            return True
-        # Check hex blocks in the text
-        for hex_block in re.findall(r"[0-9a-fA-F]{20,}", text):
-            if len(hex_block) % 2 != 0:
-                logger.debug("skipping odd-length hex block: %s", hex_block[:30])
-                continue
-            try:
-                decoded = bytes.fromhex(hex_block).decode("utf-8")
-                if canary.token in decoded or (len(half) >= 10 and half in decoded):
-                    return True
-            except Exception as exc:
-                logger.debug("hex decode error for block %r: %s", hex_block[:30], exc)
-
-        # 6. Reversed
-        if canary.token_reversed in text:
-            return True
-
-        # 7. ROT13
-        try:
-            rot13_decoded = codecs.decode(text, "rot_13")
-            if canary.token in rot13_decoded:
-                return True
-        except Exception as exc:
-            logger.debug("rot13 decode error: %s", exc)
-
-        # 8. Unicode escapes (\\uXXXX sequences)
-        if "\\u" in text:
-            try:
-                unicode_decoded = text.encode("utf-8").decode("unicode_escape")
-                if canary.token in unicode_decoded:
-                    return True
-            except Exception as exc:
-                logger.debug("unicode escape decode error: %s", exc)
-
-        # 9. URL-encoded
-        try:
-            url_decoded = urllib.parse.unquote(text)
-            if url_decoded != text and canary.token in url_decoded:
-                return True
-        except Exception as exc:
-            logger.debug("url decode error: %s", exc)
-
-        return False
+        return is_canary_present(canary, text)
 
     # ---- properties -------------------------------------------------------
 

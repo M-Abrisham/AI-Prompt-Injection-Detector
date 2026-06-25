@@ -13,6 +13,7 @@ import os
 import time
 from typing import Dict, List, Optional, Tuple
 
+from na0s.canary.leak_detection import is_canary_present
 from na0s.canary.manager import CanaryManager, CanaryToken
 
 
@@ -88,6 +89,13 @@ class SessionCanaryManager:
     def check_session_output(self, output_text: str) -> List[Dict]:
         """Check output against all active (non-expired) session canaries.
 
+        Detects each session canary in any supported form (exact OR
+        encoded -- base64, hex, reversed, ROT13, unicode-escape, URL,
+        partial) via the shared
+        :func:`na0s.canary.leak_detection.is_canary_present` helper, so
+        encoded leaks are caught with full parity to
+        ``CanaryManager._is_present`` rather than only an exact substring.
+
         Returns
         -------
         list[dict]
@@ -95,12 +103,13 @@ class SessionCanaryManager:
         """
         now = time.time()
         results: List[Dict] = []
+        if not output_text:
+            return results
         for session_id, entry in self._sessions.items():
             if now > entry["expires_at"]:
                 continue  # skip expired
             canary: CanaryToken = entry["canary"]
-            # Substring search — timing-safe comparison not applicable (see manager._is_present)
-            if canary.token in output_text:
+            if is_canary_present(canary, output_text):
                 canary.record_trigger()
                 results.append({
                     "session_id": session_id,

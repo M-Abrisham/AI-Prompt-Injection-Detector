@@ -6,21 +6,33 @@ CanaryAlertManager, HoneypotManager.
 
 from __future__ import annotations
 
+import base64
+import codecs
 import json
 import os
 import tempfile
 import time
+import urllib.parse
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from na0s.canary import CanaryManager, CanaryToken
+from na0s.canary.leak_detection import is_canary_present
 from na0s.canary_alert import CanaryAlertManager
 from na0s.canary_honeypot import HoneypotManager
 from na0s.canary_persistence import PersistentCanaryStore
 from na0s.canary_rotation import RotatingCanaryManager
 from na0s.canary_session import SessionCanaryManager
+
+
+def _b64(s: str) -> str:
+    return base64.b64encode(s.encode("utf-8")).decode("ascii")
+
+
+def _hex(s: str) -> str:
+    return s.encode("utf-8").hex()
 
 
 # ===================================================================
@@ -134,6 +146,47 @@ class TestSessionCanaryManager:
         assert len(results) == 1
         assert results[0]["session_id"] == "user-bob"
 
+    # ---- S4b / CAN-4: encoded-leak parity ----------------------------------
+    # Before the fix, check_session_output did a bare `canary.token in output`
+    # substring match and MISSED every encoded leak.  These pin the fix.
+
+    def test_check_session_output_detects_base64_leak(self):
+        """A base64-encoded session canary in output IS detected (was missed)."""
+        mgr = SessionCanaryManager()
+        _, canary = mgr.create_session("sess-b64", "prompt")
+        leak = f"the encoded blob is {_b64(canary.token)} for you"
+        # Sanity: a bare substring check (the OLD behavior) would NOT find it.
+        assert canary.token not in leak
+        results = mgr.check_session_output(leak)
+        assert len(results) == 1
+        assert results[0]["session_id"] == "sess-b64"
+        assert results[0]["triggered"] is True
+
+    def test_check_session_output_detects_hex_leak(self):
+        """A hex-encoded session canary in output IS detected (was missed)."""
+        mgr = SessionCanaryManager()
+        _, canary = mgr.create_session("sess-hex", "prompt")
+        leak = f"internal ref {_hex(canary.token)} end"
+        assert canary.token not in leak
+        results = mgr.check_session_output(leak)
+        assert len(results) == 1
+        assert results[0]["session_id"] == "sess-hex"
+
+    def test_check_session_output_encoded_benign_no_false_positive(self):
+        """An unrelated base64/hex string must NOT trigger (FP-safe)."""
+        mgr = SessionCanaryManager()
+        mgr.create_session("sess-fp", "prompt")
+        benign = (
+            "Here is some base64 " + _b64("the quick brown fox jumps over") +
+            " and hex " + _hex("a perfectly normal benign sentence here")
+        )
+        assert mgr.check_session_output(benign) == []
+
+    def test_check_session_output_empty_no_crash(self):
+        mgr = SessionCanaryManager()
+        mgr.create_session("sess-empty", "prompt")
+        assert mgr.check_session_output("") == []
+
 
 # ===================================================================
 # RotatingCanaryManager
@@ -190,6 +243,50 @@ class TestRotatingCanaryManager:
         mgr = RotatingCanaryManager()
         mgr.get_or_rotate("Prompt")
         assert mgr.check_output("") == []
+
+    # ---- S4b / CAN-4: encoded-leak parity ----------------------------------
+    # Before the fix, check_output did a bare `canary.token in output_text`
+    # substring match and MISSED every encoded leak, including on RETIRED
+    # canaries.  These pin the fix while preserving retired/active semantics.
+
+    def test_check_output_detects_base64_leak_active(self):
+        """A base64-encoded ACTIVE canary in output IS detected (was missed)."""
+        mgr = RotatingCanaryManager()
+        _, canary = mgr.get_or_rotate("Prompt")
+        leak = f"data: {_b64(canary.token)}"
+        assert canary.token not in leak  # OLD bare-substring would miss it
+        triggered = mgr.check_output(leak)
+        assert canary in triggered
+
+    def test_check_output_detects_hex_leak_active(self):
+        """A hex-encoded ACTIVE canary in output IS detected (was missed)."""
+        mgr = RotatingCanaryManager()
+        _, canary = mgr.get_or_rotate("Prompt")
+        leak = f"ref={_hex(canary.token)}"
+        assert canary.token not in leak
+        triggered = mgr.check_output(leak)
+        assert canary in triggered
+
+    def test_check_output_detects_base64_leak_retired(self):
+        """Encoded leak of a RETIRED canary is still caught (retired semantics)."""
+        mgr = RotatingCanaryManager()
+        _, old = mgr.get_or_rotate("Prompt")
+        mgr.force_rotate("Prompt")  # `old` is now retired
+        assert old in mgr._retired
+        leak = f"cached output: {_b64(old.token)}"
+        assert old.token not in leak
+        triggered = mgr.check_output(leak)
+        assert old in triggered
+
+    def test_check_output_encoded_benign_no_false_positive(self):
+        """An unrelated base64/hex string must NOT trigger (FP-safe)."""
+        mgr = RotatingCanaryManager()
+        mgr.get_or_rotate("Prompt")
+        benign = (
+            "log line " + _b64("ordinary application log message here") +
+            " checksum " + _hex("another unrelated benign payload value")
+        )
+        assert mgr.check_output(benign) == []
 
     def test_history_includes_all(self):
         mgr = RotatingCanaryManager()
@@ -426,6 +523,43 @@ class TestHoneypotManager:
         found = mgr.check_output("Nothing to see here", hps)
         assert found == []
 
+    # ---- S4b / CAN-4: encoded-leak parity ----------------------------------
+    # Before the fix, HoneypotManager.check_output did a bare `hp in output`
+    # substring match and MISSED every encoded exfiltration of a decoy.
+
+    def test_check_output_detects_base64_honeypot(self):
+        """A base64-encoded honeypot in output IS detected (was missed)."""
+        mgr = HoneypotManager()
+        hps = mgr.generate_honeypots(3)
+        leak = f"exfil blob: {_b64(hps[0])}"
+        assert hps[0] not in leak  # OLD bare-substring would miss it
+        found = mgr.check_output(leak, hps)
+        assert hps[0] in found
+
+    def test_check_output_detects_hex_honeypot(self):
+        """A hex-encoded honeypot in output IS detected (was missed)."""
+        mgr = HoneypotManager()
+        hps = mgr.generate_honeypots(3)
+        leak = f"smuggled: {_hex(hps[1])}"
+        assert hps[1] not in leak
+        found = mgr.check_output(leak, hps)
+        assert hps[1] in found
+
+    def test_check_output_encoded_benign_no_false_positive(self):
+        """Unrelated base64/hex content must NOT match any honeypot (FP-safe)."""
+        mgr = HoneypotManager()
+        hps = mgr.generate_honeypots(3)
+        benign = (
+            "config dump " + _b64("host=example port=5432 db=public") +
+            " digest " + _hex("an entirely unrelated benign config blob")
+        )
+        assert mgr.check_output(benign, hps) == []
+
+    def test_check_output_empty_no_crash(self):
+        mgr = HoneypotManager()
+        hps = mgr.generate_honeypots(2)
+        assert mgr.check_output("", hps) == []
+
     def test_default_count_is_three(self):
         mgr = HoneypotManager()
         hps = mgr.generate_honeypots()
@@ -445,3 +579,75 @@ class TestHoneypotManager:
         mgr.generate_honeypots(2)
         mgr.generate_honeypots(3)
         assert len(mgr._generated) == 5
+
+
+# ===================================================================
+# S4b / CAN-4: shared-helper parity
+# ===================================================================
+
+class TestLeakDetectionParity:
+    """The shared is_canary_present helper must agree with the manager's
+    private _is_present across the full battery of encodings, so the three
+    wrappers (rotation/session/honeypot) inherit identical detection."""
+
+    def _battery(self, token: str):
+        """Yield (label, output_text) pairs that SHOULD be detected."""
+        return [
+            ("exact", f"key is {token}"),
+            ("case_insensitive", token.lower()),
+            ("base64_direct", f"blob {_b64(token)} end"),
+            ("hex_direct", f"ref {_hex(token)} end"),
+            ("reversed", f"rev {token[::-1]} end"),
+            ("rot13", f"obf {codecs.encode(token, 'rot_13')} end"),
+            (
+                "unicode_escape",
+                "".join(f"\\u{ord(ch):04x}" for ch in token),
+            ),
+            ("url_encoded", f"param={urllib.parse.quote(token, safe='')}"),
+        ]
+
+    def test_helper_matches_manager_on_positive_battery(self):
+        mgr = CanaryManager()
+        canary = mgr.generate(length=24)  # long enough that half >= 10
+        for label, text in self._battery(canary.token):
+            helper = is_canary_present(canary, text)
+            manager = mgr._is_present(canary, text)
+            assert helper is True, f"helper missed {label}: {text!r}"
+            assert helper == manager, f"parity break on {label}: helper={helper} manager={manager}"
+
+    def test_helper_matches_manager_on_partial(self):
+        mgr = CanaryManager()
+        canary = mgr.generate(length=24)
+        half = canary.token_half
+        assert len(half) >= 10
+        text = f"fragment: {half} trailing"
+        assert is_canary_present(canary, text) is True
+        assert is_canary_present(canary, text) == mgr._is_present(canary, text)
+
+    def test_helper_matches_manager_on_negatives(self):
+        mgr = CanaryManager()
+        canary = mgr.generate(length=24)
+        negatives = [
+            "",
+            "The quick brown fox jumps over the lazy dog.",
+            "Our Widget Pro costs $29.99 and ships worldwide.",
+            "!!!not-base64-at-all!!!",
+            _b64("an unrelated benign sentence of some length"),
+            _hex("a different unrelated benign sentence value"),
+            "a" * 5000,
+        ]
+        for text in negatives:
+            helper = is_canary_present(canary, text)
+            manager = mgr._is_present(canary, text)
+            assert helper is False, f"helper false-positive on {text[:40]!r}"
+            assert helper == manager, f"parity break (negative) on {text[:40]!r}"
+
+    def test_helper_accepts_raw_string_token(self):
+        """is_canary_present must accept a raw token string (honeypot path)."""
+        token = "sk-RAWSTRINGtoken1234567890"
+        assert is_canary_present(token, f"leak {_b64(token)}") is True
+        assert is_canary_present(token, "unrelated benign text") is False
+
+    def test_helper_empty_token_or_text_is_false(self):
+        assert is_canary_present("", "anything") is False
+        assert is_canary_present("TOKEN-123456", "") is False
