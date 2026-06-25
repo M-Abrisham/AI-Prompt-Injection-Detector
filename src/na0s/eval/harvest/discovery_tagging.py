@@ -135,9 +135,19 @@ _KEYWORD_TO_CODE: dict[str, str] = {
     "html injection": "I2",
     "markdown injection": "I2",
     # --- exfiltration ---
-    "system prompt extraction": "E",
-    "system prompt leak": "E",
-    "prompt leaking": "E",
+    # System-prompt / canary leak narrows to the specific technique E1.1
+    # (Direct-prompt-request) rather than the bare category E: harvested
+    # "system prompt leak" / "canary" intel is almost always the direct-ask
+    # exfiltration probe, and E1.1 is canonical (data/taxonomy.yaml E1.1,
+    # re-validated at construction). Generic "data exfiltration" stays at the
+    # category E (it spans more than the direct system-prompt ask).
+    "system prompt extraction": "E1.1",
+    "system prompt leak": "E1.1",
+    "system prompt leakage": "E1.1",
+    "prompt leaking": "E1.1",
+    "canary": "E1.1",
+    "canary token leak": "E1.1",
+    "canary leak": "E1.1",
     "data exfiltration": "E",
     # --- privacy ---
     "membership inference": "P2",
@@ -168,15 +178,38 @@ _KEYWORD_TO_CODE: dict[str, str] = {
     "denial of service": "R",
     "resource exhaustion": "R",
     # --- supply chain ---
+    # Bare/ambiguous supply-chain & backdoor stay at the category S (a human
+    # narrows them at promotion). The two below are UNAMBIGUOUS load-time
+    # primitives with a single canonical home, so they tag to their technique:
+    #   S1.2 = Pickle-RCE (deserialization of a tampered .pkl -> code exec)
+    #   S1.1 = Model-file-tampering (the on-disk artifact was swapped)
+    # Both re-validated against data/taxonomy.yaml at construction time.
     "supply chain attack": "S",
     "model backdoor": "S",
+    "pickle deserialization": "S1.2",
+    "pickle rce": "S1.2",
+    "deserialization attack": "S1.2",
+    "model file tampering": "S1.1",
+    "model weight tampering": "S1.1",
     # --- ingestion / RAG ---
     "rag poisoning": "IG",
     "retrieval poisoning": "IG",
     "ingestion manipulation": "IG",
     # --- inter-model / self-replication ---
+    # Bare self-replication stays at the category IM. The named inter-model
+    # primitives below have a single canonical technique home (re-validated at
+    # construction). Sub-codes per data/taxonomy.yaml (Inter-Model Propagation):
+    #   IM5.4 = Rug-pull attack (model swap AFTER trust / post-approval swap)
+    #   IM4.2 = API response tampering (the inter-model prompt/response is
+    #           altered in transit) — the harvest home for "prompt tampering"
+    #           intel until a reviewer narrows it (e.g. IM5.6 template poisoning).
     "prompt self-replication": "IM",
     "llm worm": "IM",
+    "mcp rug pull": "IM5.4",
+    "rug pull attack": "IM5.4",
+    "post-approval swap": "IM5.4",
+    "model swap after trust": "IM5.4",
+    "prompt tampering": "IM4.2",
     # --- multimodal ---
     "multimodal injection": "M",
     "image injection": "M",
