@@ -21,6 +21,7 @@ import logging
 import os
 import secrets
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -36,22 +37,113 @@ PENDING_REL_PATH = "data/approval_queue/pending_deploy.json"
 # only requests signed with this key are accepted.
 HMAC_KEY_ENV = "NA0S_AGENT_APPROVAL_HMAC_KEY"
 
+# Environment variable selecting the enforcement posture for unsigned requests
+# (S5.1). Three states, evaluated case-insensitively:
+#   * ``off``     — accept unsigned requests silently (no warning latch).
+#   * ``warn``    — accept unsigned requests but log the loud one-time warning.
+#                   This is the DEFAULT and preserves today's staged-rollout
+#                   behavior so the live flow is not broken before the shared
+#                   secret is provisioned on BOTH producer and daemon.
+#   * ``enforce`` — REJECT a request whenever no HMAC key is configured (or the
+#                   request is unsigned). Flip to ``enforce`` ONLY AFTER the
+#                   GitHub ``NA0S_AGENT_APPROVAL_HMAC_KEY`` secret is provisioned
+#                   on the cloud producer and the local daemon, otherwise every
+#                   legitimate request is dropped (fail-closed by design).
+ENFORCE_ENV = "NA0S_AGENT_APPROVAL_ENFORCE"
+ENFORCE_OFF = "off"
+ENFORCE_WARN = "warn"
+ENFORCE_ENFORCE = "enforce"
+_DEFAULT_ENFORCE = ENFORCE_WARN
+
+# RFC 2104 §3 recommends an HMAC key of at least L bytes, where L is the output
+# length of the underlying hash. For SHA-256 that is 32 bytes. Keys shorter than
+# this still authenticate (HMAC is defined for any key length — short keys are
+# zero-padded to the block size), but they reduce the effective brute-force
+# search space below the digest's security level, so we warn loudly. We do NOT
+# reject: rejecting would be a breaking change for any already-provisioned short
+# secret, and a short shared secret is still vastly stronger than the unsigned
+# fallback this layer otherwise allows.
+MIN_HMAC_KEY_BYTES = 32  # RFC 2104: L = 32 for HMAC-SHA-256
+
+# Maximum accepted age of a signed request's ``requested_at`` timestamp (S5.3).
+# The producer stamps ``requested_at`` at sign time and the daemon polls the
+# mail-drop branch on a cadence measured in minutes; a 24h window comfortably
+# covers fetch latency, a daemon that was offline overnight, and producer/daemon
+# clock skew, while still bounding the replay window for a captured-and-replayed
+# signed artifact to a single day. Tightening this only narrows the replay
+# window; it never weakens authentication (the HMAC check is independent).
+APPROVAL_MAX_AGE_SECONDS = 24 * 60 * 60  # 24 hours
+
+# Symmetric tolerance for a ``requested_at`` that is slightly in the FUTURE,
+# absorbing benign producer-ahead clock skew without accepting a timestamp that
+# is implausibly far ahead (which would signal a forged/replayed future-dated
+# request). 5 minutes mirrors the common skew allowance for signed tokens.
+APPROVAL_FUTURE_LEEWAY_SECONDS = 5 * 60  # 5 minutes
+
 # Module-level latch so the "signing DISABLED" warning is logged loudly but
 # only once per process, not on every poll of the mail-drop branch.
 _unsigned_mode_warned = False
+
+# Module-level latch so the "weak HMAC key" warning (S5.4) is logged loudly but
+# only once per process, mirroring ``_unsigned_mode_warned``.
+_weak_key_warned = False
+
+
+def _enforce_mode() -> str:
+    """Return the normalized enforcement mode from ``NA0S_AGENT_APPROVAL_ENFORCE``.
+
+    Defaults to ``warn`` (today's behavior). An unrecognized value also falls
+    back to the default rather than failing the poll, so a typo can never
+    silently disable the warning or, worse, silently reject every request.
+    """
+    raw = (os.environ.get(ENFORCE_ENV) or "").strip().casefold()
+    if raw in (ENFORCE_OFF, ENFORCE_WARN, ENFORCE_ENFORCE):
+        return raw
+    if raw:
+        logger.warning(
+            "Unrecognized %s=%r; falling back to %r.",
+            ENFORCE_ENV,
+            raw,
+            _DEFAULT_ENFORCE,
+        )
+    return _DEFAULT_ENFORCE
 
 
 def _approval_key() -> Optional[bytes]:
     """Return the configured HMAC key as bytes, or None if unset/empty.
 
     The key is read from the ``NA0S_AGENT_APPROVAL_HMAC_KEY`` environment
-    variable. When it is absent the mail-drop runs in (backward-compatible)
-    unsigned mode — see ``sign_request`` / ``verify_request`` callers.
+    variable, stripped of surrounding whitespace (a trailing newline is a
+    common copy/paste artifact for secrets). When it is absent the mail-drop
+    runs in (backward-compatible) unsigned mode — see ``sign_request`` /
+    ``verify_request`` callers.
+
+    S5.4 KEY FLOOR: if the key is shorter than ``MIN_HMAC_KEY_BYTES`` (RFC 2104
+    recommends L = 32 bytes for HMAC-SHA-256) a loud one-time WARNING is logged.
+    The key is still ACCEPTED (non-breaking) — we only nudge operators toward a
+    full-length secret.
     """
+    global _weak_key_warned
     raw = os.environ.get(HMAC_KEY_ENV)
     if not raw:
         return None
-    return raw.encode("utf-8")
+    key = raw.strip().encode("utf-8")
+    if not key:
+        # Whitespace-only secret collapses to empty — treat as unset.
+        return None
+    if len(key) < MIN_HMAC_KEY_BYTES and not _weak_key_warned:
+        logger.warning(
+            "SECURITY: %s is only %d bytes; RFC 2104 recommends an HMAC key of "
+            "at least L=%d bytes for HMAC-SHA-256. The short key is still "
+            "accepted, but provision a >=%d-byte shared secret to restore the "
+            "full digest security level.",
+            HMAC_KEY_ENV,
+            len(key),
+            MIN_HMAC_KEY_BYTES,
+            MIN_HMAC_KEY_BYTES,
+        )
+        _weak_key_warned = True
+    return key
 
 
 def _canonical_request_bytes(request: Dict[str, Any]) -> bytes:
@@ -64,6 +156,54 @@ def _canonical_request_bytes(request: Dict[str, Any]) -> bytes:
     without_sig = {k: v for k, v in request.items() if k != "signature"}
     blob = json.dumps(without_sig, sort_keys=True, separators=(",", ":"))
     return blob.encode("utf-8")
+
+
+def _parse_requested_at(value: Any) -> Optional[datetime]:
+    """Parse a ``requested_at`` timestamp to a timezone-aware ``datetime``.
+
+    Accepts ISO-8601 strings as produced by ``datetime.isoformat()`` (the
+    workflow producer) and tolerates a trailing ``Z`` (UTC) designator that
+    ``datetime.fromisoformat`` rejects on older Pythons. A naive timestamp
+    (no offset) is assumed to be UTC. Returns ``None`` on any parse failure so
+    the caller can fail closed.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _is_fresh(request: Dict[str, Any]) -> bool:
+    """True iff the request's ``requested_at`` is within the freshness window.
+
+    A signed request is REPLAY-fresh when its age is in
+    ``[-APPROVAL_FUTURE_LEEWAY_SECONDS, APPROVAL_MAX_AGE_SECONDS]``:
+
+      * older than ``APPROVAL_MAX_AGE_SECONDS`` -> a stale (possibly captured and
+        replayed) artifact -> reject.
+      * more than ``APPROVAL_FUTURE_LEEWAY_SECONDS`` in the future -> an
+        implausible / forged future-dated timestamp -> reject.
+
+    A missing or unparseable ``requested_at`` fails closed (returns False): a
+    signed request the producer always stamps must carry a usable timestamp.
+    """
+    requested_at = _parse_requested_at(request.get("requested_at"))
+    if requested_at is None:
+        return False
+    age = (datetime.now(timezone.utc) - requested_at).total_seconds()
+    if age > APPROVAL_MAX_AGE_SECONDS:
+        return False
+    if age < -APPROVAL_FUTURE_LEEWAY_SECONDS:
+        return False
+    return True
 
 
 def sign_request(request: Dict[str, Any], key) -> str:
@@ -339,13 +479,20 @@ class ApprovalsSync:
 
         Policy:
           * If a key is configured (``NA0S_AGENT_APPROVAL_HMAC_KEY`` set) the
-            request MUST carry a valid ``signature`` or it is rejected — a
+            request MUST carry a valid ``signature`` AND a fresh
+            ``requested_at`` timestamp (S5.3 replay guard) or it is rejected — a
             SECURITY warning is logged and the request is dropped (never
             materialized or notified).
-          * If NO key is configured the mail-drop runs in backward-compatible
-            unsigned mode: a loud one-time WARNING is logged and the request is
-            accepted, so the live flow is not broken before the shared secret is
-            deployed to both the cloud producer and this daemon.
+          * If NO key is configured the policy depends on
+            ``NA0S_AGENT_APPROVAL_ENFORCE`` (S5.1):
+              - ``off``/``warn`` (default ``warn``): the mail-drop runs in
+                backward-compatible unsigned mode and the request is accepted.
+                ``warn`` additionally logs a loud one-time WARNING; ``off`` is
+                silent. The live flow is not broken before the shared secret is
+                deployed to both the cloud producer and this daemon.
+              - ``enforce``: an unsigned/keyless request is REJECTED. Flip to
+                ``enforce`` ONLY after the shared HMAC secret is provisioned on
+                BOTH the producer and the daemon.
 
         Returns:
             True if the request may proceed; False if it must be rejected.
@@ -353,13 +500,25 @@ class ApprovalsSync:
         global _unsigned_mode_warned
         key = _approval_key()
         if key is None:
-            if not _unsigned_mode_warned:
+            mode = _enforce_mode()
+            if mode == ENFORCE_ENFORCE:
+                logger.warning(
+                    "SECURITY: rejecting unsigned mail-drop approval request — "
+                    "%s=%s but %s is not set. Provision the shared HMAC secret "
+                    "on the cloud producer AND this daemon before enforcing.",
+                    ENFORCE_ENV,
+                    ENFORCE_ENFORCE,
+                    HMAC_KEY_ENV,
+                )
+                return False
+            if mode == ENFORCE_WARN and not _unsigned_mode_warned:
                 logger.warning(
                     "SECURITY: mail-drop request signing is DISABLED — %s is "
                     "not set, so unsigned approval requests are accepted. Set "
                     "the shared HMAC secret on the cloud producer AND this "
-                    "daemon to enforce request authenticity.",
+                    "daemon (and %s=enforce) to enforce request authenticity.",
                     HMAC_KEY_ENV,
+                    ENFORCE_ENV,
                 )
                 _unsigned_mode_warned = True
             return True
@@ -375,6 +534,19 @@ class ApprovalsSync:
                 "or tampered pending_deploy.json will not be materialized or "
                 "notified.",
                 reason,
+            )
+            return False
+
+        # S5.3 replay/freshness guard — only on the signed path so the unsigned
+        # staged-rollout flow above is unchanged.
+        if not _is_fresh(request):
+            logger.warning(
+                "SECURITY: rejecting signed mail-drop approval request — its "
+                "'requested_at' is missing, stale (> %ds old), or implausibly "
+                "future-dated (> %ds ahead); a captured-and-replayed signed "
+                "artifact will not be materialized or notified.",
+                APPROVAL_MAX_AGE_SECONDS,
+                APPROVAL_FUTURE_LEEWAY_SECONDS,
             )
             return False
         return True
