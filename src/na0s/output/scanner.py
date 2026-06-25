@@ -224,19 +224,14 @@ _TRUSTED_IMAGE_HOSTS: frozenset = frozenset({
     "img.shields.io",
 })
 
-# Query-parameter names that turn an image/link URL into a data-exfil
-# beacon -- if any of these appear in the query, the trusted-host
-# allowlist does NOT apply (the image is treated as a beacon).
-_EXFIL_QUERY_PARAMS = re.compile(
-    r"[?&](?:data|token|key|secret|password|passwd|ssn|cc|cookie|session|"
-    r"auth|q|prompt|content)=",
-    re.IGNORECASE,
-)
-
-# STRICT exfil query params -- the unambiguous data-stealing names only.
-# Used for reference-style link definitions where the ambiguous params
-# (q / prompt / content) appear in countless benign URLs (search links,
-# doc anchors), so flagging them there would be FP-unsafe.
+# Query-parameter names that turn an image/link URL into a data-exfil beacon
+# -- if any appear in the query, the trusted-host allowlist does NOT apply
+# (the URL is treated as a beacon).  This is the UNAMBIGUOUS data-stealing set
+# only: the previously-included `q` / `prompt` / `content` appear in countless
+# benign URLs (search links, doc anchors), so flagging them is FP-unsafe.  Both
+# the inline image beacon (`_is_image_beacon`) and the reference-style
+# definition gate (`_is_exfil_reference`) share this single strict set so an
+# inline `![](...?q=...)` no longer flags while the reference form does not.
 _STRICT_EXFIL_QUERY_PARAMS = re.compile(
     r"[?&](?:data|token|key|secret|password|passwd|ssn|cc|cookie|session|auth)=",
     re.IGNORECASE,
@@ -250,8 +245,11 @@ _STRICT_EXFIL_QUERY_PARAMS = re.compile(
 # it.  Captures the definition URL so the beacon shape can be checked.
 _MARKDOWN_REF_DEFINITION = re.compile(r"^[ \t]*\[[^\]]+\]:[ \t]*(\S+)", re.MULTILINE)
 
-# Markdown image:  ![alt](url)  -- captures the URL for host-allowlisting
-_MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\((https?://[^)]+)\)")
+# Markdown image:  ![alt](url)  -- captures the URL for host-allowlisting.
+# Also captures inline `data:` URIs: an `![](data:...)` payload is a beacon /
+# smuggling shape (e.g. an SVG with an embedded fetch()) that the http-only
+# form missed entirely.
+_MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\((https?://[^)]+|data:[^)]+)\)")
 
 # Bare HTML image:  <img ... src="url" ...>  -- captures the URL
 _HTML_IMAGE = re.compile(
@@ -345,9 +343,15 @@ _EGRESS_PATTERNS: Dict[str, re.Pattern] = {
         r"[A-Za-z0-9+/]{8,}(?:={1,2})"
         r"|https?://[^\s\"')\]]+\?[^\s\"')\]]*[=&][0-9a-fA-F]{16,}",
     ),
-    # DNS exfiltration: base64-encoded subdomain labels (long labels typical of exfil)
+    # DNS exfiltration: base64/base32-looking long subdomain label, then a
+    # bounded domain tail.  Every quantifier is bounded (label <=63 chars per
+    # RFC 1035, chain <=6 labels) and the leading label is DNS-valid
+    # ([A-Za-z0-9-], no `/`/`+`/`=`), so there is NO catastrophic / quadratic
+    # backtracking on shaped output (the prior unbounded `{12,}` + `(?:..\.)+`
+    # was O(n^2) on a long alphanumeric run -- an attacker-shapeable DoS that,
+    # via the cascade's fail-open scan wrapper, suppressed scanning entirely).
     "egress_dns_exfil": re.compile(
-        r"\b[A-Za-z0-9+/]{12,}(?:={0,2})\.(?:[a-zA-Z0-9\-]+\.)+[a-zA-Z]{2,}\b",
+        r"\b[A-Za-z0-9]{12,63}\.(?:[A-Za-z0-9-]{1,63}\.){1,6}[A-Za-z]{2,24}\b",
     ),
 }
 
@@ -454,7 +458,13 @@ class OutputScanner:
             if isinstance(output_text, (bytes, bytearray)):
                 output_text = output_text.decode("utf-8", "replace")
             else:
-                output_text = str(output_text)
+                try:
+                    output_text = str(output_text)
+                except Exception:
+                    # A pathological __str__ must NOT re-raise -- that would
+                    # propagate to the cascade wrapper and fail OPEN.  Fall back
+                    # to a type tag that can never raise.
+                    output_text = f"<unstringifiable {type(output_text).__name__}>"
         if not output_text.strip():
             return OutputScanResult(
                 is_suspicious=False,
@@ -639,11 +649,16 @@ class OutputScanner:
             if self._is_exfil_reference(ref.group(1).strip("<>")):
                 spans.append(ref.span(1))
 
-        # Exfiltration + egress URLs
+        # Exfiltration + egress URLs -- extend each match to the full-URL
+        # boundary so a host-anchored pattern (webhook service / raw-IP) does
+        # NOT leave the data-bearing path/port/query in redacted_text (the
+        # stolen payload often rides in the path, e.g. /collect/<base64>).
         for pat in _EXFILTRATION_URL_PATTERNS:
-            spans.extend(m.span() for m in pat.finditer(text))
+            for m in pat.finditer(text):
+                spans.append((m.start(), self._url_span_end(text, m.end())))
         for pat in _EGRESS_PATTERNS.values():
-            spans.extend(m.span() for m in pat.finditer(text))
+            for m in pat.finditer(text):
+                spans.append((m.start(), self._url_span_end(text, m.end())))
 
         # Role-break phrases
         for pat in _ROLE_BREAK_PATTERNS:
@@ -660,6 +675,23 @@ class OutputScanner:
                     )
 
         return self._apply_spans(text, spans)
+
+    @staticmethod
+    def _url_span_end(text: str, end: int) -> int:
+        """Extend a URL match end to the full-URL boundary for redaction.
+
+        Host-anchored exfil/egress patterns match only scheme+host; walk
+        forward from *end* to the first URL terminator so the whole beacon URL
+        (path + port + query) is redacted, not just the host.  Markdown/HTML
+        delimiters (`)`, `]`, `}`, `>`, quotes, backtick, `|`) and whitespace
+        all terminate the URL, so we never over-consume surrounding markup.
+        """
+        n = len(text)
+        i = end
+        terminators = " \t\n\r\f\v\"'<>`)]}|"
+        while i < n and text[i] not in terminators:
+            i += 1
+        return i
 
     @staticmethod
     def _apply_spans(text: str, spans: List[tuple]) -> str:
@@ -1084,7 +1116,7 @@ class OutputScanner:
                 return False
         # Non-trusted host: flag ONLY if it carries an exfil-bearing query
         # param (the data-beacon shape).  A bare image URL stays clean.
-        return bool(_EXFIL_QUERY_PARAMS.search(url))
+        return bool(_STRICT_EXFIL_QUERY_PARAMS.search(url))
 
     def _check_structured_injection(self, text: str) -> tuple:
         """Detect structured-output injection (O2.3 JSON role / O2.4 SQL)."""
