@@ -258,9 +258,22 @@ class TestModelRollbackList:
 
 
 class TestModelRollbackRestore:
-    """Restore operations."""
+    """Restore operations.
 
-    def test_restore_copies_file(self, tmp_path):
+    S1.7: ``restore()`` now re-verifies the restored target via
+    ``safe_pickle.verify_file_digest`` before returning, and FAILS CLOSED on any
+    integrity error (tamper / missing sidecar / malformed sidecar). Backups must
+    therefore be properly signed (``safe_dump``) to be restorable. The two tests
+    below were INVERTED from their pre-S1.7 form: they previously asserted that an
+    UNSIGNED backup (no sidecar) and a backup with a FORGED plain-text sidecar
+    were installed verbatim — exactly the insecure "install whatever is in the
+    backup dir" behavior this fix closes. They now assert fail-closed rejection.
+    Happy-path round-trips live in ``TestModelRollbackRestoreVerify`` below.
+    """
+
+    def test_restore_unsigned_backup_rejected(self, tmp_path):
+        # INVERTED (was test_restore_copies_file): a backup with NO integrity
+        # sidecar is unverifiable, so restore must refuse rather than install it.
         from na0s.model_rollback import ModelRollback
 
         model = tmp_path / "model.pkl"
@@ -269,10 +282,15 @@ class TestModelRollbackRestore:
         bpath = rb.backup(model)
 
         target = tmp_path / "restored" / "model.pkl"
-        rb.restore(bpath, target)
-        assert target.read_bytes() == b"original"
+        with pytest.raises(ValueError, match="integrity verification"):
+            rb.restore(bpath, target)
+        # Fail closed: nothing left installed at the target.
+        assert not target.exists()
 
-    def test_restore_copies_sidecars(self, tmp_path):
+    def test_restore_forged_sidecar_rejected(self, tmp_path):
+        # INVERTED (was test_restore_copies_sidecars): a hand-written, non-conformant
+        # sidecar ("hmac-value") is not a valid integrity record, so restore must
+        # refuse — it must not blindly copy a forged sidecar + payload into place.
         from na0s.model_rollback import ModelRollback
 
         model = tmp_path / "model.pkl"
@@ -284,10 +302,11 @@ class TestModelRollbackRestore:
         bpath = rb.backup(model)
 
         target = tmp_path / "restored" / "model.pkl"
-        rb.restore(bpath, target)
-        sidecar = target.parent / (target.name + ".hmac")
-        assert sidecar.exists()
-        assert sidecar.read_text() == "hmac-value"
+        with pytest.raises(ValueError, match="integrity verification"):
+            rb.restore(bpath, target)
+        # Fail closed: neither the payload nor the forged sidecar is installed.
+        assert not target.exists()
+        assert not (target.parent / (target.name + ".hmac")).exists()
 
     def test_restore_missing_backup_raises(self, tmp_path):
         from na0s.model_rollback import ModelRollback
@@ -295,6 +314,91 @@ class TestModelRollbackRestore:
         rb = ModelRollback(backup_dir=tmp_path / "backups")
         with pytest.raises(FileNotFoundError):
             rb.restore(tmp_path / "ghost", tmp_path / "target")
+
+
+class TestModelRollbackRestoreVerify:
+    """S1.7: restore() re-verifies the backup and fails closed on tamper."""
+
+    def test_restore_accepts_clean_backup(self, tmp_path):
+        """A properly-signed backup (safe_dump) round-trips and verifies."""
+        from na0s.integrity.safe_pickle import safe_dump, verify_file_digest
+        from na0s.model_rollback import ModelRollback
+
+        model = tmp_path / "model.pkl"
+        # safe_dump writes the pickle + a conformant .sha256 sidecar (keyless).
+        safe_dump({"weights": [1, 2, 3]}, str(model))
+        rb = ModelRollback(backup_dir=tmp_path / "backups")
+        bpath = rb.backup(model)
+
+        target = tmp_path / "restored" / "model.pkl"
+        out = rb.restore(bpath, target)
+
+        assert out == target
+        assert target.exists()
+        assert target.read_bytes() == model.read_bytes()
+        # Sidecar travelled too, and the installed target verifies clean.
+        assert (target.parent / (target.name + ".sha256")).exists()
+        verify_file_digest(str(target))  # no raise => verified
+
+    def test_restore_rejects_tampered_backup(self, tmp_path):
+        """A tampered BACKUP pickle is detected on re-verify; nothing installed."""
+        from na0s.model_rollback import ModelRollback
+        from na0s.integrity.safe_pickle import safe_dump
+
+        model = tmp_path / "model.pkl"
+        safe_dump({"weights": [1, 2, 3]}, str(model))
+        rb = ModelRollback(backup_dir=tmp_path / "backups")
+        bpath = rb.backup(model)
+
+        # Corrupt the BACKUP pickle bytes (sidecar in the backup stays the
+        # original digest) -> digest mismatch on the restored target.
+        forged = b"\x80\x04\x95\x00tampered-evil-payload"
+        bpath.write_bytes(forged)
+
+        target = tmp_path / "restored" / "model.pkl"
+        with pytest.raises(ValueError, match="integrity verification"):
+            rb.restore(bpath, target)
+
+        # Fail closed: the tampered bytes must NOT be installed at the target.
+        assert not target.exists()
+        # And no stray sidecar left behind from the aborted restore.
+        assert not (target.parent / (target.name + ".sha256")).exists()
+
+    def test_restore_rejects_both_files_replaced_under_hmac(self, tmp_path, monkeypatch):
+        """Both-files-replace (forged pickle + forged .hmac sidecar) is blocked.
+
+        Under an HMAC signing key, an attacker who replaces both the backup pickle
+        and its .hmac sidecar still cannot forge a valid HMAC without the key, so
+        re-verify rejects it. This is the strongest backup-dir threat.
+        """
+        import os as _os
+
+        from na0s.integrity import safe_pickle
+        from na0s.integrity.safe_pickle import safe_dump, _format_sidecar, _sha256
+        from na0s.model_rollback import ModelRollback
+
+        monkeypatch.setenv("NA0S_PICKLE_KEY", _os.urandom(32).hex())
+        safe_pickle._reset_caches()
+
+        model = tmp_path / "model.pkl"
+        safe_dump({"weights": [1, 2, 3]}, str(model))  # writes .hmac sidecar
+        rb = ModelRollback(backup_dir=tmp_path / "backups")
+        bpath = rb.backup(model)
+
+        # Attacker overwrites the backup pickle AND forges a .hmac sidecar using a
+        # plain SHA-256 (they lack the signing key) in the v1 hmac-sha256 envelope.
+        import pickle as _pickle
+
+        bpath.write_bytes(_pickle.dumps({"evil": True}))
+        forged_sidecar = bpath.parent / (bpath.name + ".hmac")
+        forged_sidecar.write_text(_format_sidecar("hmac-sha256", _sha256(str(bpath))))
+        safe_pickle._reset_caches()
+
+        target = tmp_path / "restored" / "model.pkl"
+        with pytest.raises(ValueError, match="integrity verification"):
+            rb.restore(bpath, target)
+        assert not target.exists()
+        assert not (target.parent / (target.name + ".hmac")).exists()
 
 
 class TestModelRollbackCleanup:
