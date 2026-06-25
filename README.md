@@ -124,7 +124,7 @@ result = OutputScanner(sensitivity="medium").scan(
 )
 result.is_suspicious   # True
 ```
-<!-- src: src/na0s/output/scanner.py:250 -->
+<!-- src: src/na0s/output/scanner.py:436 -->
 
 **Limits**: input capped at **50,000** characters; per-scan budget **60** seconds; long inputs over **512** words are split into at most **20** chunks. <!-- facts.yaml#constants -->
 

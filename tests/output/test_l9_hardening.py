@@ -247,5 +247,22 @@ class TestReadableSecretLabel:
         assert "\\b" not in flag and "[0-9A-Z]" not in flag
 
 
+# ---------------------------------------------------------------------------
+# decode_output ROT13 — negative test (benign prose must not be flagged)
+# ---------------------------------------------------------------------------
+
+class TestDecodeOutputRot13:
+    def test_benign_prose_rot13_variant_does_not_flag(self):
+        # decode_output unconditionally appends a ROT13 variant for any text
+        # with >= 5 alpha chars (no plausibility gate); that variant is
+        # gibberish for benign prose and must NOT cause scan() to flag.
+        prose = "The quarterly report shows steady growth across all regions."
+        variants = _scanner().decode_output(prose)
+        # a ROT13 variant is produced (documents current behavior) ...
+        assert any(v != prose for v in variants)
+        # ... but the benign prose itself stays clean through scan().
+        assert _scanner().scan(prose).flags == []
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
