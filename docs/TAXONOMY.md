@@ -2,13 +2,13 @@
 
 # Threat Taxonomy Coverage
 
-This page documents the **30** categories (29 attack + 1 benign `BEN` sentinel) and **278** techniques covered by the AI Prompt Injection Detector. For the complete taxonomy definition including all technique IDs, descriptions, and example payloads, see [`THREAT_TAXONOMY.md`](../THREAT_TAXONOMY.md).
+This page documents the **28** canonical categories (27 attack + 1 benign `BEN` sentinel) and **265** technique leaves covered by the AI Prompt Injection Detector. (Counts are computed from `data/taxonomy.yaml` by `scripts/extract_facts.py` and pinned in `docs/facts.yaml` as `taxonomy_categories` / `taxonomy_leaves`. The raw file holds 31 keys / 285 leaf entries; **3 mid-level keys are intentional aliases** — `E1`→`E`, `C1`→`C`, `P`→`P2` — excluded from the canonical count so leaves are counted once.) For the complete taxonomy definition including all technique IDs, descriptions, and example payloads, see [`THREAT_TAXONOMY.md`](../THREAT_TAXONOMY.md).
 
 ---
 
 ## <img src="https://img.shields.io/badge/-THREAT_TAXONOMY-457B9D?style=for-the-badge&labelColor=FF6B35" alt="" /> Threat Taxonomy Coverage
 
-**30** categories (29 attack + 1 benign `BEN` sentinel) with **278 techniques**, mapped to [OWASP LLM Top 10 2025](https://genai.owasp.org/), AVID, and LMRC frameworks.
+**28** canonical categories (27 attack + 1 benign `BEN` sentinel) with **265 technique leaves**, mapped to [OWASP LLM Top 10 2025](https://genai.owasp.org/), AVID, and LMRC frameworks.
 
 | Category | Name | Techniques | Coverage |
 |:--------:|------|:----------:|:--------:|
@@ -17,7 +17,7 @@ This page documents the **30** categories (29 attack + 1 benign `BEN` sentinel) 
 | **D3** | Structural Boundary Injection | 4 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **D4** | Obfuscation / Encoding | 6 | ![Partial](https://img.shields.io/badge/PARTIAL-F1C40F?style=flat-square) |
 | **D5** | Unicode Evasion | 7 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
-| **D6** | Multilingual Injection | 6 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
+| **D6** | Multilingual Injection | 7 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **D7** | Payload Delivery Tricks | 6 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **D8** | Context Window Manipulation | 6 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **I1** | Data Source Poisoning | 8 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
@@ -27,13 +27,13 @@ This page documents the **30** categories (29 attack + 1 benign `BEN` sentinel) 
 | **O** | Output Manipulation | 11 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **T** | Agent / Tool Abuse | 7 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **R** | Resource / Availability | 5 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
-| **P** | Privacy / Data Leakage | 6 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
+| **P** _(alias → P2)_ | Privacy / Data Leakage | 6 | ![Alias](https://img.shields.io/badge/ALIAS-9E9E9E?style=flat-square) |
 | **P2** | Privacy Extraction Attacks | 4 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **P3** | Malicious Code Generation | 4 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **M** | Multimodal Injection | 14 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **S** | Supply Chain / Integrity | 8 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **C** | Compliance / Policy Evasion | 8 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
-| **C1** | Compliance / Policy Evasion (C1) | 8 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
+| **C1** _(alias → C)_ | Compliance / Policy Evasion (C1) | 8 | ![Alias](https://img.shields.io/badge/ALIAS-9E9E9E?style=flat-square) |
 | **IM** | Inter-Model Propagation | 29 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **IG** | Ingestion Manipulation | 12 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **AD** | Altered Delivery | 19 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
@@ -43,6 +43,8 @@ This page documents the **30** categories (29 attack + 1 benign `BEN` sentinel) 
 | **C1MT** | Compliance Multi-Turn Probes | 6 | ![Full](https://img.shields.io/badge/FULL-3fb950?style=flat-square) |
 | **BEN** | Benign Control (FPR sentinel) | 2 | ![Benign](https://img.shields.io/badge/BENIGN-457B9D?style=flat-square) |
 
+> **Alias rows.** `C1` and `P` (and `E1`, not surfaced as its own row) are **intentional mid-level aliases** that mirror a canonical category (`C1`→`C`, `P`→`P2`, `E1`→`E`) so live `v0.1/` scenarios filed under the bare mid-level code validate without migrating their files. They are **excluded from the canonical count** (28 categories / 265 leaves) so each technique is counted once. See `data/taxonomy.yaml` for the inline alias comments.
+
 <details>
 <summary><strong>Attack Category Distribution (click to expand)</strong></summary>
 
@@ -50,7 +52,7 @@ This page documents the **30** categories (29 attack + 1 benign `BEN` sentinel) 
 
 ```mermaid
 %%{init: {'theme':'neutral'}}%%
-pie title Attack Category Distribution (278 Techniques)
+pie title Attack Category Distribution (265 canonical leaves)
     "IM: Inter-Model Propagation" : 29
     "D1: Instruction Override" : 22
     "CT: Combo Techniques" : 20
@@ -61,7 +63,7 @@ pie title Attack Category Distribution (278 Techniques)
     "AB: Adversarial Benchmarks" : 12
     "E: Exfiltration" : 11
     "O: Output Manipulation" : 11
-    "Others (20 categories)" : 113
+    "Others (18 categories)" : 100
 ```
 
 </details>

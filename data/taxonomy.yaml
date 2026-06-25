@@ -490,7 +490,11 @@ categories:
       - "avid-effect:security:S0201"
       - "avid-effect:security:S0202"
       - "avid-effect:security:S0600"
-    expected_layers: ["layer1_ml"]
+    # S1.1/S1.2/S1.4/S1.5 are defended at LOAD time by the L11 integrity layer
+    # (safe_pickle / KNOWN_HASHES allowlist), NOT by the layer1 text classifier —
+    # they never reach a prompt-scoring path. layer1_ml stays only for S1.3
+    # (training-data-poisoning), the one technique with a genuine text-content signal.
+    expected_layers: ["L11", "layer1_ml"]
     techniques:
       S1.1: { name: "Model-file-tampering", severity: critical }
       S1.2: { name: "Pickle-RCE", severity: critical }
@@ -562,7 +566,7 @@ categories:
     severity: critical
     tags:
       - "owasp-llm:2025:llm01"
-      - "owasp-llm:2025:llm15"
+      - "owasp-llm:2025:llm06"
     expected_layers: ["L1", "L9"]
     techniques:
       IM1.1: { name: "Recursive prompt injection", severity: critical }
