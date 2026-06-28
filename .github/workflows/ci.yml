@@ -40,7 +40,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Cache pip dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
@@ -49,7 +49,7 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Cache HuggingFace embedding model
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.hf-cache
           key: ${{ runner.os }}-hf-minilm-${{ hashFiles('src/na0s/ml/embedding_classifier.py') }}
