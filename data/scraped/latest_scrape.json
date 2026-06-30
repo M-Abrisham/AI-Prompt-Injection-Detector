@@ -1,6 +1,6 @@
 {
-  "total_new": 40478,
-  "timestamp": "2026-06-30T17:03:16.808291+00:00",
+  "total_new": 123,
+  "timestamp": "2026-06-30T19:49:25.633298+00:00",
   "sources": [
     "twitter",
     "datasets",
@@ -8,7 +8,7 @@
   ],
   "records_per_source": {
     "twitter": 0,
-    "datasets": 86827,
+    "datasets": 251,
     "reddit": 0
   }
 }
