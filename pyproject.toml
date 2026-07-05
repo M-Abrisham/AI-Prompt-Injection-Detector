@@ -78,7 +78,7 @@ embedding = [
     # is bumped to a v5-compatible release (ST>=5), add
     # `"transformers>=5.3.0,<6"` here and `transformers==<pin>` to
     # requirements-benchmark.txt. Tracked as SUP-HF-PIN in ROADMAP_V2.md.
-    "sentence-transformers>=2.2,<4",
+    "sentence-transformers>=2.2,<6",
     "faiss-cpu>=1.7.4",
 ]
 ocr = [
