@@ -1,26 +1,117 @@
 {
-  "scan_time": "2026-06-15T11:48:30Z",
+  "scan_time": "2026-07-13T08:52:31Z",
   "since_days": 7,
   "sources_scanned": [
     "arxiv",
     "github",
     "hf"
   ],
-  "total_discovered": 63,
-  "total_new": 63,
+  "total_discovered": 107,
+  "total_new": 107,
   "per_source_counts": {
-    "huggingface": 11,
-    "arxiv": 46,
-    "github": 6
+    "huggingface": 17,
+    "arxiv": 80,
+    "github": 10
   },
   "errors": {},
   "discoveries": [
     {
+      "id": "3nesdeniz/agentic-prompt-injection-boundary-pairs",
+      "source": "huggingface",
+      "discovered_at": "2026-07-13T08:52:31Z",
+      "url": "https://huggingface.co/datasets/3nesdeniz/agentic-prompt-injection-boundary-pairs",
+      "description": "\n\t\n\t\t\n\t\n\t\n\t\tAgentic Prompt-Injection Boundary Pairs\n\t\n\nMost prompt-injection datasets make the attack easy to recognize. The malicious row contains obvious override language, while the benign row discusses something unrelated. A classifier can look capable without learning the boundary that matters in production.\nThis dataset takes a stricter approach. Each attack is paired with a legitimate request from the same workflow. The two rows share the asset, role, tool and topic. What changes is the… ",
+      "size_estimate": "unknown",
+      "tags": [
+        "task_categories:text-classification",
+        "language:en",
+        "license:cc-by-4.0",
+        "size_categories:1K<n<10K",
+        "format:json",
+        "modality:text",
+        "library:datasets",
+        "library:pandas",
+        "library:polars",
+        "library:mlcroissant",
+        "region:us",
+        "ai-security",
+        "llm-security",
+        "prompt-injection",
+        "agentic-ai",
+        "red-teaming",
+        "hard-negatives"
+      ],
+      "relevance_keywords": [
+        "prompt injection"
+      ],
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-13T02:37:50.000Z",
+      "downloads": 0
+    },
+    {
+      "id": "3nesdeniz/turkish-conversation-prompt-injection",
+      "source": "huggingface",
+      "discovered_at": "2026-07-13T08:52:31Z",
+      "url": "https://huggingface.co/datasets/3nesdeniz/turkish-conversation-prompt-injection",
+      "description": "\n\t\n\t\t\n\t\n\t\n\t\tTurkish Conversation Prompt-Injection Dataset\n\t\n\n\n\n\n\n\nCanonical dataset release:\nHugging Face\nhosts the dataset viewer and downloads. This GitHub repository contains the\nauthoring sources, release files, documentation, deterministic build pipeline\nand validation scripts.\nThe interactive dataset explorer\nprovides side-by-side inspection of all 150 controlled boundary pairs, complete\nrow filtering, release coverage and methodology notes. It runs entirely in the\nvisitor's browser and… S",
+      "size_estimate": "unknown",
+      "tags": [
+        "task_categories:text-classification",
+        "annotations_creators:other",
+        "language_creators:machine-generated",
+        "multilinguality:monolingual",
+        "source_datasets:original",
+        "language:tr",
+        "license:cc-by-4.0",
+        "size_categories:n<1K",
+        "modality:text",
+        "region:us",
+        "turkish",
+        "prompt-injection",
+        "llm-security",
+        "ai-security",
+        "red-teaming",
+        "hard-negatives",
+        "paired-data"
+      ],
+      "relevance_keywords": [
+        "prompt injection"
+      ],
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-13T00:15:01.000Z",
+      "downloads": 97
+    },
+    {
+      "id": "hirundo-io/spml-chatbot-prompt-injection-malicious-refusals",
+      "source": "huggingface",
+      "discovered_at": "2026-07-13T08:52:31Z",
+      "url": "https://huggingface.co/datasets/hirundo-io/spml-chatbot-prompt-injection-malicious-refusals",
+      "description": "",
+      "size_estimate": "unknown",
+      "tags": [
+        "size_categories:10K<n<100K",
+        "format:parquet",
+        "format:optimized-parquet",
+        "modality:text",
+        "library:datasets",
+        "library:pandas",
+        "library:polars",
+        "library:mlcroissant",
+        "region:us"
+      ],
+      "relevance_keywords": [
+        "prompt injection"
+      ],
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-12T12:36:33.000Z",
+      "downloads": 208
+    },
+    {
       "id": "neuralchemy/prompt-injection-dataset-categorized",
       "source": "huggingface",
-      "discovered_at": "2026-06-15T11:48:30Z",
+      "discovered_at": "2026-07-13T08:52:31Z",
       "url": "https://huggingface.co/datasets/neuralchemy/prompt-injection-dataset-categorized",
-      "description": "\n\t\n\t\t\n\t\n\t\n\t\tPrompt Injection V2 Categorized (Threat Matrix)\n\t\n\nWelcome to Prompt Injection dataset Categorized (formerly Threat Matrix) by NeuralAlchemy! \nThis dataset is the definitive successor to our highly popular Prompt Injection dataset. While most prompt injection datasets only provide a simple safe vs unsafe binary label, this V2 dataset provides a comprehensive, 6-dimensional taxonomy of prompt injections. \nWe have demerged the multi-label architecture into clean, individual subsets… Se",
+      "description": "\n\t\n\t\t\n\t\n\t\n\t\tPrompt Injection Dataset — Categorized (Threat Matrix V2)\n\t\n\nWelcome to Prompt Injection Dataset – Categorized (formerly Threat Matrix), by Neuralchemy.\nThis is the successor to our original Prompt Injection Threat Matrix dataset. Instead of one multi-label table, this version splits the taxonomy into 7 clean, single-purpose subsets — 6 taxonomy dimensions plus a bonus ambiguity flag — so you can train a focused specialist model on each one instead of fighting multi-task learning.… S",
       "size_estimate": "unknown",
       "tags": [
         "task_categories:text-classification",
@@ -44,58 +135,24 @@
         "prompt injection",
         "jailbreak"
       ],
-      "scan_date": "2026-06-15",
-      "last_modified": "2026-06-14T09:43:58.000Z",
-      "downloads": 0
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-10T10:33:15.000Z",
+      "downloads": 508
     },
     {
-      "id": "blackXmask/RedLockX-Prompt-Injection-109K-DataSet",
+      "id": "tmdeptrai3012/prompt-injection-dataset-vi-en",
       "source": "huggingface",
-      "discovered_at": "2026-06-15T11:48:30Z",
-      "url": "https://huggingface.co/datasets/blackXmask/RedLockX-Prompt-Injection-109K-DataSet",
-      "description": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n \n  \n    The RedLockX Dataset is a large-scale curated security dataset designed for \n    evaluating and training AI systems against adversarial threats such as prompt injection, \n    jailbreak attempts, system prompt leakage, and LLM manipulation attacks.\n    \n    It contains structured real-world and synthetic attack patterns used in modern AI red-teaming.\n  \n\n  \n  📌 Dataset Overview\n\n  \n    ✔ 109,000+ labeled adversarial & safe samples \n    ✔ Multi-category threat… See the full",
+      "discovered_at": "2026-07-13T08:52:31Z",
+      "url": "https://huggingface.co/datasets/tmdeptrai3012/prompt-injection-dataset-vi-en",
+      "description": "Dataset for prompt injection samples, mix of Vietnamese and English, for classification task.\n",
       "size_estimate": "unknown",
       "tags": [
         "task_categories:text-classification",
         "language:en",
+        "language:vi",
         "license:apache-2.0",
-        "size_categories:100K<n<1M",
-        "format:csv",
-        "modality:tabular",
-        "modality:text",
-        "library:datasets",
-        "library:pandas",
-        "library:polars",
-        "library:mlcroissant",
-        "region:us",
-        "security",
-        "LLM-safety",
-        "prompt-injection",
-        "jailbreak",
-        "adversarial-ai",
-        "ai-security",
-        "llm-security",
-        "red-team"
-      ],
-      "relevance_keywords": [
-        "prompt injection",
-        "jailbreak"
-      ],
-      "scan_date": "2026-06-15",
-      "last_modified": "2026-06-12T12:34:21.000Z",
-      "downloads": 114
-    },
-    {
-      "id": "ShieldX/Context-Aware-Repository-Prompt-Injection",
-      "source": "huggingface",
-      "discovered_at": "2026-06-15T11:48:30Z",
-      "url": "https://huggingface.co/datasets/ShieldX/Context-Aware-Repository-Prompt-Injection",
-      "description": "\n\t\n\t\t\n\t\n\t\n\t\tOverview\n\t\n\nThis dataset is designed for training and evaluating AI security scanners that detect repository-aware prompt injection attacks in software development and code-assistant environments.\nRepository-aware prompt injections are malicious instructions embedded in code repositories, documentation, comments, configuration files, issue trackers, or other project artifacts that attempt to manipulate an AI system's behavior, override its instructions, exfiltrate sensitive… See the ",
-      "size_estimate": "unknown",
-      "tags": [
-        "license:apache-2.0",
-        "size_categories:1K<n<10K",
-        "format:csv",
+        "size_categories:n<1K",
+        "format:json",
         "modality:text",
         "library:datasets",
         "library:pandas",
@@ -106,90 +163,19 @@
       "relevance_keywords": [
         "prompt injection"
       ],
-      "scan_date": "2026-06-15",
-      "last_modified": "2026-06-11T16:57:51.000Z",
-      "downloads": 63
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-10T03:58:48.000Z",
+      "downloads": 23
     },
     {
-      "id": "PraneshJs/Prompt_injection_safe",
+      "id": "hirundo-io/bloom-prompt-injection-benign",
       "source": "huggingface",
-      "discovered_at": "2026-06-15T11:48:30Z",
-      "url": "https://huggingface.co/datasets/PraneshJs/Prompt_injection_safe",
+      "discovered_at": "2026-07-13T08:52:31Z",
+      "url": "https://huggingface.co/datasets/hirundo-io/bloom-prompt-injection-benign",
       "description": "",
       "size_estimate": "unknown",
       "tags": [
-        "license:mit",
-        "size_categories:1K<n<10K",
-        "format:parquet",
-        "modality:text",
-        "library:datasets",
-        "library:pandas",
-        "library:polars",
-        "library:mlcroissant",
-        "region:us"
-      ],
-      "relevance_keywords": [
-        "prompt injection"
-      ],
-      "scan_date": "2026-06-15",
-      "last_modified": "2026-06-11T13:47:03.000Z",
-      "downloads": 25
-    },
-    {
-      "id": "Xhaurya/prompt-injections",
-      "source": "huggingface",
-      "discovered_at": "2026-06-15T11:48:30Z",
-      "url": "https://huggingface.co/datasets/Xhaurya/prompt-injections",
-      "description": "\n\t\n\t\t\n\t\n\t\n\t\tDataset Card for \"deberta-v3-base-injection-dataset\"\n\t\n\nMore Information needed\n",
-      "size_estimate": "unknown",
-      "tags": [
-        "license:apache-2.0",
         "size_categories:n<1K",
-        "format:parquet",
-        "modality:text",
-        "library:datasets",
-        "library:pandas",
-        "library:polars",
-        "library:mlcroissant",
-        "region:us"
-      ],
-      "relevance_keywords": [
-        "prompt injection"
-      ],
-      "scan_date": "2026-06-15",
-      "last_modified": "2026-06-11T13:40:30.000Z",
-      "downloads": 20
-    },
-    {
-      "id": "jainsatyam26/prompt-injection-comparison",
-      "source": "huggingface",
-      "discovered_at": "2026-06-15T11:48:30Z",
-      "url": "https://huggingface.co/datasets/jainsatyam26/prompt-injection-comparison",
-      "description": "\n\t\n\t\t\n\t\n\t\n\t\tPrompt-Injection Model Comparison\n\t\n\nCompares 4 HuggingFace models on 2 prompt-injection benchmark datasets.\n\n\t\n\t\t\n\t\n\t\n\t\tModels Compared\n\t\n\n\n\t\n\t\t\nModel\nHF ID\n\n\n\t\t\nrogue-sentinel-v2\nrogue-security/prompt-injection-jailbreak-sentinel-v2\n\n\nprotectai-deberta-v3\nprotectai/deberta-v3-base-prompt-injection-v2\n\n\nqualifire-sentinel\nqualifire/prompt-injection-sentinel\n\n\nmeta-prompt-guard-86M\nmeta-llama/Prompt-Guard-86M\n\n\n\t\n\n\n\t\n\t\t\n\t\n\t\n\t\tDatasets\n\t\n\n\nrogue-security/prompt-injections-benchmark… S",
-      "size_estimate": "unknown",
-      "tags": [
-        "modality:text",
-        "region:us"
-      ],
-      "relevance_keywords": [
-        "jailbreak"
-      ],
-      "scan_date": "2026-06-15",
-      "last_modified": "2026-06-10T17:02:18.000Z",
-      "downloads": 60
-    },
-    {
-      "id": "axiotic/ogma-prompt-injection-benign",
-      "source": "huggingface",
-      "discovered_at": "2026-06-15T11:48:30Z",
-      "url": "https://huggingface.co/datasets/axiotic/ogma-prompt-injection-benign",
-      "description": "\n\t\n\t\t\n\t\n\t\n\t\togma-prompt-injection-benign\n\t\n\n~11,400 benign prompts (label 0) for training and evaluating prompt-injection\nclassifiers. They are realistic, everyday requests a user would send an AI\nassistant — the kind a naive classifier wrongly flags as attacks.\nBuilt to fix a specific failure: classifiers trained on prompt-injection datasets\noften learn that any instruction looks malicious, because the benign side of\nthose datasets is templated filler. This set provides genuine, varied benign… ",
-      "size_estimate": "unknown",
-      "tags": [
-        "task_categories:text-classification",
-        "language:en",
-        "license:apache-2.0",
-        "size_categories:10K<n<100K",
         "format:parquet",
         "format:optimized-parquet",
         "modality:text",
@@ -197,22 +183,123 @@
         "library:pandas",
         "library:polars",
         "library:mlcroissant",
-        "region:us",
-        "prompt-injection",
-        "synthetic",
-        "security"
+        "region:us"
       ],
       "relevance_keywords": [
         "prompt injection"
       ],
-      "scan_date": "2026-06-15",
-      "last_modified": "2026-06-09T18:38:21.000Z",
-      "downloads": 48
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-07T13:00:00.000Z",
+      "downloads": 79
+    },
+    {
+      "id": "hirundo-io/bloom-prompt-injection-malicious",
+      "source": "huggingface",
+      "discovered_at": "2026-07-13T08:52:31Z",
+      "url": "https://huggingface.co/datasets/hirundo-io/bloom-prompt-injection-malicious",
+      "description": "",
+      "size_estimate": "unknown",
+      "tags": [
+        "size_categories:n<1K",
+        "format:parquet",
+        "format:optimized-parquet",
+        "modality:text",
+        "library:datasets",
+        "library:pandas",
+        "library:polars",
+        "library:mlcroissant",
+        "region:us"
+      ],
+      "relevance_keywords": [
+        "prompt injection"
+      ],
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-07T12:59:59.000Z",
+      "downloads": 84
+    },
+    {
+      "id": "brady-bai/Prompt_injection_and_Sensitive_Data_exposure_detection",
+      "source": "huggingface",
+      "discovered_at": "2026-07-13T08:52:31Z",
+      "url": "https://huggingface.co/datasets/brady-bai/Prompt_injection_and_Sensitive_Data_exposure_detection",
+      "description": "",
+      "size_estimate": "unknown",
+      "tags": [
+        "license:apache-2.0",
+        "size_categories:1K<n<10K",
+        "format:json",
+        "modality:text",
+        "library:datasets",
+        "library:pandas",
+        "library:polars",
+        "library:mlcroissant",
+        "region:us"
+      ],
+      "relevance_keywords": [
+        "prompt injection"
+      ],
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-07T03:54:07.000Z",
+      "downloads": 32
+    },
+    {
+      "id": "OnerAYTAS/Turkish_prompt_injection_jailbreak_dataset",
+      "source": "huggingface",
+      "discovered_at": "2026-07-13T08:52:31Z",
+      "url": "https://huggingface.co/datasets/OnerAYTAS/Turkish_prompt_injection_jailbreak_dataset",
+      "description": "\n[!NOTE]\n\n\t\n\t\t\n\t\n\t\n\t\tTürkçe Prompt Injection & Jailbreak Veri Seti\n\t\n\n📌 Atıf / Citation\nBu veri setini akademik çalışmalarda, model değerlendirmelerinde, güvenlik analizlerinde veya türev araştırmalarda kullanırsanız lütfen aşağıdaki makaleye atıf veriniz:\nAytaş, Ö.; Şen, T.; Diri, B.; Biricik, G.; Bayram, M.A. Benchmarking Prompt Injection Attacks on LLMs: Turkish Vulnerability Assessment and English Comparative Analysis. Applied Sciences 2026, 16(13), 6740.… See the full description on the dat",
+      "size_estimate": "unknown",
+      "tags": [
+        "task_categories:text-generation",
+        "language:tr",
+        "language:en",
+        "license:cc-by-nc-sa-4.0",
+        "size_categories:10K<n<100K",
+        "region:us",
+        "prompt-injection",
+        "jailbreak",
+        "llm-security",
+        "safety",
+        "turkish",
+        "benchmark"
+      ],
+      "relevance_keywords": [
+        "prompt injection",
+        "jailbreak"
+      ],
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-06T17:08:14.000Z",
+      "downloads": 135
+    },
+    {
+      "id": "DAXAAI-Research/prompt_injection_v8",
+      "source": "huggingface",
+      "discovered_at": "2026-07-13T08:52:31Z",
+      "url": "https://huggingface.co/datasets/DAXAAI-Research/prompt_injection_v8",
+      "description": "",
+      "size_estimate": "unknown",
+      "tags": [
+        "size_categories:100K<n<1M",
+        "format:parquet",
+        "format:optimized-parquet",
+        "modality:text",
+        "library:datasets",
+        "library:pandas",
+        "library:polars",
+        "library:mlcroissant",
+        "region:us"
+      ],
+      "relevance_keywords": [
+        "prompt injection"
+      ],
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-06T13:12:10.000Z",
+      "downloads": 87
     },
     {
       "id": "chiruu12/jailbreak-dojo-corpus",
       "source": "huggingface",
-      "discovered_at": "2026-06-15T11:48:31Z",
+      "discovered_at": "2026-07-13T08:52:32Z",
       "url": "https://huggingface.co/datasets/chiruu12/jailbreak-dojo-corpus",
       "description": "",
       "size_estimate": "unknown",
@@ -230,41 +317,135 @@
       "relevance_keywords": [
         "jailbreak"
       ],
-      "scan_date": "2026-06-15",
-      "last_modified": "2026-06-15T10:00:51.000Z",
-      "downloads": 42
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-10T09:29:47.000Z",
+      "downloads": 153
     },
     {
-      "id": "chiruu12/jailbreak-dojo-leaderboard",
+      "id": "MarkrAI/ko-jailbreak",
       "source": "huggingface",
-      "discovered_at": "2026-06-15T11:48:31Z",
-      "url": "https://huggingface.co/datasets/chiruu12/jailbreak-dojo-leaderboard",
-      "description": "",
+      "discovered_at": "2026-07-13T08:52:32Z",
+      "url": "https://huggingface.co/datasets/MarkrAI/ko-jailbreak",
+      "description": "\n\t\n\t\t\n\t\n\t\n\t\t🔓 ko-jailbreak\n\t\n\n공개된 영어 jailbreak(탈옥) 벤치마크들을 한국어로 번역·정제하고 소스 간 중복을 제거해 하나로 통합한 한국어 jailbreak 평가 벤치마크입니다. 한국어 LLM·안전 가드가 실제 탈옥 공격에 얼마나 견고한지 측정합니다.\n\n💻 GitHub (코드·파이프라인·리포트): https://github.com/Marker-Inc-Korea/KO-JailBreak\n📊 규모: 11,441개 (behavior 10,303 + template 1,138)\n\n새로운 공격 기법을 제안하지 않습니다. 이미 검증된 공개 영어 jailbreak 데이터셋들을 재배포가 허용되는 라이선스(MIT/Apache-2.0)에 한해 선별하고, 한국어로 번역·품질 검수한 뒤 소스 간 중복을 제거해 한국어 환경에서 바로 쓸 수 있는 단일 벤치마크로 재구성했습니다.\n\n\t\n\t\t\n\t\n\t\n\t\t데이터 구성\n\t\n\njailbreak 벤치마크의 두 축을 함께 담아… See th",
       "size_estimate": "unknown",
       "tags": [
-        "size_categories:n<1K",
-        "format:json",
-        "modality:tabular",
-        "modality:text",
-        "library:datasets",
-        "library:pandas",
-        "library:polars",
-        "library:mlcroissant",
-        "region:us"
+        "task_categories:text-generation",
+        "language:ko",
+        "language:en",
+        "license:other",
+        "size_categories:10K<n<100K",
+        "arxiv:2402.04249",
+        "arxiv:2404.01318",
+        "arxiv:2307.15043",
+        "arxiv:2402.10260",
+        "arxiv:2402.05044",
+        "arxiv:2402.19085",
+        "arxiv:2308.03825",
+        "arxiv:2307.08487",
+        "arxiv:2309.10253",
+        "region:us",
+        "jailbreak",
+        "safety",
+        "red-teaming",
+        "korean",
+        "llm-safety"
       ],
       "relevance_keywords": [
         "jailbreak"
       ],
-      "scan_date": "2026-06-15",
-      "last_modified": "2026-06-15T09:50:51.000Z",
-      "downloads": 36
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-08T08:40:32.000Z",
+      "downloads": 21
     },
     {
       "id": "youbin2014/JailbreakDB",
       "source": "huggingface",
-      "discovered_at": "2026-06-15T11:48:31Z",
+      "discovered_at": "2026-07-13T08:52:32Z",
       "url": "https://huggingface.co/datasets/youbin2014/JailbreakDB",
-      "description": "\n\t\n\t\t\n\t\n\t\n\t\tJailbreakDB\n\t\n\nTwo large-scale, curated text-only datasets for LLM safety research:\n\ntext_jailbreak_unique.csv (~6.6M rows): jailbreak/adversarial prompts\ntext_regular_unique.csv (~5.7M rows): benign prompts\n\nEach record includes: system_prompt, user_prompt, jailbreak (0/1), source, tactic.\nThis release also includes promptsecurity_eval/, a separate evaluation-result\nsubtree generated by the PromptSecurity evaluation protocol. The CSV files are\nprompt-level corpora;… See the full des",
+      "description": "\n\t\n\t\t\n\t\n\t\n\t\tJailbreakDB\n\t\n\nJailbreakDB is a large-scale prompt corpus for LLM safety and prompt-security\nresearch. It contains two deduplicated, text-only CSV files:\n\ntext_jailbreak_unique.csv (~6.6M rows): jailbreak and adversarial prompts.\ntext_regular_unique.csv (~5.7M rows): benign prompts.\n\nEach row stores the prompt text and lightweight source metadata. The associated\nPromptSecurity evaluation measurements are maintained as a separate Hugging Face\ndataset:… See the full description on the ",
+      "size_estimate": "unknown",
+      "tags": [
+        "task_categories:text-classification",
+        "language:en",
+        "license:cc-by-4.0",
+        "arxiv:2510.15476",
+        "region:us",
+        "llm-safety",
+        "jailbreak",
+        "prompts",
+        "security"
+      ],
+      "relevance_keywords": [
+        "jailbreak",
+        "adversarial prompt",
+        "LLM safety"
+      ],
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-08T07:15:50.000Z",
+      "downloads": 548
+    },
+    {
+      "id": "itsVentie/llm-red-teaming-corpus",
+      "source": "huggingface",
+      "discovered_at": "2026-07-13T08:52:33Z",
+      "url": "https://huggingface.co/datasets/itsVentie/llm-red-teaming-corpus",
+      "description": "",
+      "size_estimate": "unknown",
+      "tags": [
+        "license:apache-2.0",
+        "region:us"
+      ],
+      "relevance_keywords": [
+        "red teaming LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-12T20:17:13.000Z",
+      "downloads": 0
+    },
+    {
+      "id": "quickium/prompt-security-v0",
+      "source": "huggingface",
+      "discovered_at": "2026-07-13T08:52:34Z",
+      "url": "https://huggingface.co/datasets/quickium/prompt-security-v0",
+      "description": "\n\t\n\t\t\n\t\n\t\n\t\tQuickium Prompt Security v0\n\t\n\nA multilingual corpus for prompt-security classification — prompt injection, jailbreak, and\nPII exposure — curated and published by Quickium. 365,024 prompts from 12 public datasets,\nnormalized to a single schema with a binary safety label and a domain tag, partitioned into\ntwo splits by license posture:\n\n\t\n\t\t\nSplit\nRows\nSources\nLicense posture\n\n\n\t\t\ntrain\n71,117\n10\nCommercial-clean (permissive + one GPL-3.0 slice + one ODC-BY source)\n\n\ntrain_nc\n293… See",
+      "size_estimate": "unknown",
+      "tags": [
+        "task_categories:text-classification",
+        "language:en",
+        "language:de",
+        "language:es",
+        "language:fr",
+        "language:it",
+        "language:sv",
+        "language:nl",
+        "language:pt",
+        "language:hi",
+        "language:ja",
+        "language:vi",
+        "language:th",
+        "language:zh",
+        "language:ko",
+        "language:ca",
+        "language:mr",
+        "language:ro",
+        "language:af",
+        "language:da"
+      ],
+      "relevance_keywords": [
+        "prompt injection",
+        "jailbreak",
+        "prompt security"
+      ],
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-10T19:27:19.000Z",
+      "downloads": 28
+    },
+    {
+      "id": "youbin2014/PromptSecurity-Eval",
+      "source": "huggingface",
+      "discovered_at": "2026-07-13T08:52:34Z",
+      "url": "https://huggingface.co/datasets/youbin2014/PromptSecurity-Eval",
+      "description": "\n\t\n\t\t\n\t\n\t\n\t\tPromptSecurity-Eval\n\t\n\nPromptSecurity-Eval is a standalone evaluation-result dataset generated by the\nPromptSecurity evaluation protocol. It intentionally uses a schema separate from\nthe JailbreakDB prompt corpus: JailbreakDB stores prompt text, while\nPromptSecurity-Eval stores CSV measurements over configured <model, attack, defense, dataset, judger> tuples.\nRelated resources:\n\nPrompt corpus: https://huggingface.co/datasets/youbin2014/JailbreakDB\nCode:… See the full description on t",
       "size_estimate": "unknown",
       "tags": [
         "task_categories:text-classification",
@@ -282,1135 +463,1939 @@
         "region:us",
         "llm-safety",
         "jailbreak",
-        "prompts",
+        "prompt-security",
+        "evaluation",
         "security"
       ],
       "relevance_keywords": [
-        "jailbreak",
-        "adversarial prompt",
-        "LLM safety"
+        "jailbreak"
       ],
-      "scan_date": "2026-06-15",
-      "last_modified": "2026-06-12T03:16:11.000Z",
-      "downloads": 254
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-08T07:14:01.000Z",
+      "downloads": 53
     },
     {
-      "id": "ahmedmostafa0521/All-Prompt-Jailbreak",
+      "id": "jang1563/llm-sfm-safety-eval",
       "source": "huggingface",
-      "discovered_at": "2026-06-15T11:48:31Z",
-      "url": "https://huggingface.co/datasets/ahmedmostafa0521/All-Prompt-Jailbreak",
-      "description": "",
+      "discovered_at": "2026-07-13T08:52:35Z",
+      "url": "https://huggingface.co/datasets/jang1563/llm-sfm-safety-eval",
+      "description": "\n\t\n\t\t\n\t\n\t\n\t\tLLM x SFM Safety Evaluation\n\t\n\nWhen a general-purpose language model interprets the output of a specialist\nscience foundation model (a protein, genomic, RNA, or chemistry model), does its\nsafety behavior recognize the scientific content, or only the surface form of the\nrequest?\nThis repository is the empirical core of a study of that question: the evaluation\nharness, the redacted aggregate results, and the measurement specifications behind\nfour findings about how deployed Claude… See",
       "size_estimate": "unknown",
       "tags": [
-        "task_categories:text-generation",
-        "task_categories:table-question-answering",
-        "task_categories:fill-mask",
+        "task_categories:text-classification",
         "language:en",
-        "license:mit",
-        "size_categories:n<1K",
-        "format:parquet",
-        "modality:image",
+        "license:apache-2.0",
+        "size_categories:10K<n<100K",
+        "format:json",
         "modality:text",
         "library:datasets",
         "library:pandas",
         "library:polars",
         "library:mlcroissant",
         "region:us",
-        "finance",
-        "code"
+        "ai-safety",
+        "biosecurity",
+        "science-foundation-models",
+        "llm-evaluation",
+        "refusal-calibration"
       ],
       "relevance_keywords": [
-        "jailbreak"
+        "LLM safety"
       ],
-      "scan_date": "2026-06-15",
-      "last_modified": "2026-06-09T06:41:06.000Z",
-      "downloads": 462
+      "scan_date": "2026-07-13",
+      "last_modified": "2026-07-12T05:01:55.000Z",
+      "downloads": 845
     },
     {
-      "id": "http://arxiv.org/abs/2606.14702v1",
+      "id": "http://arxiv.org/abs/2607.09655v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14702v1",
-      "description": "OmniVideo-100K: A Dataset for Audio-Visual Reasoning through Structured Scripts and Evidence Chains",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09655v1",
+      "description": "OpenLongTail: Generative Scaling of Long-Tail Driving Data",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
         "all:prompt injection LLM"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:59:55Z",
-      "summary": "Current automated pipelines for audio-visual Question Answering (QA) generally adopt a ``video-caption-QA'' paradigm. However, these methods typically segment videos into short clips and generate separate descriptions for audio and visual modalities. This decoupled processing severs inherent associations between sounds and their visual sources, while independent clip processing often causes inconsistent descriptions of the same entity across segments. Furthermore, coupling long-text comprehensio",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:54:14Z",
+      "summary": "Scaling robust driving policies is fundamentally bottlenecked by the scarcity of edge cases in curated datasets. While the real world continuously captures these critical events, such long-tail events remain underutilized when collected from heterogeneous sources. Specifically, diverse but valuable in-the-wild long-tail videos lack the full view coverage required for training policy models, often missing multi-view poses or originating solely from monocular dash cameras. This modality gap preven",
       "links": [
-        "https://arxiv.org/abs/2606.14702v1",
-        "https://arxiv.org/pdf/2606.14702v1"
+        "https://arxiv.org/abs/2607.09655v1",
+        "https://arxiv.org/pdf/2607.09655v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14700v1",
+      "id": "http://arxiv.org/abs/2607.09653v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14700v1",
-      "description": "RepFusion: Leveraging Multimodal Priors for Denoising in Representation Space",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09653v1",
+      "description": "VEXAIoT: Autonomous IoT Vulnerability EXploitation using AI Agents",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
         "all:prompt injection LLM"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:59:51Z",
-      "summary": "Large language models (LLMs) are widely used in text-to-image (T2I) systems, but they are typically limited to text encoding, while denoising is handled by newly trained generative backbones. The emergence of representation autoencoders (RAEs) shifts the generation target toward semantically structured visual representations, creating a latent space that is more compatible with pretrained LLM priors. Inspired by multimodal LLMs (MLLMs), where an MLP projector is sufficient to align clean visual ",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:52:29Z",
+      "summary": "Internet of Things (IoT) systems are inherently vulnerable due to constrained hardware, outdated firmware, and insecure default configurations, creating a need for scalable and adaptive security testing approaches. While recent adoptions of Large Language Model (LLM) agents have demonstrated promise in penetration testing and Capture-the-Flag (CTF) environments, their application to IoT specific vulnerabilities remains unexplored. This paper presents an autonomous multi-agent framework, referred",
       "links": [
-        "https://arxiv.org/abs/2606.14700v1",
-        "https://arxiv.org/pdf/2606.14700v1"
+        "https://arxiv.org/abs/2607.09653v1",
+        "https://arxiv.org/pdf/2607.09653v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14699v1",
+      "id": "http://arxiv.org/abs/2607.09628v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14699v1",
-      "description": "Instruct-Particulate: Scaling Feed-Forward 3D Object Articulation with Kinematic Control",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09628v1",
+      "description": "Indirect and Direct AI Scaffolding for Computational Problem Posing: A Pilot Experience Report",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
         "all:prompt injection LLM"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:59:36Z",
-      "summary": "Reconstructing articulated 3D objects is important for animation, gaming, and robotic simulations. Recent neural networks can estimate the articulated structure of 3D objects, but their generalization remains limited by the scarcity of annotated data for this task. To address this gap, we introduce Instruct-Particulate, a model that takes a 3D mesh together with a target kinematic specification, including part descriptions, connectivity, joint types, and optional point prompts, and predicts the ",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:25:34Z",
+      "summary": "Problem posing is a valuable learning activity in computing education, encouraging learners to actively construct, refine, and reflect on problems rather than simply solving them. This experience report presents the design and pilot deployment of two LLM-powered scaffolding systems for supporting problem posing across two computational scenarios with different levels of task openness. Both systems assessed student-generated problems using Bloom's Taxonomy-based criteria and applied the same asse",
       "links": [
-        "https://arxiv.org/abs/2606.14699v1",
-        "https://arxiv.org/pdf/2606.14699v1"
+        "https://arxiv.org/abs/2607.09628v1",
+        "https://arxiv.org/pdf/2607.09628v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14695v1",
+      "id": "http://arxiv.org/abs/2607.09625v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14695v1",
-      "description": "Persona-Pruner: Sculpting Lightweight Models for Role-Playing",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09625v1",
+      "description": "On the accretivity and m-accretivity of Laplacians and porous medium-type operators on graphs",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
         "all:prompt injection LLM"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:58:08Z",
-      "summary": "Language Models (LMs) have shown remarkable potential as role-playing chatbots, delivering consistent, stylized interactions when given a specification of a character or user persona. However, applying these capabilities to real-world applications (e.g., ecosystems with numerous NPCs interacting simultaneously) exposes a critical inefficiency due to the excessive computational cost. In this paper, we question the necessity of dedicating a full, generalist model to a single persona, hypothesizing",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:23:48Z",
+      "summary": "We study the accretivity and m-accretivity of Laplacian and porous medium-type operators on weighted graphs. In particular, we give several conditions that imply these properties for maximal operators and investigate when these operators agree with various restrictions. For porous medium-type operators on $\\ell^1$ and for Laplacians on $\\ell^p$ for $p \\in [1,\\infty)$, we show that there always exists a dense subset of the domain on which the maximal operator is m-accretive. As a consequence, we ",
       "links": [
-        "https://arxiv.org/abs/2606.14695v1",
-        "https://arxiv.org/pdf/2606.14695v1"
+        "https://arxiv.org/abs/2607.09625v1",
+        "https://arxiv.org/pdf/2607.09625v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09616v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09616v1",
+      "description": "LLM for EDA in Front-End Design: Challenges and Opportunities",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:15:54Z",
+      "summary": "As chip complexity increases and time-to-market pressures grow, front-end design has become a critical bottleneck in chip development. Recently, Large Language Models (LLMs) have shown great potential in Electronic Design Automation (EDA). Beyond specification understanding, LLMs show the potential to serve as a unified intelligent interface for hardware description language (HDL) generation, testbench construction, and design space exploration. The rise of agentic AI, represented by pioneering ",
+      "links": [
+        "https://arxiv.org/abs/2607.09616v1",
+        "https://arxiv.org/pdf/2607.09616v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09603v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09603v1",
+      "description": "Mosaic: Runtime-Efficient Multi-Agent Embodied Planning",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T16:57:37Z",
+      "summary": "LLM-based multi-agent embodied planning remains impractical due to prohibitively high execution latency. We identify failed actions as the dominant bottleneck, stemming from two core challenges: inaccurate state tracking under partial observability and inefficient coordination that produces redundant or conflicting actions. We introduce Mosaic, a runtime-efficient multi-agent planning framework that addresses both challenges. Mosaic maintains accurate yet lightweight state tracking through agent",
+      "links": [
+        "https://arxiv.org/abs/2607.09603v1",
+        "https://arxiv.org/pdf/2607.09603v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09600v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09600v1",
+      "description": "Agora: Enhancing LLM Agent Reasoning Via Auction-Based Task Allocation",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T16:54:52Z",
+      "summary": "Enhancing the reasoning capabilities of large language model (LLM) agents requires effective orchestration of diverse expert models and tools. However, existing frameworks typically call APIs based on coarse-grained matching between tasks and the functions of expert models or tools, while overlooking critical factors such as performance variability and cost efficiency among functionally similar alternatives. To address this, we propose Agora, a framework that introduces an incentive-compatible a",
+      "links": [
+        "https://arxiv.org/abs/2607.09600v1",
+        "https://arxiv.org/pdf/2607.09600v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09583v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09583v1",
+      "description": "Promptable Concept Segmentation from Above: Evaluating SAM 3's Zero-Shot and One-Shot Capabilities in Remote Sensing",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T16:33:05Z",
+      "summary": "The deployment of large-scale foundation models, such as the Segment Anything Model 3 (SAM 3), promises a transition toward open-vocabulary, training-free computer vision. However, their capacity to generalize out-of-distribution to the complex, top-down geometric structures of Earth Observation imagery remains largely unquantified. Driven by SAM 3's performance disparities in highly specialized domains, we present a comprehensive, multi-task empirical evaluation across remote sensing scene clas",
+      "links": [
+        "https://arxiv.org/abs/2607.09583v1",
+        "https://arxiv.org/pdf/2607.09583v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09581v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09581v1",
+      "description": "Wan-Dancer: A Hierarchical Framework for Minute-scale Coherent Music-to-Dance Generation",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T16:30:29Z",
+      "summary": "Generating long-duration, high-definition, and rhythmically synchronized dance videos directly from music remains a significant challenge, primarily due to the temporal constraints of current diffusion models, which typically fail beyond 20 seconds. Existing approaches, whether they rely on intermediate 3D skeletons or on end-to-end video synthesis, suffer from temporal drift, identity inconsistency, and repetitive motion patterns when extended to longer horizons. To address these limitations, w",
+      "links": [
+        "https://arxiv.org/abs/2607.09581v1",
+        "https://arxiv.org/pdf/2607.09581v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09576v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09576v1",
+      "description": "Conceptual Networks for Cross-Linguistic Idiomatic Expressions:A Feature-Based Graph Approach",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T16:25:51Z",
+      "summary": "We present an interpretable network-based framework for representing idiomatic and figurative meaning across eight typologically diverse languages, totaling 160 conventional expressions, the large majority of which are idiomatic. Each expression is annotated with binary conceptual features (containment, concealment, emotional, social, etc.) derived from cognitive-linguistic theory, and pairwise Jaccard similarities define a weighted graph. Community detection reveals that idioms cluster by conce",
+      "links": [
+        "https://arxiv.org/abs/2607.09576v1",
+        "https://arxiv.org/pdf/2607.09576v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09564v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09564v1",
+      "description": "Bidirectional Elaborators à la Carte",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T16:10:31Z",
+      "summary": "Surface syntax in proof assistants like Rocq, Lean, Agda, and Idris is highly implicit, lacking many details that are needed for user-written code to denote precisely defined mathematical objects. Elaboration is an algorithm that accounts for these details by translating surface syntax to an explicit enough core syntax. The reliability and predictability of elaboration relies on several critical properties of the core type system, including decidability of judgemental equality and the injectivit",
+      "links": [
+        "https://arxiv.org/abs/2607.09564v1",
+        "https://arxiv.org/pdf/2607.09564v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09553v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09553v1",
+      "description": "Writing Bug Reports for Software Repair Agents: What Information Matters Most?",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T16:00:57Z",
+      "summary": "Software development is increasingly moving toward agentic-first workflows. This includes AI agents responsible for generating initial fixes for submitted issue reports. In this setting, issue reports are no longer merely documentation for human maintainers; they become the primary task specification for the agent. However, little is known about how such reports should be written to maximize the agent's chances of producing a correct fix. We study what makes a bug report agent-ready. Starting fr",
+      "links": [
+        "https://arxiv.org/abs/2607.09553v1",
+        "https://arxiv.org/pdf/2607.09553v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09544v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09544v1",
+      "description": "The Count Is There, but Misaligned: Understanding and Correcting Counting Failures in VLMs",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T15:50:54Z",
+      "summary": "Despite strong performance on many multimodal tasks, vision-language models (VLMs) still struggle with basic object counting. We investigate whether this reflects missing internal knowledge or a gap between internal representations and verbalized outputs. Training simple probes on activations from four VLMs across five counting datasets reveals that nonlinear probes can reliably detect counting errors, suggesting that VLMs often encode the correct count even when they output the wrong answer. SV",
+      "links": [
+        "https://arxiv.org/abs/2607.09544v1",
+        "https://arxiv.org/pdf/2607.09544v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09543v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09543v1",
+      "description": "CoCoT-EEG: Contrastive-Pretrained Multiscale Convolutional Transformer for EEG Decoding",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T15:48:15Z",
+      "summary": "Self-supervised pretrained foundation models (FM) have shown early promise for non-invasive electroencephalogram (EEG) decoding applications. Many recent large-scale models converged on the approach of tokenizing raw EEG followed by masked reconstruction pretraining. However, this recipe has been shown to be suboptimal for data, like EEG, with high noise amplitude and information confined to limited dimensions such as narrow frequency bands. Building on this insight, we develop a novel contrasti",
+      "links": [
+        "https://arxiv.org/abs/2607.09543v1",
+        "https://arxiv.org/pdf/2607.09543v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09524v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09524v1",
+      "description": "Balancing Usefulness and Naturalness: An LLM-based Curation Pipeline for Code Review Comments",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T15:33:47Z",
+      "summary": "Code review is a cornerstone of software development, where reviewers provide feedback through written comments to ensure code quality, maintainability, and correctness. The effectiveness of this process hinges on the quality of review comments. As large language models (LLMs) gain traction in automating code review tasks, the utility of these systems is directly limited by the quality of the datasets on which they are trained. Unfortunately, existing code review datasets are often noisy, incons",
+      "links": [
+        "https://arxiv.org/abs/2607.09524v1",
+        "https://arxiv.org/pdf/2607.09524v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09521v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09521v1",
+      "description": "SAGEAgent: A Self-Evolving Agent for Cost-Aware Modality Acquisition in Multimodal Survival Prediction",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T15:32:11Z",
+      "summary": "Does every cancer patient truly need a complete diagnostic workup for accurate survival prediction? In multimodal clinical oncology, diagnostic modalities follow a clinically mandated order of escalating burden -- from demographics collected at intake to genomic profiling requiring specialized tissue analysis. Current multimodal survival methods either assume all modalities are available or passively handle missing data, but none actively reason about whether acquiring the next modality is justi",
+      "links": [
+        "https://arxiv.org/abs/2607.09521v1",
+        "https://arxiv.org/pdf/2607.09521v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09520v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09520v1",
+      "description": "Seeing is Free, Speaking is Not: Uncovering the True Energy Bottleneck in Edge VLM Inference",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T15:31:06Z",
+      "summary": "Vision-Language Models (VLMs) are the perceptual backbone of embodied AI, but their energy footprint on edge hardware remains poorly understood. Existing efficiency efforts focus predominantly on reducing visual tokens, implicitly treating visual processing as the dominant energy cost. We overturn this implicit assumption through the first systematic energy profiling of on-device VLM inference, spanning five models across three architecture families, four input resolutions, and two hardware plat",
+      "links": [
+        "https://arxiv.org/abs/2607.09520v1",
+        "https://arxiv.org/pdf/2607.09520v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09518v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09518v1",
+      "description": "Learning When to Intervene on Habitual Behaviors: A Case Study in Oral Health Care",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T15:28:15Z",
+      "summary": "A central challenge for digital health interventions aimed at improving habitual behaviors is deciding when to deliver an intervention prompt. For many daily habits, such as tooth brushing or eating, individuals tend to act around a usual time of day, but this timing is not fixed and can shift as routines evolve. When intervention timing is selected in advance and held constant throughout a study, it can gradually become misaligned with behavior, causing interventions to potentially arrive after",
+      "links": [
+        "https://arxiv.org/abs/2607.09518v1",
+        "https://arxiv.org/pdf/2607.09518v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09510v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09510v1",
+      "description": "Failure as a Process: An Anatomy of CLI Coding Agent Trajectories",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T15:25:56Z",
+      "summary": "Large language model (LLM) coding agents are increasingly deployed to autonomously perform software engineering tasks in terminal-based environments, making their reliability a growing concern. Existing empirical studies investigate why coding agents fail, yet they largely treat failure as a final outcome rather than a temporal process, providing limited insight into how failures emerge, evolve, and become unrecoverable. We present the first large-scale empirical study of CLI coding-agent failur",
+      "links": [
+        "https://arxiv.org/abs/2607.09510v1",
+        "https://arxiv.org/pdf/2607.09510v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09493v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:39Z",
+      "url": "http://arxiv.org/abs/2607.09493v1",
+      "description": "Shared Selective Persistent Memory for Agentic LLM Systems",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:prompt injection LLM"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T15:07:00Z",
+      "summary": "Agentic LLM systems that generate code through multi-turn tool use face a fundamental context problem: each session starts from zero, discarding the configuration choices, domain constraints, data schemas, and tool-use patterns that made previous sessions productive. Naively persisting entire conversation histories is token-inefficient and counterproductive: irrelevant context degrades generation quality. We introduce shared selective persistent memory, an architecture that identifies and retain",
+      "links": [
+        "https://arxiv.org/abs/2607.09493v1",
+        "https://arxiv.org/pdf/2607.09493v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09662v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09662v1",
+      "description": "PHINN-EEG: Topological Time-Series Analysis of Dream-State EEG -- Dynamic Betti Curves for Dream Content Classification and Topology-Conditioned Neural Signal Synthesis",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:59:45Z",
+      "summary": "Current electroencephalography (EEG)-based dream detection relies on power spectral density (PSD) and statistical moment features, achieving a state-of-the-art area under the receiver operating characteristic curve (AUC) of approximately 0.70 on the DREAM database (Wong et al., 2025, Nature Communications). We introduce PHINN-EEG (Persistent Homology Inspired Neural Network for EEG), the first topological time-series framework for dream mentation analysis. Using sliding-window Takens delay embed",
+      "links": [
+        "https://arxiv.org/abs/2607.09662v1",
+        "https://arxiv.org/pdf/2607.09662v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09661v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09661v1",
+      "description": "PanoWorld: Real-World Panoramic Generation",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:59:32Z",
+      "summary": "In this work, we aim to address the challenge of long-range memory in panoramic world models by exploiting the rotation-equivariant property of omnidirectional representations, where rotation can be treated as an implicit geometric transformation.Building on this insight, we propose PanoWorld, which simplifies camera trajectories into translations via fixed headings for both current-action modeling and long-range memory through Dense Panoramic Ray-Conditioning (DPRC) and Geometry-aware Memory Au",
+      "links": [
+        "https://arxiv.org/abs/2607.09661v1",
+        "https://arxiv.org/pdf/2607.09661v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09660v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09660v1",
+      "description": "Nonlinear particle detectors across the Rindler firewall",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:59:23Z",
+      "summary": "We investigate Unruh-DeWitt detectors coupled to composite observables of a quantum scalar field, including quadratic coupling to the field momentum and coupling to the local energy density. We develop a distributional framework for evaluating the corresponding detector response functions and apply it to detectors crossing the Rindler firewall. While we recover the finite response of the derivative-coupling model, we show that quadratic momentum coupling leads to ill-defined products of distribu",
+      "links": [
+        "https://arxiv.org/abs/2607.09660v1",
+        "https://arxiv.org/pdf/2607.09660v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09657v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09657v1",
+      "description": "Scalable Visual Pretraining for Language Intelligence",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:57:03Z",
+      "summary": "The rapid progress of large foundation models has been driven predominantly by pretraining on large-scale text corpora. However, many forms of knowledge are conveyed through visual representations, where figures, typeset equations, and page layouts carry rich information that cannot be faithfully or completely captured by text alone. Yet current pretraining approaches discard these visual cues by converting visually rich sources, such as documents and web pages, into plain text for learning lang",
+      "links": [
+        "https://arxiv.org/abs/2607.09657v1",
+        "https://arxiv.org/pdf/2607.09657v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09654v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09654v1",
+      "description": "Evolution of Accuracy and Visual-Cognitive Errors in a Decade of Vision-Language AI Models",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:53:37Z",
+      "summary": "Vision language models (VLMs) have made remarkable progress in visual reasoning during the last decade. Most evaluations have used simple scenes (MS-COCO) that do not showcase complex human interactions or behaviors, only a handful of non-curated human descriptions as a benchmark, and have not focused on understanding the model's error types. Here, we introduce the Complex Social Behavior (CSB) dataset, containing 100 images depicting complex social interactions/behaviors. We analyze the progres",
+      "links": [
+        "https://arxiv.org/abs/2607.09654v1",
+        "https://arxiv.org/pdf/2607.09654v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09652v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09652v1",
+      "description": "Silicon-Germanium Heterostructures with Enhanced Valley Splitting for Spin Qubits",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:50:38Z",
+      "summary": "Achieving valley splittings well in excess of the thermal energy of electrons and avoiding valley excitations is essential for the consistent initialization, operation and readout of gate-defined Si spin qubits. In this work, we present a device-level optimization strategy for pushing valley splittings to between 1 and 5 meV, well beyond values reported in nearly all previous theoretical studies. Using device-scale simulations that incorporate atomistic alloy disorder through a 1D tight-binding ",
+      "links": [
+        "https://arxiv.org/abs/2607.09652v1",
+        "https://arxiv.org/pdf/2607.09652v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09651v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09651v1",
+      "description": "Local Determinacy of Quantum Master Equations and a Mechanical Interpretation of the Multi-Mode Jaynes-Cummings and Central Spin Models",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:49:49Z",
+      "summary": "We propose a novel formulation of master equations for open systems wherein the evolution of a state is determined solely by its local behaviour at any point of time. Specifically, our formulation allows for a local interpretation of the workings of beyond-Markovian dynamics as opposed to the more common conception that non-Markovian state evolution is affected by its cumulative past history. Quite interestingly, local determinacy is found prevalent in quantum dynamics. We illustrate the advanta",
+      "links": [
+        "https://arxiv.org/abs/2607.09651v1",
+        "https://arxiv.org/pdf/2607.09651v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09650v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09650v1",
+      "description": "Revisiting Euler-Angle Regression with Kolmogorov-Arnold Networks",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:48:06Z",
+      "summary": "In many real-world systems, including articulated robots and biomechanical models, rotations are defined in joint space and naturally parameterized by Euler angles with bounded ranges. Yet regressing Euler angles remains challenging, as their discontinuities and singularities often destabilize training. In this work, we revisit Euler-angle regression and show that its effectiveness depends critically on the interaction between rotation representation, regression architecture, and domain constrai",
+      "links": [
+        "https://arxiv.org/abs/2607.09650v1",
+        "https://arxiv.org/pdf/2607.09650v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09649v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09649v1",
+      "description": "ConceptSMILE: Auditing the Trustworthiness of Concept-Based Explainable AI",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:47:38Z",
+      "summary": "Concept-based explainable artificial intelligence (AI) can make model reasoning more human-understandable, but concept-level outputs are not automatically trustworthy. We introduce ConceptSMILE, a model-agnostic perturbation-based auditing framework for evaluating the reliability of concept-based explanations. Rather than replacing SMILE, ConceptSMILE extends its perturbation-based logic from feature- or region-level attribution to the auditing of human-understandable concept explanations. The f",
+      "links": [
+        "https://arxiv.org/abs/2607.09649v1",
+        "https://arxiv.org/pdf/2607.09649v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09647v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09647v1",
+      "description": "Spatial decomposition of Little Red Dots with JWST/NIRSpec IFU into broad-line red cores and narrow-line blue host galaxies",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:45:13Z",
+      "summary": "Little Red Dots (LRDs) are a population of compact red sources discovered by the James Webb Space Telescope (JWST). Imaging and spectroscopy have shown that LRDs exhibit a complex spectrum with a ``V-shaped\" continuum, broad Balmer emission lines, and in some cases Balmer absorption. While the physical origin of these components remains debated, recent studies propose that they arise from a compact central engine likely hosting a rapidly growing black hole embedded within a more extended host ga",
+      "links": [
+        "https://arxiv.org/abs/2607.09647v1",
+        "https://arxiv.org/pdf/2607.09647v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09646v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09646v1",
+      "description": "Forbidding anticomplete planar minors: Induced Erdős--Pósa property and Maximum Independent Set in QP",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:43:39Z",
+      "summary": "The Erdős--Pósa theorem asserts that every graph $G$ with no $k$ disjoint cycles contains a set $X$ of $f(k)$ vertices such that $G\\setminus X$ has no cycle. Robertson and Seymour showed that this Erdős--Pósa property also holds for $H$-minor models of any planar graph $H$. Equivalently, if $G$ has no $k$ minor models of $H$ pairwise at distance at least 1 (i.e. disjoint), then one can remove $f(k,H)$ balls of radius 0 (i.e. vertices) to make the graph $H$-minor free.\n  We show that this coarse ",
+      "links": [
+        "https://arxiv.org/abs/2607.09646v1",
+        "https://arxiv.org/pdf/2607.09646v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09645v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09645v1",
+      "description": "Deep Gaussian Processes on Directed Acyclic Graphs",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:41:11Z",
+      "summary": "Many real-world processes can be represented as compositions of functions along a directed acyclic graph (DAG). In causal modelling, these correspond to the underlying mechanisms; in engineering, to multiple fidelity levels; and in gene-regulatory networks, to transcription factors. These functions are partially observed across the DAG, with noisy and heterogeneously sampled measurements, posing significant challenges for reconstruction, uncertainty propagation, and inference. To tackle these ch",
+      "links": [
+        "https://arxiv.org/abs/2607.09645v1",
+        "https://arxiv.org/pdf/2607.09645v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09641v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09641v1",
+      "description": "Semantic Pareto-DQN: A Multi-Objective Reinforcement Learning Framework for Financial Anomaly Detection",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:39:00Z",
+      "summary": "Financial anomaly detection suffers from extreme class imbalance, causing traditional single-objective algorithms to exhibit ``fraud collapse'', defaulting to the majority class and failing to balance anomaly interdiction with customer friction. To overcome this without distortive data resampling, we propose the Semantic Pareto-DQN, a multi-objective reinforcement learning framework. Our approach synthesizes heterogeneous transaction features into cohesive natural-language narratives, encoded by",
+      "links": [
+        "https://arxiv.org/abs/2607.09641v1",
+        "https://arxiv.org/pdf/2607.09641v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09640v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09640v1",
+      "description": "SPOT-IC: Improving prediction for interval-censored data via survival probability transfer",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:36:31Z",
+      "summary": "Accurate prediction with interval-censored data is particularly challenging when censoring intervals are wide and follow-up is limited, as is common in studies of chronic diseases. Although auxiliary information from source studies may improve prediction in a target study, existing transfer learning methods typically impose restrictive assumptions on model or parameter similarity, or require access to individual-level source data. We propose a novel transfer learning method for interval-censored",
+      "links": [
+        "https://arxiv.org/abs/2607.09640v1",
+        "https://arxiv.org/pdf/2607.09640v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09639v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09639v1",
+      "description": "A Quantum Path to Partial Differential Equations",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:36:20Z",
+      "summary": "Partial differential equations are a promising application area for fault-tolerant quantum algorithms, but the subject lies between two communities with different languages: numerical analysis and quantum computation. These lecture notes provide a numerically grounded introduction for readers entering from either field. Block encoding is the organizing principle: once a discretized differential operator is embedded in a unitary, primitives such as quantum singular value transformation, Hamiltoni",
+      "links": [
+        "https://arxiv.org/abs/2607.09639v1",
+        "https://arxiv.org/pdf/2607.09639v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09638v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09638v1",
+      "description": "Complete measurement of tunnel- and valley-coupling parameters in a silicon double quantum dot",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:35:58Z",
+      "summary": "Tunneling is essential in the initialization, measurement, and control of quantum dot qubits. In silicon, such tunneling connects not only the qubit states but also valley minima in the conduction band on opposite sides of the Brillouin zone, with large consequences for the quantum dot behavior. Here we present a full characterization of the intravalley and intervalley tunnel couplings, including their complex phases -- the valley phases. These phases are shown to control measurable parameters, ",
+      "links": [
+        "https://arxiv.org/abs/2607.09638v1",
+        "https://arxiv.org/pdf/2607.09638v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09637v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09637v1",
+      "description": "Network Analysis with Parametric NetKAT",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:35:06Z",
+      "summary": "Network engineers often need to perform network diagnosis and inference tasks, which frequently require answers to enumeration questions such as \"Which packets from the Internet arrive at host C?\" or \"Which single-link failures disconnect my network?\" Parametric NetKAT is a new domain-specific language that combines elements of NetKAT, Relational NetKAT, and Weighted NetKAT into a single system and extends them with parameters, allowing users to pose such enumeration questions directly over netw",
+      "links": [
+        "https://arxiv.org/abs/2607.09637v1",
+        "https://arxiv.org/pdf/2607.09637v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09635v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:43Z",
+      "url": "http://arxiv.org/abs/2607.09635v1",
+      "description": "Kleene Algebra with Transitive Commutativity Conditions",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:jailbreak large language model"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:33:24Z",
+      "summary": "Kleene algebra (KA) provides a foundational algebraic framework for reasoning about program structure and control flow. To capture equivalences arising from reordering or independence of actions, Kozen [1996] purposed that KA can be extended with commutativity conditions, that is, equations of the form { ab = ba | (a,b) \\in C }, where C is a binary relation on constant symbols. This paper studies the following question: for which relations C is the equational theory of KA+C decidable?\n  Early re",
+      "links": [
+        "https://arxiv.org/abs/2607.09635v1",
+        "https://arxiv.org/pdf/2607.09635v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09659v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09659v1",
+      "description": "Impact of Benign Connectivity Variations on Intrusion Detection for Encrypted OPC UA Traffic in Industrial Private 5G Networks",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:adversarial prompt attack"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:58:55Z",
+      "summary": "Machine learning (ML)-based intrusion detection systems (IDSs) are increasingly used to monitor encrypted industrial communication. However, their behavior under realistic private 5G operating conditions remains insufficiently understood. This paper investigates the impact of benign connectivity variations on ML-based IDSs for encrypted Open Platform Communications Unified Architecture (OPC UA) traffic in industrial private 5G networks. Experimental results show that legitimate connectivity even",
+      "links": [
+        "https://arxiv.org/abs/2607.09659v1",
+        "https://arxiv.org/pdf/2607.09659v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09593v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09593v1",
+      "description": "Characterization of the basin of convexity for multi-snapshot spike deconvolution via variable projection",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:adversarial prompt attack"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T16:49:27Z",
+      "summary": "We study the problem of multi-snapshot spike deconvolution, where the goal is to recover the locations of sparse impulses from their noisy convolution with a known point spread function (PSF) across multiple snapshots. We adopt a variable-projection formulation that eliminates the amplitudes in closed form, reducing the task to a nonconvex least-squares problem over the spike locations alone, which we refer to as the variable-projection formulation of spike deconvolution (VarProSD). We provide a",
+      "links": [
+        "https://arxiv.org/abs/2607.09593v1",
+        "https://arxiv.org/pdf/2607.09593v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09532v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09532v1",
+      "description": "Statistically Undetectable Backdoors in Deep Neural Networks",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:adversarial prompt attack"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T15:37:32Z",
+      "summary": "We show how an adversarial model trainer can plant backdoors in a large class of deep, feedforward neural networks. These backdoors are statistically undetectable in the white-box setting, meaning that the backdoored and honestly trained models are close in total variation distance, even given the full descriptions of the models (e.g., all of the weights). The backdoor provides access to invariance-based adversarial examples for every input, mapping distant inputs to unusually close outputs. How",
+      "links": [
+        "https://arxiv.org/abs/2607.09532v1",
+        "https://arxiv.org/pdf/2607.09532v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09522v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09522v1",
+      "description": "Short Graph Sketches Suffice for Error-resilient Leader Verification in CONGEST",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:adversarial prompt attack"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T15:33:23Z",
+      "summary": "Locally Checkable Proofs (LCPs) enable the verification of global graph properties using locally checkable certificates assigned by a prover. Recently, this framework was extended to Locally Checkable Proofs-with-Errors (LCPE), where an adversary may corrupt some certificates. Existing LCPE algorithms, however, are designed for the LOCAL model, whose unbounded communication makes them unsuitable for direct implementation in the bandwidth-restricted CONGEST model.\n  We initiate the study of effic",
+      "links": [
+        "https://arxiv.org/abs/2607.09522v1",
+        "https://arxiv.org/pdf/2607.09522v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09480v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09480v1",
+      "description": "Foveation-Guided Dynamic Token Selection for Robust and Efficient Vision Transformers",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:adversarial prompt attack"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T14:53:16Z",
+      "summary": "The human visual system (HVS) employs foveated sampling and eye movements to achieve efficient perception, conserving both metabolic energy and computational resources. Drawing inspiration from this robustness and adaptability, we introduce the Foveated Dynamic Transformer (FDT), a foveation-guided dynamic token-selection architecture that integrates these mechanisms into a vision transformer framework. The FDT exhibits strong resilience to various types of noise and adversarial attacks, despite",
+      "links": [
+        "https://arxiv.org/abs/2607.09480v1",
+        "https://arxiv.org/pdf/2607.09480v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09473v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09473v1",
+      "description": "Triggering Stealthy Feature Map Backdoors via Physical Fault Injection in Embedded Neural Networks",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:adversarial prompt attack"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T14:44:32Z",
+      "summary": "Fault injection (FI) attacks on embedded neural network (NN) implementations primarily focus on inducing misclassification by corrupting weights or intermediate computations, overlooking their interaction with algorithmic adversarial threats. In this work, we present a cross-level attack that bridges implementation-level physical faults to algorithm-level adversarial attacks. By characterizing fault-induced data perturbations during NN inference, we connect FI with backdoor learning, enabling sy",
+      "links": [
+        "https://arxiv.org/abs/2607.09473v1",
+        "https://arxiv.org/pdf/2607.09473v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09450v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09450v1",
+      "description": "Robustifying Vision-Language Models via Test-Time Prompt Adaptation",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:adversarial prompt attack"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T14:19:42Z",
+      "summary": "Pre-trained Vision-Language Models (VLMs) such as CLIP achieve strong zero-shot generalization, but their performance degrades sharply under adversarial perturbations. Existing test-time adaptation methods typically rely on sample-level confidence heuristics, overlooking the intrinsic distributional structure of the data. This sample-centric approach limits robustness, as it fails to distinguish confident adversarial mispredictions from true semantic consistency. In this work, we observe that ad",
+      "links": [
+        "https://arxiv.org/abs/2607.09450v1",
+        "https://arxiv.org/pdf/2607.09450v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09448v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09448v1",
+      "description": "Pre/Post-Assessment Cycles in Calculus: Supporting Student Preparation, Reflection, and Learning",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:adversarial prompt attack"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T14:17:05Z",
+      "summary": "This article describes a semester-long implementation of pre/post-assessment cycles in an undergraduate Calculus I course. The activity was designed to address a common difficulty in lower-division mathematics courses: students often enter a new unit without knowing which prior ideas are relevant, which concepts deserve special attention, or how to judge their own progress before high-stakes exams. Brief pre-assessments were administered before major course units, and related post-assessment que",
+      "links": [
+        "https://arxiv.org/abs/2607.09448v1",
+        "https://arxiv.org/pdf/2607.09448v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.09443v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09443v1",
+      "description": "Parameter-Efficient Vision-Language Adaptation with Continuous Metadata Conditioning for Animal Re-Identification",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:adversarial prompt attack"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T14:15:21Z",
+      "summary": "Long-term animal re-identification (ReID) must remain robust to gradual morphological evolution and seasonal appearance shifts. Although recent vision-language models provide strong pretrained visual representations, adapting them to longitudinal ecological settings remains challenging, particularly under identity and temporal distribution shifts. We present a parameter-efficient CLIP adaptation framework for animal ReID and introduce a continuous metadata-conditioning mechanism that incorporate",
+      "links": [
+        "https://arxiv.org/abs/2607.09443v1",
+        "https://arxiv.org/pdf/2607.09443v1"
       ],
       "github_urls": [
-        "https://github.com/jsu-kim/Persona-Pruner."
+        "https://github.com/AnilOsmanTur/MetaPrompt-ReID."
       ],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14674v1",
+      "id": "http://arxiv.org/abs/2607.09438v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14674v1",
-      "description": "AgentSpec: Understanding Embodied Agent Scaffolds Through Controlled Composition",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09438v1",
+      "description": "Test-Time Scaling for Small VLMs on Multilingual Visual MCQ",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:adversarial prompt attack"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:39:49Z",
-      "summary": "LLM agents are increasingly built not as single model calls, but as scaffolded systems that combine reasoning, memory, reflection, action execution, and learning. While such scaffolds often improve performance, they are often embedded in tightly coupled pipelines, making it difficult to isolate component contributions, compare alternative designs, or understand how module interactions shape agent behavior. We introduce AgentSpec, a modular specification framework that represents embodied agents ",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T14:09:04Z",
+      "summary": "Test-time scaling (TTS) reliably improves reasoning in large language models, but whether it transfers to small open vision-language models remains unclear. We examine this on EXAMS-V, a multilingual visual multiple-choice benchmark, comparing self-consistency, describe-then-reason with PRM-guided beam search, and two post-hoc selectors across Qwen2.5-VL-7B-Instruct and Qwen3.5-4B. What matters is the conditions under which TTS runs, not the search or verification machinery. The largest factor i",
       "links": [
-        "https://arxiv.org/abs/2606.14674v1",
-        "https://arxiv.org/pdf/2606.14674v1"
+        "https://arxiv.org/abs/2607.09438v1",
+        "https://arxiv.org/pdf/2607.09438v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14672v1",
+      "id": "http://arxiv.org/abs/2607.09378v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14672v1",
-      "description": "Towards Direct Latent-Space Synthesis for Parallel Branches in LLM-Agent Workflows",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09378v1",
+      "description": "When Routes Run Out: Adversarial Co-Learning and Explainable Robustness in Quantum Repeater Networks",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:adversarial prompt attack"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:39:29Z",
-      "summary": "Large language models increasingly serve as execution engines for agentic systems, yet they still consume context through a sequential text interface. This creates a mismatch with modern structured agent workflows, in which independent branches explore subtasks, retrieve evidence, or generate candidate solutions before a final synthesis step. Existing systems typically merge these branches by concatenating their textual outputs, which discards the parallel structure and incurs redundant prefill ",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T13:01:55Z",
+      "summary": "We study an adversarial bandit problem for entanglement-based quantum-network routing over a modest graph corpus. Alice selects an end-to-end repeater route for an Ekert-91 protocol (E91) representing her move, while Eve selects an attack surface, either edge intercept--resend or repeater memory degradation. Payoffs are drawn from cached SeQUeNCe-simulated E91 transcripts, and Alice accepts a turn when the finite-sample statistic violates the Clauser-Horne-Shimony-Holt (CHSH) bound. Performing a",
       "links": [
-        "https://arxiv.org/abs/2606.14672v1",
-        "https://arxiv.org/pdf/2606.14672v1"
+        "https://arxiv.org/abs/2607.09378v1",
+        "https://arxiv.org/pdf/2607.09378v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14668v1",
+      "id": "http://arxiv.org/abs/2607.09362v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14668v1",
-      "description": "When to Write and When to Suppress: Route-Specialized Dual Adapters for Memory-Assisted Knowledge Editing",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09362v1",
+      "description": "CtrlVTON: Controllable Virtual Try-On via Visual-Instance-Prompt Segmentation",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:adversarial prompt attack"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:37:32Z",
-      "summary": "Knowledge editing systems must update selected facts while preserving nearby but irrelevant behavior. This paper studies this problem in a memory-assisted setting where an edit memory is retrieved at inference time and a parameter-efficient adapter corrects the model's object preference. We argue that the central design question is not only how to write an edit, but also when to suppress it. We introduce \\method{}, a route-specialized dual-adapter editor. A relevance router first decides whether",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T12:40:06Z",
+      "summary": "Virtual try-on (VTO) has made significant progress in realistically transferring garments onto a target person. Yet most systems give the user little control over how a garment should be worn -- its size (loose or fitted), style (e.g., tucked in or untucked, open or closed), and spatial placement on the body. We address this gap with two complementary contributions. First, we define and solve Visual-Instance-Prompt Segmentation via VIP-SAM: given a flatlay image of a garment, segment that specif",
       "links": [
-        "https://arxiv.org/abs/2606.14668v1",
-        "https://arxiv.org/pdf/2606.14668v1"
+        "https://arxiv.org/abs/2607.09362v1",
+        "https://arxiv.org/pdf/2607.09362v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14654v1",
+      "id": "http://arxiv.org/abs/2607.09351v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14654v1",
-      "description": "Abstracting Cross-Domain Action Sequences into Interpretable Workflows",
+      "discovered_at": "2026-07-13T08:52:46Z",
+      "url": "http://arxiv.org/abs/2607.09351v1",
+      "description": "Simon-SR: Spatially Adaptive Modulation and Visual Prompt Adaptation for Text-Reinforced Super-Resolution",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:adversarial prompt attack"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:19:15Z",
-      "summary": "Sequential or time-stamped interaction logs provide objective records of digital application usage, yet their granularity and noise often obscure meaningful insights into people's work. Such insights are essential for improving digital products in ways grounded in real-world user interactions. Prior research has applied deep learning models to cluster user actions into high-level activities, but these approaches are highly sensitive to noise and struggle to generalize across applications. To add",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T12:30:00Z",
+      "summary": "Single Image Super-Resolution (SISR) reconstructs high-quality images from low-resolution inputs. While recent multi-modal methods improve perceptual quality, they remain sensitive to erroneous priors and require expensive annotations. To address these issues, we propose Simon-SR, a multi-modal SISR framework leveraging learnable prompts for efficient semantic mining and robust text-image fusion. Our approach combines Contrastive Prompt Learning with Prompt-Guided Spatially Adaptive Refinement t",
       "links": [
-        "https://arxiv.org/abs/2606.14654v1",
-        "https://arxiv.org/pdf/2606.14654v1"
+        "https://arxiv.org/abs/2607.09351v1",
+        "https://arxiv.org/pdf/2607.09351v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14620v1",
+      "id": "http://arxiv.org/abs/2607.09630v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14620v1",
-      "description": "Neither Parallel Nor Sequential: How DiffusionGemma Actually Commits Tokens",
+      "discovered_at": "2026-07-13T08:52:50Z",
+      "url": "http://arxiv.org/abs/2607.09630v1",
+      "description": "The Effects of Synthetic Data and Label Distribution on Canola Branch Counting",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:GCG adversarial suffix aligned language model"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T16:45:11Z",
-      "summary": "Open diffusion language models are marketed as parallel, non-autoregressive decoders, yet the order in which a shipped checkpoint actually commits its tokens is almost never measured. We instrument DiffusionGemma 26B, a masked discrete-diffusion mixture-of-experts model built on Gemma 4, hooking its sampler's accept step to record which canvas positions commit, when, and at what confidence. Across a 686-prompt, six-regime probe suite we find that its decoding is neither parallel nor block-autore",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:27:58Z",
+      "summary": "Collecting annotated plant images for automated phenotyping is often slow and expensive. Plant models simulating growth and development can generate unlimited synthetic images with exact labels. However, previous work has established that whether incorporating synthetic data improves performance depends on the ratio of synthetic to real images and the label distribution of the synthetic dataset. To systematically quantify both factors, we train ResNet-18 models on a canola branch-counting task u",
       "links": [
-        "https://arxiv.org/abs/2606.14620v1",
-        "https://arxiv.org/pdf/2606.14620v1"
+        "https://arxiv.org/abs/2607.09630v1",
+        "https://arxiv.org/pdf/2607.09630v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14616v1",
+      "id": "http://arxiv.org/abs/2607.09629v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14616v1",
-      "description": "GitHub Template Repositories: Served Domains, Maintenance, and Practitioner Guidelines",
+      "discovered_at": "2026-07-13T08:52:50Z",
+      "url": "http://arxiv.org/abs/2607.09629v1",
+      "description": "4DR360: State Reasoning for Joint 3D Detection and Occupancy Prediction in 4D Radar-Camera Full-Scene Perception",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:GCG adversarial suffix aligned language model"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T16:41:04Z",
-      "summary": "Over time, GitHub has introduced different strategies for sharing reusable code artifacts. In addition to fork-based reuse, template repositories provide a distinct feature for generating new projects from scaffolding. Although this feature has been available since 2019, little is known about the domains it supports, its maintenance characteristics, or the practices that guide practitioners for effective template design. To address this gap, we conduct a large-scale empirical study of GitHub tem",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T17:26:19Z",
+      "summary": "Reliable autonomous driving requires full-scene perception that couples foreground objects with dense semantic layout. Recently, 4D millimeter-wave radar has emerged as a robust and affordable sensor, yet its sparse returns make radar-camera fusion necessary for comprehensive scene understanding. Existing radar-camera methods mainly optimize detection, while dual-task systems usually decode boxes and occupancy with limited interaction. To address this gap and advance radar-based multi-task learn",
       "links": [
-        "https://arxiv.org/abs/2606.14616v1",
-        "https://arxiv.org/pdf/2606.14616v1"
+        "https://arxiv.org/abs/2607.09629v1",
+        "https://arxiv.org/pdf/2607.09629v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14612v1",
+      "id": "http://arxiv.org/abs/2607.08883v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14612v1",
-      "description": "Moonlight in Latent Space: Chirality and Structural Correspondence Between Beethoven's Op. 27 No. 2 and Machine Learning Mechanisms",
+      "discovered_at": "2026-07-13T08:52:54Z",
+      "url": "http://arxiv.org/abs/2607.08883v1",
+      "description": "Optimizing Against Safety Representations: Activation-Guided Adversarial Suffixes and the Geometry of Refusal",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:AutoDAN jailbreak"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T16:35:17Z",
-      "summary": "We show that the three movements of Beethoven's \"Moonlight Sonata\" (Op. 27 No. 2) instantiate three distinct machine learning architectures -- not by analogy, but by structural correspondence. Through computational analysis of the score (entropy, Jensen-Shannon divergence, dissonance, hand distributional overlap, self-similarity matrices, temporal memory decay, and contextual pitch embeddings), we establish four counterintuitive findings: (1) perceived musical \"temperature\" is governed by throug",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T19:21:29Z",
+      "summary": "Behavioral alignment in large language models often masks fragile internal safety representations. Recent work suggests that refusal behavior is mediated by low-dimensional directions in activation space. This raises questions about how such representations are structured, localized, and accessed by optimization. We study adversarial suffix attacks as a probe of representational alignment. We introduce Activation-Guided GCG, which replaces output-based objectives with losses that directly target",
       "links": [
-        "https://arxiv.org/abs/2606.14612v1",
-        "https://arxiv.org/pdf/2606.14612v1"
+        "https://arxiv.org/abs/2607.08883v1",
+        "https://arxiv.org/pdf/2607.08883v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14607v1",
+      "id": "http://arxiv.org/abs/2607.08066v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14607v1",
-      "description": "Empowering Student Debugging in Parallel Programming with Execution Traces and Large Language Models",
+      "discovered_at": "2026-07-13T08:52:54Z",
+      "url": "http://arxiv.org/abs/2607.08066v1",
+      "description": "Persuasion Attacks Can Decrease Effectiveness of CoT Monitoring",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:AutoDAN jailbreak"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T16:30:41Z",
-      "summary": "Concurrent programming is a core component of Computer Science curricula, yet remains notoriously difficult for students to master due to its inherent complexity and the nondeterministic nature of concurrency bugs such as deadlocks and race conditions. In this work, we present ParaView, an educational tool designed to help students understand, debug, and correct concurrency issues in parallel programs written in C/C++. ParaView provides transparent execution recording and visualization to make p",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T02:48:36Z",
+      "summary": "Chain-of-thought (CoT) monitoring is a promising safety mechanism for AI agents, based on the premise that visible reasoning traces can surface misaligned or deceptive behavior. While effective in standard scenarios, recent work highlights that LLMs remain vulnerable to persuasion-based jailbreaks, where natural-language arguments override model constraints. We stress-test whether this vulnerability extends to monitoring LLMs: can an adversarial agent persuade its CoT monitor to approve proposed",
       "links": [
-        "https://arxiv.org/abs/2606.14607v1",
-        "https://arxiv.org/pdf/2606.14607v1"
+        "https://arxiv.org/abs/2607.08066v1",
+        "https://arxiv.org/pdf/2607.08066v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14600v1",
+      "id": "http://arxiv.org/abs/2607.07918v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14600v1",
-      "description": "LoSoNA: A Benchmark for Local Social Norm Adaptation in Group Conversations",
+      "discovered_at": "2026-07-13T08:52:54Z",
+      "url": "http://arxiv.org/abs/2607.07918v1",
+      "description": "Efficient Safety Alignment of Language Models via Latent Personality Traits",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:AutoDAN jailbreak"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T16:23:00Z",
-      "summary": "Online group chats are social spaces with local conversational norms that are rarely stated explicitly. The ability and willingness of LLM-based agents to recognize and adapt to these norms remains mostly unexplored. We introduce LoSoNA, a benchmark for local social norm adaptation in multi-party chat. Each scenario gives a subject model a curated group-chat transcript in which non-subject participants demonstrate a hidden local norm, followed by a final elicitor turn that forces a response reve",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-08T21:03:27Z",
+      "summary": "Current safety methods for large language models are known to be vulnerable to adversarial attacks, motivating research into robust alternatives. Latent Adversarial Training (LAT) is among the most effective defenses, but can degrade utility and requires training on large datasets of harmful prompts. We introduce Latent Personality Alignment (LPA), which replaces explicit harm refusal with adversarial training on just 66 harm-agnostic statements drawn from psychometric personality literature. We",
       "links": [
-        "https://arxiv.org/abs/2606.14600v1",
-        "https://arxiv.org/pdf/2606.14600v1"
+        "https://arxiv.org/abs/2607.07918v1",
+        "https://arxiv.org/pdf/2607.07918v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14589v1",
+      "id": "http://arxiv.org/abs/2607.07903v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14589v1",
-      "description": "When Errors Become Narratives: A Longitudinal Taxonomy of Silent Failures in a Production LLM Agent Runtime",
+      "discovered_at": "2026-07-13T08:52:54Z",
+      "url": "http://arxiv.org/abs/2607.07903v1",
+      "description": "Mechanistic Interpretability of LLM Jailbreaks via Internal Attribution Graphs",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:AutoDAN jailbreak"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T16:06:55Z",
-      "summary": "LLM agent systems increasingly run as long-lived autonomous runtimes: scheduling jobs, calling tools, maintaining memory, and pushing results to humans. We present a longitudinal study of silent failures in one such system: a personal-assistant agent runtime in continuous production since March 2026, with roughly 40 scheduled jobs, 8 LLM providers, a tool-governance proxy, and a knowledge-base memory plane, defended by 4,286 unit tests and 827 governance checks. Over eight weeks we documented 22",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-08T20:31:06Z",
+      "summary": "Large language models (LLMs) exhibit remarkable capabilities but remain highly vulnerable to adversarial prompts and jailbreak attacks. Existing approaches primarily analyze these failures through input-output behaviors or attribution methods, offering limited insight into how adversarial perturbations alter the model's internal reasoning. Consequently, the mechanisms underlying unsafe or incorrect behaviors remain poorly understood. We introduce a mechanistic framework for diagnosing LLM vulner",
       "links": [
-        "https://arxiv.org/abs/2606.14589v1",
-        "https://arxiv.org/pdf/2606.14589v1"
+        "https://arxiv.org/abs/2607.07903v1",
+        "https://arxiv.org/pdf/2607.07903v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14581v1",
+      "id": "http://arxiv.org/abs/2607.07827v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14581v1",
-      "description": "CARE: Controlling LLM-Generated Policies through Auditable Review of Evidence in Scientific Experimentation",
+      "discovered_at": "2026-07-13T08:52:54Z",
+      "url": "http://arxiv.org/abs/2607.07827v1",
+      "description": "Open Models, Open Risks: Measuring Unsafe Generation in Text-to-Image Models In the Wild",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:AutoDAN jailbreak"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T15:58:32Z",
-      "summary": "Granting LLMs direct control over costly, irreversible scientific experiments leads to unsafe exploration and unstable performance, but discarding LLM creativity entirely sacrifices significant optimization potential. We introduce CARE (Controlling LLM-Generated Policies through Auditable Review of Evidence in Scientific Experimentation), an auditable controller for high-throughput experimentation (HTE) optimization that keeps a non-LLM incumbent optimizer as the default action path while using ",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-08T18:07:35Z",
+      "summary": "Existing safety studies on text-to-image (T2I) jailbreaks are largely conducted in controlled in-the-lab settings, typically on a small number of canonical models. As a result, the current safety status of the rapidly growing in-the-wild T2I ecosystem remains unclear. This uncertainty is amplified by two factors: existing detector-based metrics are designed for controlled evaluation, and in-the-wild risks may arise not only from adversarial prompting, but also from unsafe release practices and u",
       "links": [
-        "https://arxiv.org/abs/2606.14581v1",
-        "https://arxiv.org/pdf/2606.14581v1"
+        "https://arxiv.org/abs/2607.07827v1",
+        "https://arxiv.org/pdf/2607.07827v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14574v1",
+      "id": "http://arxiv.org/abs/2607.07696v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14574v1",
-      "description": "SIMMER: Benchmarking Latent Failures in LLM Executable Planning with a World Model",
+      "discovered_at": "2026-07-13T08:52:54Z",
+      "url": "http://arxiv.org/abs/2607.07696v1",
+      "description": "Breaking Database Lock-in: Agentic Regeneration of High Performance Storage Readers for Database Bypass",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:AutoDAN jailbreak"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T15:53:16Z",
-      "summary": "Large language models (LLMs) are increasingly deployed as planners for autonomous agents in household environments. While existing benchmarks evaluate whether LLM-generated plans execute successfully, they overlook a critical type of failure: latent failures. Unlike immediate failures that trigger instant feedback at execution time and enable timely correction, latent failures do not immediately halt plan execution but silently compromise goal achievement. In severe cases, they cause irreversibl",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-08T17:55:00Z",
+      "summary": "Analytical workloads operating on data stored in external database systems face a fundamental bottleneck: data access is guarded entirely by the database driver, like JDBC or ODBC, forcing all reads through query execution and other driver layers that are not designed for bulk columnar analytics. We present Jailbreak, an approach that bypasses the database engine entirely by reading storage files directly and materializing data as in-memory columnar buffers. Jailbreak's key insight is that datab",
       "links": [
-        "https://arxiv.org/abs/2606.14574v1",
-        "https://arxiv.org/pdf/2606.14574v1"
+        "https://arxiv.org/abs/2607.07696v1",
+        "https://arxiv.org/pdf/2607.07696v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14530v1",
+      "id": "http://arxiv.org/abs/2607.07023v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14530v1",
-      "description": "Code Correctness Signals in LLM Hidden States: Pre-Generation Probing and Repair Geometry",
+      "discovered_at": "2026-07-13T08:52:54Z",
+      "url": "http://arxiv.org/abs/2607.07023v1",
+      "description": "Online Data Selection Is Implicit Alignment",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:AutoDAN jailbreak"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T15:06:15Z",
-      "summary": "Large language models encode rich information in their hidden states. This work asks whether code correctness is legible in the hidden states of Qwen3-4B-Instruct-2507, before it generates and as it repairs a failed attempt, studied on 444 LiveCodeBench tasks. It reports two findings connected by a single confound-control tool: residualization. First, the correctness of the model's first-attempt code is linearly decodable from the prompt-final hidden state, with a leakage-free held-out AUC of 0.",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-08T05:44:33Z",
+      "summary": "Supervised fine-tuning (SFT) is often treated as a capability-adaptation step, while alignment is attributed to later preference optimization or reinforcement learning. This separation is incomplete: when examples are scored and kept online during fine-tuning, the choice of which data to train on already changes the model's behavioral preferences. We study online data selection as an implicit alignment mechanism. Given the same base model, optimizer, and selected-token budget, we compare random,",
       "links": [
-        "https://arxiv.org/abs/2606.14530v1",
-        "https://arxiv.org/pdf/2606.14530v1"
+        "https://arxiv.org/abs/2607.07023v1",
+        "https://arxiv.org/pdf/2607.07023v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14528v1",
+      "id": "http://arxiv.org/abs/2607.06120v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14528v1",
-      "description": "BayLing-Duplex: Native Full-Duplex Speech Dialogue with a Single Autoregressive LLM",
+      "discovered_at": "2026-07-13T08:52:54Z",
+      "url": "http://arxiv.org/abs/2607.06120v1",
+      "description": "AEGIS: A Mechanism-Guided Defense against Visual Synonym Jailbreaks in Text-to-Image Models",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:AutoDAN jailbreak"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T15:01:51Z",
-      "summary": "Real-time, full-duplex speech interaction is a key feature of next-generation spoken chatbots, allowing the model to listen and speak at the same time and to handle natural phenomena such as overlap, hesitation, and barge-in. Existing speech language models (SpeechLMs) such as LLaMA-Omni and GLM-4-Voice are still turn-based and rely on an external Voice Activity Detection (VAD) module to mark the end of the user's turn, which fundamentally limits their interactive ability. In this paper, we intr",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-07T10:27:54Z",
+      "summary": "Text-to-image diffusion models have achieved high visual fidelity and broad adoption, but remain vulnerable to safety violations when adversaries exploit them to synthesize illicit content. Existing alignment paradigms, from input sanitization to structural feature pruning, are largely organized around unsafe concepts explicitly exposed during filtering, editing, or localization. This leaves a blind spot for visual synonym attacks (VSA), a jailbreak where benign-looking prompts elicit prohibited",
       "links": [
-        "https://arxiv.org/abs/2606.14528v1",
-        "https://arxiv.org/pdf/2606.14528v1"
+        "https://arxiv.org/abs/2607.06120v1",
+        "https://arxiv.org/pdf/2607.06120v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14517v1",
+      "id": "http://arxiv.org/abs/2607.09474v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14517v1",
-      "description": "From Shield to Target: Denial-of-Service Attacks on LLM-Based Agent Guardrails",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.09474v1",
+      "description": "ProofCouncil: An LLM Agent for Solving Open Mathematical Problems",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T14:49:00Z",
-      "summary": "LLM-based guardrails have emerged as a highly effective defense against prompt injection and jailbreak attacks in autonomous agents. However, we reveal that the very reasoning and task-following capabilities enabling this protection introduce a novel vulnerability: attackers can inject crafted data to trap the guardrail in extended reasoning loops, effectuating a systematic denial-of-service (DoS) attack. To systematically expose this threat, we design a beam-search optimization framework that c",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T14:46:01Z",
+      "summary": "Large language models (LLMs) have shown increasing promise in solving open problems in mathematics. However, their performance can be further improved through agentic workflows tailored to real-world mathematical practice. To this end, we introduce ProofCouncil, a mathematical agent that is designed to tackle open problems using an author-critic architecture. ProofCouncil served as a submission to the second batch of FirstProof, a challenge consisting of 10 real-world mathematical problems that ",
       "links": [
-        "https://arxiv.org/abs/2606.14517v1",
-        "https://arxiv.org/pdf/2606.14517v1"
+        "https://arxiv.org/abs/2607.09474v1",
+        "https://arxiv.org/pdf/2607.09474v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14502v1",
+      "id": "http://arxiv.org/abs/2607.09342v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:35Z",
-      "url": "http://arxiv.org/abs/2606.14502v1",
-      "description": "From Chatbot to Digital Colleague: The Paradigm Shift Toward Persistent Autonomous AI",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.09342v1",
+      "description": "Spanning Paths and Cycles: Structural Limitations of the Irrelevant Vertex Technique",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:prompt injection LLM"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T14:33:55Z",
-      "summary": "Large Language Models (LLMs) are undergoing a fundamental transformation from conversational generators into integrated AI systems capable of reasoning, action, memory, and self-improvement. We conceptualize this transition as a shift from Chatbot to Digital Colleague: from conversational answers to persistent work. We organize this transition along two tightly coupled dimensions. First, at the cognitive core level, LLMs are advancing from Chatbot-era \"fast thinking\" systems driven by next-token",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T12:22:17Z",
+      "summary": "The Irrelevant Vertex Technique is one of the cornerstones of algorithmic graph theory, underlying Robertson and Seymour's algorithm for \\textsc{Disjoint Paths} and much of the algorithmic Graph Minors theory. We show that, in the setting of spanning routing, this technique exhibits an exact combinatorial limitation. Unlike classical routing problems, spanning routing is not governed by the number of distinguished vertices but by the way they are distributed throughout the graph. The input is a ",
       "links": [
-        "https://arxiv.org/abs/2606.14502v1",
-        "https://arxiv.org/pdf/2606.14502v1"
+        "https://arxiv.org/abs/2607.09342v1",
+        "https://arxiv.org/pdf/2607.09342v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14704v1",
+      "id": "http://arxiv.org/abs/2607.09330v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14704v1",
-      "description": "The Edges of Planetary Systems: Falling Off the Kuiper Cliff in a Dissipating Gas Disk",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.09330v1",
+      "description": "Communication-Efficient Digital-Twin Coordination for Heterogeneous LLM Embodied Agents over Computing Power Networks",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:jailbreak large language model"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:59:58Z",
-      "summary": "Probably the last planetesimals to have formed from dust in the solar nebula are Cold Classical Kuiper belt objects (CCKBOs). To the extent that they are isolated and unchanged since birth, CCKBOs offer direct insights into nebular processes. Their population density drops abruptly beyond a heliocentric radius of $\\sim$47 au, a feature known as the \"Kuiper Cliff\". We show with global, 1D (radial), time-dependent models how gaseous protoplanetary disks that disperse from magnetic and photoevapora",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T12:10:31Z",
+      "summary": "Embodied agent teams powered by heterogeneous large language models (LLMs) are being widely deployed in physical artificial intelligence such as smart factories, warehouses, and service robotics. To enable collaboration among such an agent team, efficient coordination mechanisms that operate reliably under limited network resources are required. However, existing heterogeneous LLM-agent coordination frameworks that rely on multi-round natural-language-based conversations introduce three coupled ",
       "links": [
-        "https://arxiv.org/abs/2606.14704v1",
-        "https://arxiv.org/pdf/2606.14704v1"
+        "https://arxiv.org/abs/2607.09330v1",
+        "https://arxiv.org/pdf/2607.09330v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14703v1",
+      "id": "http://arxiv.org/abs/2607.09201v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14703v1",
-      "description": "Gaze Heads: How VLMs Look at What They Describe",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.09201v1",
+      "description": "The gravitational-wave fingerprint of dynamically assembled primordial black hole cluster seeds in JWST's Little Red Dots",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:jailbreak large language model"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:59:57Z",
-      "summary": "How a vision-language model internally solves the task of describing an image is far from obvious. We find that the model develops a specific mechanism for this: a small set of attention heads in its language-model backbone, which we call gaze heads, whose attention tracks the image region the model is currently describing. We find them with a simple correlation score from a few forward passes, using comic strips as a controlled testbed where narrative order is laid out spatially. These gaze hea",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T08:47:53Z",
+      "summary": "The James Webb Space Telescope (JWST) has revealed compact, red, overmassive accreting black holes - the so-called ``Little Red Dots'' (LRDs) - in chemically near-pristine hosts at $z\\simeq5 - 9$, straining standard heavy-seed models. We show that a population of strongly clustered primordial black holes (PBH) with a broad mass function predicted by a QCD-epoch thermal history naturally realizes the configuration that assembles LRD-scale seeds: an intermediate-mass PBH \\emph{nucleus} $M_{\\rm BH}",
       "links": [
-        "https://arxiv.org/abs/2606.14703v1",
-        "https://arxiv.org/pdf/2606.14703v1"
+        "https://arxiv.org/abs/2607.09201v1",
+        "https://arxiv.org/pdf/2607.09201v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14701v1",
+      "id": "http://arxiv.org/abs/2607.09060v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14701v1",
-      "description": "RATS! Patches Talk Through Registers: Emergent Parts in Register Attention Transformers",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.09060v1",
+      "description": "Dec-MARVEL: Decentralized Multi-Agent Exploration without Communication under Budget Constraints",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:jailbreak large language model"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:59:53Z",
-      "summary": "When humans see a bird, they recognize far more than just \"bird\" -- they see a head, wings, and talons, a structured assembly of reusable parts that can be identified across every bird they have ever seen. We ask whether a self-supervised visual model can discover the same compositional structure on its own. To this end, we propose RATS (Register Attention Transformers), which decomposes the classification token into N learnable register tokens that route patch information through an L->N->N->L ",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-10T03:06:08Z",
+      "summary": "Multi-UAV exploration is often constrained by unreliable communication, limited field-of-view sensing (e.g., lightweight onboard camera), and finite travel budgets that require each robot to reserve enough budget to return to its base. We present Dec-MARVEL, a decentralized budget-aware exploration framework for communication-free teams with directional sensing. Rather than exchanging maps, goals, or messages, each robot coordinates through its incidental observations: any teammate trajectory wi",
       "links": [
-        "https://arxiv.org/abs/2606.14701v1",
-        "https://arxiv.org/pdf/2606.14701v1"
+        "https://arxiv.org/abs/2607.09060v1",
+        "https://arxiv.org/pdf/2607.09060v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14697v1",
+      "id": "http://arxiv.org/abs/2607.08874v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14697v1",
-      "description": "ClinHallu: A Benchmark for Diagnosing Stage-Wise Hallucinations in Medical MLLM Reasoning",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.08874v1",
+      "description": "The Gaussian phenotype of biological measurements",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:jailbreak large language model"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:58:38Z",
-      "summary": "Building trustworthy medical multimodal large language models (MLLMs) is critical for reliable clinical decision support. Existing medical hallucination benchmarks mainly focus on data collection, but often ignore where hallucinations originate within the reasoning process. We find that hallucination sources vary across samples: errors may arise from visual misrecognition, incorrect medical knowledge recall, or flawed reasoning integration. To enable source-level hallucination diagnosis, we intr",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T19:01:48Z",
+      "summary": "Biological measurements are commonly assumed to approximate Gaussian distributions, and normality is routinely assessed as a prerequisite for statistical analysis. However, whether the degree of Gaussianity itself contains biological information remains largely unexplored. Here, we quantified the Gaussianity of biological measurements using the root mean square error of normal quantile-quantile plots (QQ-RMSE). A reference distribution was constructed from 10,249 biological measurements from the",
       "links": [
-        "https://arxiv.org/abs/2606.14697v1",
-        "https://arxiv.org/pdf/2606.14697v1"
+        "https://arxiv.org/abs/2607.08874v1",
+        "https://arxiv.org/pdf/2607.08874v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.08858v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.08858v1",
+      "description": "Observations of the Halo Star HD 177566",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:HarmBench red teaming"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T18:27:49Z",
+      "summary": "We have analyzed archival FUV and optical spectra of the hot halo star HD 177566. The star has an effective temperature $T_{\\rm eff} = 33{,}000 \\pm 1000$ K, surface gravity $\\log g = 3.79 \\pm 0.11$, and helium abundance $\\log N({\\rm He})/N({\\rm H}) = -0.86 \\pm 0.05$. Abundances of 13 additional elements are consistent with those of other halo stars, save for carbon, which is underabundant by about 1 dex. The low-order hydrogen Balmer lines are not well reproduced by our models. The diffuse lines",
+      "links": [
+        "https://arxiv.org/abs/2607.08858v1",
+        "https://arxiv.org/pdf/2607.08858v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.08856v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.08856v1",
+      "description": "A Calibration Audit of a Gaia XP White-Dwarf Main-Sequence Binary Catalog: How Much BP-Band Residual it Takes to Manufacture Contamination",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:HarmBench red teaming"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T18:26:49Z",
+      "summary": "A Gaussian-process classifier on Gaia DR3 XP spectra produced $\\sim$30{,}000 white-dwarf main-sequence (WD--MS) binary candidates, each with a probability but no likelihood or goodness-of-fit. The corrected XP BP band keeps a local blue-flux residual of about 2\\%, where a hot white dwarf also adds flux. We asked whether that residual contaminates the selection at its realistic amplitude. It does not. The answer turns on one unit: 2\\% of total flux, deposited in the narrow blue band, is a median ",
+      "links": [
+        "https://arxiv.org/abs/2607.08856v1",
+        "https://arxiv.org/pdf/2607.08856v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.08767v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.08767v1",
+      "description": "Plaquette: A hardware-aware design platform for fault-tolerant quantum computers",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:HarmBench red teaming"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T17:59:27Z",
+      "summary": "Hardware teams building fault-tolerant quantum computers (FTQCs) must decide which imperfections to suppress, and that decision requires the logical performance of the architecture under the device's actual noise. Hardware noise often departs from the stochastic Pauli models used by scalable stabilizer simulators: superconducting transmons leak out of the computational subspace, neutral atoms scatter through intermediate states, trapped ions heat as their motional modes absorb phonons, and misca",
+      "links": [
+        "https://arxiv.org/abs/2607.08767v1",
+        "https://arxiv.org/pdf/2607.08767v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.08652v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.08652v1",
+      "description": "Formal Mechanisms for Market Stability in Self-Interested Agent Societies: A Marketplace Simulation Study",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:HarmBench red teaming"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T16:21:16Z",
+      "summary": "Self-interested agents, left unconstrained, tend toward defection in repeated social dilemmas, causing cooperative gains from trade to collapse. This paper investigates what formal mechanisms, layered on top of unrestricted communication, are sufficient for a society of such agents to maintain market stability, and how resilient those mechanisms are to adversarial attack. We instantiate the research question as a multi-agent marketplace simulation where 18 LLM agents (DeepSeek-V3) with complemen",
+      "links": [
+        "https://arxiv.org/abs/2607.08652v1",
+        "https://arxiv.org/pdf/2607.08652v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.08644v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.08644v1",
+      "description": "Acceleration-based clustering reveals frequent gait switching in sprint sled dogs",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:HarmBench red teaming"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T16:17:19Z",
+      "summary": "Continuous video is difficult to obtain during field studies of sprint sled dogs, limiting analysis of stride-to-stride variation during load-pulling gallop. We developed an acceleration-based pipeline to identify recurrent stride states from harness-mounted tri-axial accelerometers without manual gait labels. Using multivariate dynamic time warping, manifold embedding, and density-based clustering, we analyzed more than 20,000 strides from a 10-dog team and identified recurrent, dog-specific st",
+      "links": [
+        "https://arxiv.org/abs/2607.08644v1",
+        "https://arxiv.org/pdf/2607.08644v1"
+      ],
+      "github_urls": [],
+      "hf_urls": []
+    },
+    {
+      "id": "http://arxiv.org/abs/2607.08449v1",
+      "source": "arxiv",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.08449v1",
+      "description": "Predicting Viticulture Potential through an Ensemble of U-Net and a Geospatial Foundation Model",
+      "size_estimate": "paper",
+      "tags": [],
+      "relevance_keywords": [
+        "all:HarmBench red teaming"
+      ],
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T13:12:47Z",
+      "summary": "Determining agricultural potential is fundamental to sustainable land management and agricultural planning. Remote sensing data is increasingly valuable as an avenue for agricultural potential due to the cost of traditional methods (surveys, in-situ measurements, soil testing, etc). ImageCLEF AI4Agri 2026: Subtask 1 is concerned with the prediction of viticulture potential in Southern France. The DS@GT ARC's submission for Subtask 1 introduces an ensemble of U-Net and a Geospatial Foundation Mod",
+      "links": [
+        "https://arxiv.org/abs/2607.08449v1",
+        "https://arxiv.org/pdf/2607.08449v1"
       ],
       "github_urls": [
-        "https://github.com/alibaba-damo-academy/ClinHallu."
+        "https://github.com/dsgt-arc/imageclef-ai4agri-2026"
       ],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14694v1",
+      "id": "http://arxiv.org/abs/2607.08403v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14694v1",
-      "description": "AdaSR: Adaptive Streaming Reasoning with Hierarchical Relative Policy Optimization",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.08403v1",
+      "description": "Game Theory Driven Multi-Agent Framework Mitigates Language Model Hallucination",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:jailbreak large language model"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:56:25Z",
-      "summary": "Large reasoning models typically follow a read-then-think paradigm: they observe the complete input, reason over a static context, and then produce the answer. Yet many real-world scenarios are inherently dynamic, such as audio and video stream, where information arrives as a continuous stream and models must reason, update, and respond under partial observations. Recent streaming reasoning methods allow models to think while reading, but they largely rely on supervised imitation of pre-construc",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T12:28:39Z",
+      "summary": "The application of lightweight Large Language Models in rule-based scientific domains remains severely limited by their tendency to mimic linguistic patterns rather than reproduce axiomatic reasoning, causing frequent hallucinations. Here, we show that G-Frame, an adaptive multi-agent framework integrating Bayesian and team game principles, establishes an automated closed-loop for high-quality data synthesis and model training. By forcing the internalization of domain constraints through structu",
       "links": [
-        "https://arxiv.org/abs/2606.14694v1",
-        "https://arxiv.org/pdf/2606.14694v1"
-      ],
-      "github_urls": [
-        "https://github.com/EIT-NLP/StreamingLLM"
-      ],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14693v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14693v1",
-      "description": "Learning Coordinated Preference for Multi-Objective Multi-Agent Reinforcement Learning",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:jailbreak large language model"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:55:28Z",
-      "summary": "Cooperative multi-objective multi-agent reinforcement learning (MOMARL) models team decision making under multiple, potentially conflicting objectives. In this setting, conflicts arise not only across objectives but also across agents with different observations, roles, and contributions. We propose Preference Coordinated Multi-agent Policy Optimization (PCMA), which learns coordinated agent-specific preferences to enable complementary trade-offs among agents. Theoretically, we formulate coopera",
-      "links": [
-        "https://arxiv.org/abs/2606.14693v1",
-        "https://arxiv.org/pdf/2606.14693v1"
+        "https://arxiv.org/abs/2607.08403v1",
+        "https://arxiv.org/pdf/2607.08403v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14692v1",
+      "id": "http://arxiv.org/abs/2607.08376v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14692v1",
-      "description": "Implications of hierarchical Markov models of behavior: on irreversibility, predictability, and dimensionality",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.08376v1",
+      "description": "Multiple populations along the asymptotic giant branch: a Gaia+APOGEE study of 22 Galactic globular clusters",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:jailbreak large language model"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:55:28Z",
-      "summary": "The maturation of quantitative tools for studying the high-level structure of animal behavior, and especially tools which represent spontaneous behavior as a sequence of stereotyped and neurally well-defined 'syllables', demands that the field revisit a fundamental theoretical question: if the coarse structure of behavior can be accurately described by Markov models, what do these models really tell us about behavior? In this work, we explore the theoretical implications of these models and disc",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T11:52:27Z",
+      "summary": "We present an investigation of multiple stellar populations along the asymptotic giant branch (AGB) in 22 globular clusters (GCs), exploiting APOGEE spectroscopy combined with AGB selection based on Gaia color-magnitude diagrams. Using light-element abundances ([C/Fe], [N/Fe], [Mg/Fe], and [Al/Fe]), we disentangle first- (1P) and second- (2P) populations along the AGB. We derive their fractions in the AGB for the largest sample of GCs to date, finding that the 1P fraction decreases with cluster ",
       "links": [
-        "https://arxiv.org/abs/2606.14692v1",
-        "https://arxiv.org/pdf/2606.14692v1",
-        "https://doi.org/10.32470/06d965e7"
+        "https://arxiv.org/abs/2607.08376v1",
+        "https://arxiv.org/pdf/2607.08376v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14691v1",
+      "id": "http://arxiv.org/abs/2607.08215v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14691v1",
-      "description": "CORA: Analyzing and bridging thinking-answer gap in Multimodal RLVR via Consistency-Oriented Reasoning Alignment",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.08215v1",
+      "description": "On the Limitations of Non-GPU AI Accelerators for Large-Model Inference: A Field Study of MoE and Multimodal Serving on Huawei Ascend",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:jailbreak large language model"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:54:59Z",
-      "summary": "Reinforcement learning with verifiable rewards (RLVR) has successfully elicited the reasoning capabilities of large language models, motivating its extension to multimodal scenarios. Existing methods primarily focus on improving the visual coverage of reasoning traces and mitigating visual hallucinations, but underestimate the semantic inconsistency between the reasoning process and the final answer. In this paper, we delve into thinking-answer inconsistency in RLVR for large vision-language mod",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T08:12:15Z",
+      "summary": "Non-GPU AI accelerators are increasingly adopted as alternatives to general-purpose GPUs for large-model inference, but the real engineering cost of migrating demanding workloads beyond CUDA remains poorly documented. We present a field study of deploying two large inference workloads on a 16-device Huawei Ascend 910 system using CANN and vLLM-Ascend: an LLM-as-a-judge safety and alignment evaluation pipeline based on a W8A8 MoE judge model, DeepSeek-V4-Flash, and a multimodal medical vision--la",
       "links": [
-        "https://arxiv.org/abs/2606.14691v1",
-        "https://arxiv.org/pdf/2606.14691v1"
+        "https://arxiv.org/abs/2607.08215v1",
+        "https://arxiv.org/pdf/2607.08215v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14690v1",
+      "id": "http://arxiv.org/abs/2607.08143v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14690v1",
-      "description": "A Complexity Measure for Active Learning in Multi-group Mean Estimation",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.08143v1",
+      "description": "ICDAR 2026 HIPE-OCRepair Competition on LLM-Assisted OCR Post-Correction for Historical Documents",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:jailbreak large language model"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:54:26Z",
-      "summary": "We study a \\emph{max-risk} objective for active learning in a multi-group mean estimation $d$-armed bandits: a learner adaptively allocates a budget of $T$ samples across $d$ groups to minimize the worst-case uncertainty index $\\max_{k\\in[d]}σ_k^2/n_k$, where $σ_k$ is the standard deviation of the distribution of arm $d$, and $n_k$ is the number of times arm $d$ is sampled. We develop a local minimax framework and prove the first general lower bound for this objective, valid for any finite-varia",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T06:26:13Z",
+      "summary": "We present the results of HIPE-OCRepair-2026, an ICDAR competition on LLM-assisted OCR post-correction of historical documents. OCR post-correction remains a long-standing challenge in digital heritage: large-scale collections of digitized documents are affected by legacy OCR errors, while re-digitization at scale remains impractical. Large language models (LLMs) offers a major opportunity to revisit this challenge, yet their effectiveness across languages, document types, and noise conditions -",
       "links": [
-        "https://arxiv.org/abs/2606.14690v1",
-        "https://arxiv.org/pdf/2606.14690v1"
+        "https://arxiv.org/abs/2607.08143v1",
+        "https://arxiv.org/pdf/2607.08143v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14689v1",
+      "id": "http://arxiv.org/abs/2607.08001v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14689v1",
-      "description": "Leptonic flavour transfer: a new window on flavour gauge symmetries",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.08001v1",
+      "description": "Low-Rate Wrist SpO2 Estimation under Micro-Perturbations Using Motion-Aware Beat Selection and Perfusion-Guided Calibration",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:jailbreak large language model"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:54:12Z",
-      "summary": "New flavour non-abelian gauge groups, which may arise as part of a fundamental theory of flavour, can lead to distinctive flavour-transfer processes. When restricted to the lepton sector, such processes partially mimic the standard charged current interactions at low energy. We explicitly study such constructions with various flavour structures, and investigate systematically all relevant accelerator-based constraints, exploring specific experimental signatures for these models. In the absence o",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T00:08:24Z",
+      "summary": "Continuous oxygen saturation (SPO2) monitoring from photoplethysmography (PPG) is important for wearable health sensing, but wrist-based SPO2 estimation remains challenging due to subtle wrist micro-perturbations and inter-subject differences in local perfusion status. These factors can destabilize the red-to-infrared ratio-of-ratios (R) and reduce the reliability of conventional fixed R-SPO2 mapping. This paper proposes a lightweight low-rate wrist SPO2 estimation framework that integrates moti",
       "links": [
-        "https://arxiv.org/abs/2606.14689v1",
-        "https://arxiv.org/pdf/2606.14689v1"
+        "https://arxiv.org/abs/2607.08001v1",
+        "https://arxiv.org/pdf/2607.08001v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14688v1",
+      "id": "http://arxiv.org/abs/2607.07996v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14688v1",
-      "description": "Flood and Harvest: The Provable Necessity of Trivia for Generating Valuable Mathematics via the Lens of Language Generation in the Limit",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.07996v1",
+      "description": "SpO$_2$ Predictor-Guided Stage-Wise Time-Frequency Reconstruction of Low-Quality Dual-Wavelength PPG for Oxygen Saturation Estimation",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:jailbreak large language model"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:52:24Z",
-      "summary": "AI systems coupled to proof assistants now generate formal mathematics at scale, and the gap between what a checker can verify and what a mathematician would value has become the binding constraint. We model the generation of valuable mathematics as nested language generation in the limit: a verifiable formal language $F$, accessed through a membership oracle (the proof checker), contains an unknown valuable language $H \\in \\mathcal{H}$ revealed only through an adversarial enumeration of a core ",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T00:00:42Z",
+      "summary": "Continuous oxygen saturation (SpO$_2$) estimation from wearable photoplethysmography (PPG) is important for long-term health monitoring, but low-quality red and infrared PPG segments can distort waveform morphology and degrade SpO$_2$ prediction accuracy. Existing PPG denoising and reconstruction methods usually optimize waveform fidelity or heart rate characteristics, while time-domain waveform loss on PPG signals alone insufficiently preserves frequency structure and SpO$_2$-relevant informati",
       "links": [
-        "https://arxiv.org/abs/2606.14688v1",
-        "https://arxiv.org/pdf/2606.14688v1"
+        "https://arxiv.org/abs/2607.07996v1",
+        "https://arxiv.org/pdf/2607.07996v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14687v1",
+      "id": "http://arxiv.org/abs/2607.07995v1",
       "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14687v1",
-      "description": "Lehner's operator norm formulas, semidefinite programming, and spiked matrix models",
+      "discovered_at": "2026-07-13T08:52:57Z",
+      "url": "http://arxiv.org/abs/2607.07995v1",
+      "description": "D-CLIPSE: Distributed Consensus-based Localization with Passive Listening on Shared State Exchange",
       "size_estimate": "paper",
       "tags": [],
       "relevance_keywords": [
-        "all:jailbreak large language model"
+        "all:HarmBench red teaming"
       ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:50:49Z",
-      "summary": "Lehner (1999) derived elegant formulas for the operator norm $\\|\\mathfrak{X}\\|$ of operators of the form $\\mathfrak{X} = \\mathbf{A}_0 \\otimes \\mathfrak{1} + \\sum_{i = 1}^n \\mathbf{A}_i \\otimes \\mathfrak{m}_i$, also easily generalized to the spectral edge $λ_{\\max}(\\mathfrak{X})$, in terms of nonlinear optimization problems over positive definite matrices. Here the $\\mathbf{A}_i$ are finite-dimensional Hermitian matrices, the $\\mathfrak{m}_i$ are either free semicircular or free Rademacher famili",
+      "scan_date": "2026-07-13",
+      "published": "2026-07-09T00:00:09Z",
+      "summary": "Multi-robot localization that is accurate and consistent is imperative for downstream tasks such as planning and control. Centralized filtering approaches optimally fuse all available sensor measurements of the team. However, a centralized solution is rarely implementable due to hardware, communication, and computational constraints. Distributed approaches deploy a filter on each robot to estimate their own state and neighbours' states using inter-robot communication. This paper proposes a consi",
       "links": [
-        "https://arxiv.org/abs/2606.14687v1",
-        "https://arxiv.org/pdf/2606.14687v1"
+        "https://arxiv.org/abs/2607.07995v1",
+        "https://arxiv.org/pdf/2607.07995v1"
       ],
       "github_urls": [],
       "hf_urls": []
     },
     {
-      "id": "http://arxiv.org/abs/2606.14686v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14686v1",
-      "description": "CottonLeafVision: An Explainable and Robust Deep Learning Framework for Cotton Leaf Disease Classification",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:jailbreak large language model"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:50:23Z",
-      "summary": "Globally, cotton is a highly economically beneficial crop, as the textile industry heavily depends on it. So, the precise identification and detection of cotton leaf disease is crucial for economic stability. The development goal of \"CottonLeafVision\" is to accurately classify and detect cotton leaf disease. With this goal, we have evaluated multiple pretrained Deep Convolutional Neural Networks, including DenseNet201, InceptionV3, and VGG19 on a publicly available cotton leaf disease image data",
-      "links": [
-        "https://arxiv.org/abs/2606.14686v1",
-        "https://arxiv.org/pdf/2606.14686v1"
-      ],
-      "github_urls": [],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14684v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14684v1",
-      "description": "HumP-KD: A Hybrid Uncertainty-Aware Multi-Stage Progressive Knowledge Distillation Framework for Efficient Fire Classification",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:jailbreak large language model"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:48:27Z",
-      "summary": "Real-time fire classification systems require models that are simultaneously accurate, computationally efficient, and deployable on resource-constrained hardware. This work proposes \\textbf{HumP-KD}, a Hybrid Uncertainty-aware Multi-stage Progressive Knowledge Distillation framework for efficient fire classification. Two datasets, FlameVision and Dataset-II, containing 8,600 and 31,309 images, are used. Various CNN and transformer baselines are applied under standard preprocessing, online augmen",
-      "links": [
-        "https://arxiv.org/abs/2606.14684v1",
-        "https://arxiv.org/pdf/2606.14684v1"
-      ],
-      "github_urls": [],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14683v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14683v1",
-      "description": "Quantum geometrical description of hole spin qubits far away from the $Γ$-point",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:jailbreak large language model"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:47:35Z",
-      "summary": "Hole spin qubits provide one of the leading platforms for spin-based quantum computing due to their large intrinsic spin-orbit interaction (SOI), which enables fast electrical manipulation. The SOI of planar quantum dots has mostly been investigated in theoretical studies by examining the SOI already present in the two-dimensional hole gas (2DHG). Here, we study the SOI created by the in-plane confinement by deriving non-perturbative effective Hamiltonians numerically for hole spin qubits. We fi",
-      "links": [
-        "https://arxiv.org/abs/2606.14683v1",
-        "https://arxiv.org/pdf/2606.14683v1"
-      ],
-      "github_urls": [],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14681v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:38Z",
-      "url": "http://arxiv.org/abs/2606.14681v1",
-      "description": "Enigmatic Line Broadening During Solar Flares: Magnetic Field Broadening?",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:jailbreak large language model"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:46:41Z",
-      "summary": "The origin of the extreme broadening observed in chromospheric metal lines during solar and stellar flares, particularly Mg II h&k and Ca II H&K, remains poorly understood. These lines often display Lorentzian like wings whose widths exceed standard Stark broadening predictions by factors of approx. 30, with no known collisional mechanism capable of producing such enhancements. We posit that magnetic fields are responsible for this additional broadening due to the increase of magnetic activity d",
-      "links": [
-        "https://arxiv.org/abs/2606.14681v1",
-        "https://arxiv.org/pdf/2606.14681v1"
-      ],
-      "github_urls": [],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14658v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:41Z",
-      "url": "http://arxiv.org/abs/2606.14658v1",
-      "description": "Giving AI a Headache: Acoustic Adversarial Attacks to Computer Vision Applications",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:adversarial prompt attack"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:22:53Z",
-      "summary": "Artificial Intelligence (AI) is increasingly used to automate a variety of real-world computer vision (CV) applications, such as autonomous vehicle control, facial recognition, and security cameras. Recent research has shown that acoustic vibration can induce real physical motion in cameras, interfering with their internal stabilization mechanisms. Because the motion falls outside the conditions the stabilization system was designed to handle, the system introduces artifacts into the frame, caus",
-      "links": [
-        "https://arxiv.org/abs/2606.14658v1",
-        "https://arxiv.org/pdf/2606.14658v1",
-        "https://doi.org/10.1117/12.3093699"
-      ],
-      "github_urls": [],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14648v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:41Z",
-      "url": "http://arxiv.org/abs/2606.14648v1",
-      "description": "Which Directions Matter? Sparse Design for Affine Robust Optimization",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:adversarial prompt attack"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T17:10:58Z",
-      "summary": "Robust machine learning and optimization rely on the uncertainty model choice. We investigate which uncertainty directions a model must cover when defined by a finite dictionary and a budget constraint. Selecting a subset forms an atomic uncertainty set with a closed form support function, yielding tractable robust programs for affine objectives. We propose a data driven selection rule based on a coverage objective over evaluation directions, including gradients, adversarial perturbations, or sh",
-      "links": [
-        "https://arxiv.org/abs/2606.14648v1",
-        "https://arxiv.org/pdf/2606.14648v1"
-      ],
-      "github_urls": [],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14554v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:41Z",
-      "url": "http://arxiv.org/abs/2606.14554v1",
-      "description": "Security Threats and Their Impact on Blockchain Interoperability: Identification and Countermeasures",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:adversarial prompt attack"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T15:30:47Z",
-      "summary": "Blockchain interoperability enables independent blockchain systems to communicate and exchange assets across heterogeneous networks. However, the lack of comprehensive security mechanisms remains a critical weakness -- one that attackers have already exploited to cause hundreds of millions of dollars in asset losses. This paper presents a systematic identification and classification of security threats facing interoperable blockchain systems, along with corresponding countermeasures for each. We",
-      "links": [
-        "https://arxiv.org/abs/2606.14554v1",
-        "https://arxiv.org/pdf/2606.14554v1"
-      ],
-      "github_urls": [],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14518v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:41Z",
-      "url": "http://arxiv.org/abs/2606.14518v1",
-      "description": "Behavioral Audit of Machine Unlearning Has a Privacy Cost",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:adversarial prompt attack"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T14:49:01Z",
-      "summary": "The removal of learned data from Machine Learning models through Machine Unlearning (MU) has been widely studied; however, there has yet to be an agreed-upon scheme for auditing MU. Existing work has shown that a dishonest model owner can falsify evidence to avoid executing MU, while curious auditors (and adversaries) can infer the privacy-sensitive properties of the model and its training data even with limited access. Yet auditing of MU under mutual distrust between the model owner and the aud",
-      "links": [
-        "https://arxiv.org/abs/2606.14518v1",
-        "https://arxiv.org/pdf/2606.14518v1"
-      ],
-      "github_urls": [
-        "https://github.com/LiouTang/Behavioral-Unlearn-Audit."
-      ],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14504v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:41Z",
-      "url": "http://arxiv.org/abs/2606.14504v1",
-      "description": "Scratched Lenses, Shifted Depth: Passive Camera-Side Optical Attacks",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:adversarial prompt attack"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T14:34:53Z",
-      "summary": "Physical adversarial attacks on vision systems are typically studied through scene manipulation, such as adversarial patches or projections, where the adversary controls what the camera observes. Camera-side attacks using stickers or auxiliary optics have also been explored, but they treat attacks as image-space perturbations from designed patterns. This misses how physical imperfections interact with scene-dependent lighting and optics. We identify a threat: passive lens-side damage that is per",
-      "links": [
-        "https://arxiv.org/abs/2606.14504v1",
-        "https://arxiv.org/pdf/2606.14504v1"
-      ],
-      "github_urls": [],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14466v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:41Z",
-      "url": "http://arxiv.org/abs/2606.14466v1",
-      "description": "The Perceived Fragility of Explanations in Audio Models: Manipulation of Attribution with Unchanged Predictions",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:adversarial prompt attack"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T13:58:34Z",
-      "summary": "This paper investigates the fragility of post-hoc explanation methods in audio deepfake detection. While previous work on explanation manipulation focused on images using standard $L_p$ metrics, we introduce a psychoacoustic framework that optimizes inaudible perturbations to decouple model attributions from final classifications. We evaluate this vulnerability across state-of-the-art architectures under strict prediction-preserving constraints. By evaluating the manipulation cost through domain",
-      "links": [
-        "https://arxiv.org/abs/2606.14466v1",
-        "https://arxiv.org/pdf/2606.14466v1"
-      ],
-      "github_urls": [
-        "https://github.com/cncPomper/Audio-XAI"
-      ],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14465v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:41Z",
-      "url": "http://arxiv.org/abs/2606.14465v1",
-      "description": "When the UE Turns Adversary: Real-Time Uplink Jamming from Within 5G Networks",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:adversarial prompt attack"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T13:57:00Z",
-      "summary": "This paper presents an investigation of a novel class of stealthy and selective reactive jamming attacks targeting the Physical Uplink Shared Channel (PUSCH) in 5G New Radio (NR) networks. We design and implement STORM-RJ (Stealthy Timing Obstruction and Radio Manipulation -- Reactive Jamming), a Software-Defined Radio (SDR)-based adversarial framework that enables highly precise, time-frequency aligned interference by dynamically adapting the bandwidth and center frequency of injected noise bur",
-      "links": [
-        "https://arxiv.org/abs/2606.14465v1",
-        "https://arxiv.org/pdf/2606.14465v1"
-      ],
-      "github_urls": [],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14453v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:41Z",
-      "url": "http://arxiv.org/abs/2606.14453v1",
-      "description": "Redistricting from the Bottom Up: Sampling Communities of Interest with Differential Privacy",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:adversarial prompt attack"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T13:39:57Z",
-      "summary": "Independent Redistricting Commissions (IRCs) are a promising tool for bottom-up redistricting, but their public testimony processes are vulnerable to adversarial manipulation. We propose using differential privacy to draw redistricting plans that incorporate community of interest (COI) testimonies while remaining robust to adversarial input. Treating individual testimonies as data points, we use the marked edge walk to sample from differentially private distributions of redistricting plans via t",
-      "links": [
-        "https://arxiv.org/abs/2606.14453v1",
-        "https://arxiv.org/pdf/2606.14453v1"
-      ],
-      "github_urls": [],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14427v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:41Z",
-      "url": "http://arxiv.org/abs/2606.14427v1",
-      "description": "Breaking TinyML: Why Quantized Neural Networks Need Domain-Specific Security Analysis",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:adversarial prompt attack"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T13:05:34Z",
-      "summary": "Most TinyML hardware accelerators focus on supporting Quantized Neural Networks (QNNs) to meet stringent constraints on power consumption and size. Despite this, the security aspects of quantization within TinyML hardware remain largely unexplored. Although previous studies indicate that QNNs demonstrate similar or enhanced robustness when compared to full-precision Deep Neural Networks (DNNs) against typical evasion attacks, no attack strategies tailored specifically for TinyML hardware have be",
-      "links": [
-        "https://arxiv.org/abs/2606.14427v1",
-        "https://arxiv.org/pdf/2606.14427v1",
-        "https://doi.org/10.1109/MM.2026.3666128"
-      ],
-      "github_urls": [],
-      "hf_urls": []
-    },
-    {
-      "id": "http://arxiv.org/abs/2606.14411v1",
-      "source": "arxiv",
-      "discovered_at": "2026-06-15T11:48:41Z",
-      "url": "http://arxiv.org/abs/2606.14411v1",
-      "description": "Fabula: Building a Narrative Storytelling Sidekick with the Writers' Community",
-      "size_estimate": "paper",
-      "tags": [],
-      "relevance_keywords": [
-        "all:adversarial prompt attack"
-      ],
-      "scan_date": "2026-06-15",
-      "published": "2026-06-12T12:46:53Z",
-      "summary": "We design and evaluate Fabula, an interactive app for fiction writers. Fabula uses detailed narrative plans informed by general narratological theory. Stories are structured hierarchically into scenes and beats that can be (re)generated and revised at script and story plan level. Using participatory AI, we critically evaluate and improve Fabula with casual and published writers, via design interviews and writing sessions with 42 experts, and large-scale internal and external testing. We interrog",
-      "links": [
-        "https://arxiv.org/abs/2606.14411v1",
-        "https://arxiv.org/pdf/2606.14411v1"
-      ],
-      "github_urls": [],
-      "hf_urls": []
-    },
-    {
-      "id": "Player1205/DataPassport-IQ",
+      "id": "yingchen-coding/agentic-misuse-benchmark",
       "source": "github",
-      "discovered_at": "2026-06-15T11:48:45Z",
-      "url": "https://github.com/Player1205/DataPassport-IQ",
-      "description": "Solving the AI Crisis of Provenance: An audited, off-chain/on-chain pipeline that blocks prompt injections and anchors verified dataset hashes to the blockchain.",
-      "size_estimate": "0 stars",
-      "tags": [],
-      "relevance_keywords": [
-        "prompt injection dataset"
-      ],
-      "scan_date": "2026-06-15",
-      "stars": 0,
-      "updated_at": "2026-06-15T08:53:07Z"
-    },
-    {
-      "id": "Pranesh-2005/guardix",
-      "source": "github",
-      "discovered_at": "2026-06-15T11:48:45Z",
-      "url": "https://github.com/Pranesh-2005/guardix",
-      "description": "A Input Prompt Guard Library with Bert model trained on prompt injection dataset",
-      "size_estimate": "0 stars",
-      "tags": [
-        "ai-app-safety",
-        "llm-guard",
-        "llm-guardrails",
-        "prompt-governance",
-        "prompt-guard",
-        "prompt-guardrial",
-        "prompt-injection"
-      ],
-      "relevance_keywords": [
-        "prompt injection dataset"
-      ],
-      "scan_date": "2026-06-15",
-      "stars": 0,
-      "updated_at": "2026-06-15T06:23:29Z"
-    },
-    {
-      "id": "TechCeo/llmguard-eval",
-      "source": "github",
-      "discovered_at": "2026-06-15T11:48:45Z",
-      "url": "https://github.com/TechCeo/llmguard-eval",
-      "description": "LLMGuard Evaluation Framework — Evaluating LLMGuard's performance on prompt injection, toxicity, topic detection, and PII filtering tasks using curated benchmark datasets and integrated LLMs.",
-      "size_estimate": "0 stars",
-      "tags": [],
-      "relevance_keywords": [
-        "prompt injection dataset"
-      ],
-      "scan_date": "2026-06-15",
-      "stars": 0,
-      "updated_at": "2026-06-14T16:33:42Z"
-    },
-    {
-      "id": "MukundaKatta/awesome-prompt-injection-defense",
-      "source": "github",
-      "discovered_at": "2026-06-15T11:48:45Z",
-      "url": "https://github.com/MukundaKatta/awesome-prompt-injection-defense",
-      "description": "A curated list of tools, papers, datasets, and guardrails for defending LLMs against prompt injection.",
+      "discovered_at": "2026-07-13T08:53:00Z",
+      "url": "https://github.com/yingchen-coding/agentic-misuse-benchmark",
+      "description": "Trajectory-level benchmark for prompt injection, policy erosion, intent drift, and coordinated misuse in agentic LLM systems.",
       "size_estimate": "1 stars",
       "tags": [
-        "ai-security",
-        "awesome",
-        "awesome-list",
-        "guardrails",
+        "agentic",
+        "ai-safety",
+        "benchmark",
+        "dataset",
+        "evaluation",
         "llm",
-        "llm-security",
+        "misuse",
         "prompt-injection",
-        "rag"
+        "security"
       ],
       "relevance_keywords": [
         "prompt injection dataset"
       ],
-      "scan_date": "2026-06-15",
+      "scan_date": "2026-07-13",
       "stars": 1,
-      "updated_at": "2026-06-14T19:07:41Z"
+      "updated_at": "2026-07-13T06:49:44Z"
     },
     {
-      "id": "RootTwoOverTwelve/ipi_defense_eval_may29",
+      "id": "3nesdeniz/agentic-prompt-injection-boundary-pairs",
       "source": "github",
-      "discovered_at": "2026-06-15T11:48:45Z",
-      "url": "https://github.com/RootTwoOverTwelve/ipi_defense_eval_may29",
-      "description": "Off-the-shelf prompt-injection defense evaluation on Baihan's May 29 unified dataset — zero-shot + LODO fine-tune of PIGuard, PromptGuard 1/2, ProtectAI v1/v2, TaskTracker",
+      "discovered_at": "2026-07-13T08:53:00Z",
+      "url": "https://github.com/3nesdeniz/agentic-prompt-injection-boundary-pairs",
+      "description": "Curated English dataset of 600 matched benign and attack pairs for agentic prompt-injection and trust-boundary testing.",
+      "size_estimate": "0 stars",
+      "tags": [
+        "agentic-ai",
+        "ai-security",
+        "datasets",
+        "hard-negatives",
+        "llm-security",
+        "prompt-injection",
+        "red-teaming"
+      ],
+      "relevance_keywords": [
+        "prompt injection dataset"
+      ],
+      "scan_date": "2026-07-13",
+      "stars": 0,
+      "updated_at": "2026-07-13T02:37:52Z"
+    },
+    {
+      "id": "3nesdeniz/turkish-conversation-prompt-injection",
+      "source": "github",
+      "discovered_at": "2026-07-13T08:53:00Z",
+      "url": "https://github.com/3nesdeniz/turkish-conversation-prompt-injection",
+      "description": "Curated Turkish prompt-injection dataset by Enes Deniz, with paired benign and attack examples for LLM security and AI red/blue teaming.",
+      "size_estimate": "3 stars",
+      "tags": [
+        "ai-security",
+        "dataset",
+        "hard-negatives",
+        "jailbreak",
+        "llm-security",
+        "paired-data",
+        "prompt-injection",
+        "red-teaming",
+        "turkish-nlp"
+      ],
+      "relevance_keywords": [
+        "prompt injection dataset"
+      ],
+      "scan_date": "2026-07-13",
+      "stars": 3,
+      "updated_at": "2026-07-13T00:14:27Z"
+    },
+    {
+      "id": "ArunRyzen/llm-eval-kit",
+      "source": "github",
+      "discovered_at": "2026-07-13T08:53:00Z",
+      "url": "https://github.com/ArunRyzen/llm-eval-kit",
+      "description": "A reusable LLM evaluation + guardrails toolkit: dataset scorers, LLM-as-judge, CI regression gates, lightweight tracing, and prompt-injection/PII guardrails. Offline-testable.",
       "size_estimate": "0 stars",
       "tags": [],
       "relevance_keywords": [
         "prompt injection dataset"
       ],
-      "scan_date": "2026-06-15",
+      "scan_date": "2026-07-13",
       "stars": 0,
-      "updated_at": "2026-06-09T19:51:36Z"
+      "updated_at": "2026-07-08T20:59:06Z"
     },
     {
-      "id": "octave-commons/shibboleth",
+      "id": "edujbarrios/metaclean-vlm",
       "source": "github",
-      "discovered_at": "2026-06-15T11:48:50Z",
-      "url": "https://github.com/octave-commons/shibboleth",
-      "description": "Generative DSL for adversarial prompt evaluation datasets",
-      "size_estimate": "2 stars",
+      "discovered_at": "2026-07-13T08:53:00Z",
+      "url": "https://github.com/edujbarrios/metaclean-vlm",
+      "description": "A Python package that removes metadata from image datasets before VLM training or ingestion to reduce hidden prompt injection risk.",
+      "size_estimate": "0 stars",
+      "tags": [
+        "ai",
+        "metadata-cleaning",
+        "metadata-extraction",
+        "vlm",
+        "vlm-extraction",
+        "vlm-training"
+      ],
+      "relevance_keywords": [
+        "prompt injection dataset"
+      ],
+      "scan_date": "2026-07-13",
+      "stars": 0,
+      "updated_at": "2026-07-08T11:37:47Z"
+    },
+    {
+      "id": "Rubyglask/llm-redteam-corpus-taxonomy",
+      "source": "github",
+      "discovered_at": "2026-07-13T08:53:03Z",
+      "url": "https://github.com/Rubyglask/llm-redteam-corpus-taxonomy",
+      "description": "Living aggregated LLM red-team corpus + cross-framework taxonomy (OWASP LLM Top 10, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO 42001, KISA). CC-BY-4.0 (data) + MIT (code). Quarterly refresh.",
+      "size_estimate": "1 stars",
+      "tags": [
+        "corpus",
+        "dataset",
+        "jailbreak",
+        "llm-security",
+        "mitre-atlas",
+        "owasp-llm-top10",
+        "red-team",
+        "safety-evaluation"
+      ],
+      "relevance_keywords": [
+        "jailbreak LLM dataset"
+      ],
+      "scan_date": "2026-07-13",
+      "stars": 1,
+      "updated_at": "2026-07-13T06:39:33Z"
+    },
+    {
+      "id": "ant-research/awesome-mllm-guardrails",
+      "source": "github",
+      "discovered_at": "2026-07-13T08:53:03Z",
+      "url": "https://github.com/ant-research/awesome-mllm-guardrails",
+      "description": "A curated list of LLM/MLLM guardrails, safety benchmarks, guard models, jailbreak attacks, moderation datasets, and evaluation tools.",
+      "size_estimate": "13 stars",
+      "tags": [
+        "ai-safety",
+        "awesome-list",
+        "content-moderation",
+        "guardrails",
+        "jailbreak",
+        "llm",
+        "llm-guardrails",
+        "llm-safety",
+        "mllm",
+        "multimodal-safety",
+        "red-teaming",
+        "safety-evaluation"
+      ],
+      "relevance_keywords": [
+        "jailbreak LLM dataset"
+      ],
+      "scan_date": "2026-07-13",
+      "stars": 13,
+      "updated_at": "2026-07-10T13:02:02Z"
+    },
+    {
+      "id": "Shahiba11-GHUB/Jailbreak-Attacks-for-LLMs",
+      "source": "github",
+      "discovered_at": "2026-07-13T08:53:03Z",
+      "url": "https://github.com/Shahiba11-GHUB/Jailbreak-Attacks-for-LLMs",
+      "description": "This project implements a controlled LLM safety evaluation pipeline that measures how different target models respond to adversarial prompt patterns. The system separates the experiment into five layers: dataset curation, prompt generation, target-model execution, automated safety evaluation, and analytics.",
+      "size_estimate": "0 stars",
+      "tags": [],
+      "relevance_keywords": [
+        "jailbreak LLM dataset"
+      ],
+      "scan_date": "2026-07-13",
+      "stars": 0,
+      "updated_at": "2026-07-08T14:52:01Z"
+    },
+    {
+      "id": "blackbird-alt/vocab-locked-writing-tutor",
+      "source": "github",
+      "discovered_at": "2026-07-13T08:53:05Z",
+      "url": "https://github.com/blackbird-alt/vocab-locked-writing-tutor",
+      "description": "Grade 7-8 vocabulary-locked writing tutor (Qwen3 4B + 0.6B). Trained from data to hold its reading level under adversarial pushback, where prompting caves. Dataset, eval harness, CI gate.",
+      "size_estimate": "0 stars",
       "tags": [],
       "relevance_keywords": [
         "adversarial prompt dataset"
       ],
-      "scan_date": "2026-06-15",
-      "stars": 2,
-      "updated_at": "2026-06-09T20:46:40Z"
+      "scan_date": "2026-07-13",
+      "stars": 0,
+      "updated_at": "2026-07-13T03:23:53Z"
+    },
+    {
+      "id": "cigdemarda/Linguistic-characteristics-of-jailbreak-prompt-data-",
+      "source": "github",
+      "discovered_at": "2026-07-13T08:53:12Z",
+      "url": "https://github.com/cigdemarda/Linguistic-characteristics-of-jailbreak-prompt-data-",
+      "description": "the profiling pipeline used to establish the recurrent linguistic and structural properties of jailbreak prompts across eight datasets: AdvBench, HarmBench, JBB-Behaviors, StrongREJECT, BeaverTails, ClearHarm, Lakera Mosscap, and the in-the-wild jailbreak prompts of Shen et al. (2024).",
+      "size_estimate": "0 stars",
+      "tags": [],
+      "relevance_keywords": [
+        "HarmBench behaviors"
+      ],
+      "scan_date": "2026-07-13",
+      "stars": 0,
+      "updated_at": "2026-07-12T12:12:56Z"
     }
   ]
 }
