@@ -64,7 +64,7 @@
     }
   },
   {
-    "timestamp": "2026-07-21T16:20:31.246640+00:00",
+    "timestamp": "2026-07-21T19:14:01.476229+00:00",
     "new_count": 40478,
     "total_raw": 86827,
     "duplicates_removed": 46349,
@@ -73,7 +73,7 @@
       "datasets": 86827,
       "reddit": 0
     },
-    "elapsed_seconds": 40.2,
+    "elapsed_seconds": 40.1,
     "label_distribution": {
       "injection": 40478,
       "benign": 0
