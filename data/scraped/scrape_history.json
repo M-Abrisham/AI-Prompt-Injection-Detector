@@ -64,16 +64,16 @@
     }
   },
   {
-    "timestamp": "2026-08-17T15:21:01.718083+00:00",
+    "timestamp": "2026-08-17T18:32:37.085432+00:00",
     "new_count": 40478,
     "total_raw": 86827,
     "duplicates_removed": 46349,
     "sources": {
       "twitter": 0,
-      "reddit": 0,
-      "datasets": 86827
+      "datasets": 86827,
+      "reddit": 0
     },
-    "elapsed_seconds": 55.3,
+    "elapsed_seconds": 39.5,
     "label_distribution": {
       "injection": 40478,
       "benign": 0
